@@ -134,6 +134,10 @@ docker compose -f docker-compose.prod.yml restart server
 AI-generated (Claude Code)
 ```
 
+## 友情链接
+
+- [LINUX DO](https://linux.do/) — 真诚、友善、充满活力的技术社区。
+
 ## 许可证
 
 [AGPL-3.0](LICENSE)。Emoji 图片来自 [Twemoji](https://github.com/twitter/twemoji)（CC-BY 4.0，见 `packages/web/public/twemoji-NOTICE.txt`）。

@@ -134,6 +134,10 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and commit conventi
 AI-generated (Claude Code)
 ```
 
+## Friends
+
+- [LINUX DO](https://linux.do/) — a sincere, friendly and vibrant tech community.
+
 ## License
 
 [AGPL-3.0](LICENSE). Emoji images from [Twemoji](https://github.com/twitter/twemoji) (CC-BY 4.0, see `packages/web/public/twemoji-NOTICE.txt`).
