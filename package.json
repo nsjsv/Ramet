@@ -1,0 +1,16 @@
+{
+  "name": "ramet",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "DATABASE_URL=postgres://postgres:postgres@localhost:5432/ramet concurrently -n server,web \"npm run dev -w packages/server\" \"npm run dev -w packages/web\"",
+    "build": "npm run build -w packages/server && npm run build -w packages/web",
+    "test": "npm test -w packages/web && DATABASE_URL=postgres://postgres:postgres@localhost:5432/ramet_test npm test -w packages/server",
+    "connector": "npm run connector -w packages/server --"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.5"
+  }
+}

@@ -1,0 +1,426 @@
+/* ---------- 编辑器弹层的共通卡片语言 ----------
+ * 斜杠菜单（editor/slash.ts）、引用菜单（editor/doc-mention.ts + mention-menu.tsx）、文字框选工具栏（editor/selection-menu.ts）与它的「转换成」下拉共用。
+ * 各自的定位 / 显隐留在原处（editor.css 的 .slash-menu、chat.css 的 .chat-mention / .doc-mention、editor-widgets.css 的 .selection-menu）。
+ * 深色模式只靠令牌翻转（dark.css）。 */
+
+.pop-card {
+  padding: 4px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-2);
+}
+
+.pop-section {
+  padding: 8px 8px 4px;
+  font-size: var(--t-xs);
+  font-weight: 500;
+  color: var(--ink-3);
+  user-select: none;
+}
+
+.pop-section:first-child {
+  padding-top: 4px;
+}
+
+.pop-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+  width: 100%;
+  min-height: 30px;
+  padding: 4px 8px;
+  border-radius: var(--r-sm);
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.pop-row:hover,
+.pop-row.is-active {
+  background: var(--hover);
+}
+
+.pop-row:disabled {
+  color: var(--ink-3);
+  cursor: default;
+  background: none;
+}
+
+.pop-row.is-danger:not(:disabled) {
+  color: var(--danger);
+}
+
+/* 图标块：斜杠菜单是带描边的方块，引用菜单是小号不描边 */
+.pop-ic {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--ink-2);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.pop-ic.is-sm {
+  width: 20px;
+  height: 20px;
+  border: none;
+  background: none;
+}
+
+/* `@` 大菜单的分类行：小方块底色图标，和下面「最近」里的页面行一眼区分开 */
+.pop-ic.is-cat {
+  border-radius: 5px;
+  background: var(--hover);
+  color: var(--ink-2);
+}
+
+.pop-ic.is-cat.is-agent {
+  background: var(--accent-tint);
+  color: var(--accent);
+}
+
+.pop-ic.is-cat.is-skill {
+  background: var(--live-tint);
+  color: var(--live);
+}
+
+.pop-ic.is-cat.is-person {
+  background: var(--you-tint);
+  color: var(--you);
+}
+
+/* 成员行的头像（people.ts fillAvatar 填内容） */
+.pop-avatar {
+  --avatar-size: 18px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+}
+
+.pop-avatar svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* 行尾 ›：这一行选中是「进入」 */
+.pop-chev {
+  flex: none;
+  display: grid;
+  place-items: center;
+  color: var(--ink-3);
+}
+
+.pop-aside + .pop-chev {
+  margin-left: -4px;
+}
+
+.pop-t + .pop-chev {
+  margin-left: auto;
+}
+
+/* React 菜单里图标的挂载位（mention-icon.ts 产出的 .pop-ic 塞进来）：本身不占布局 */
+.pop-ic-slot {
+  display: contents;
+}
+
+/* 引用菜单的 agent 品牌 mark / 文本 logo */
+.pop-agent {
+  width: 16px;
+  height: 16px;
+  font-size: 14px;
+  line-height: 16px;
+  text-align: center;
+}
+
+.pop-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+.pop-t {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--t-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pop-text .pop-t {
+  flex: none;
+}
+
+.pop-d {
+  margin-top: 1px;
+  overflow: hidden;
+  font-size: var(--t-xs);
+  color: var(--ink-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 右侧灰字：引用菜单的页面路径、「转换成」下拉的当前项对勾 */
+.pop-aside {
+  flex: none;
+  max-width: 45%;
+  margin-left: auto;
+  overflow: hidden;
+  font-size: var(--t-xs);
+  color: var(--ink-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pop-aside svg {
+  display: block;
+}
+
+/* ---------- 文字框选工具栏：单行（selection-menu.ts） ---------- */
+
+.selection-menu.pop-card {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  max-width: calc(100vw - 16px);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.selection-menu button {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  height: 30px;
+  padding: 0 6px;
+  border-radius: var(--r-sm);
+  color: var(--ink-2);
+  font-size: 15px;
+  line-height: 1;
+}
+
+.selection-menu button:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.selection-menu button.on {
+  background: var(--press);
+  color: var(--ink);
+}
+
+.selection-menu button[hidden],
+.selection-menu .sel-sep[hidden] {
+  display: none;
+}
+
+/* 链接编辑行（link-input.ts）：平时不画；链接模式下只画它，格式按钮整组藏起 */
+.selection-menu .link-row {
+  display: none;
+  align-items: center;
+  gap: 2px;
+}
+
+.selection-menu.is-link-mode > :not(.link-row) {
+  display: none;
+}
+
+.selection-menu.is-link-mode > .link-row {
+  display: flex;
+}
+
+.selection-menu .link-row input {
+  width: min(280px, 60vw);
+  height: 30px;
+  padding: 0 8px;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--t-sm);
+}
+
+.selection-menu .sel-b {
+  font-weight: 700;
+}
+
+.selection-menu .sel-i {
+  font-family: Georgia, 'Times New Roman', serif;
+  font-style: italic;
+}
+
+.selection-menu .sel-u {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.selection-menu .sel-s {
+  text-decoration: line-through;
+}
+
+.selection-menu .sel-code {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+/* 「转换成 ▾」：当前块类型 + 下拉箭头 */
+.selection-menu .sel-turn {
+  gap: 4px;
+  padding: 0 8px;
+  font-size: var(--t-sm);
+  white-space: nowrap;
+}
+
+.sel-sep {
+  flex: none;
+  width: 1px;
+  height: 18px;
+  margin: 0 4px;
+  background: var(--line);
+}
+
+/* 「转换成」下拉：挂 body，fixed 定位在按钮下方；层级压过工具栏 */
+.sel-turn-menu {
+  position: fixed;
+  z-index: 21;
+  display: flex;
+  flex-direction: column;
+  min-width: 160px;
+  animation: menu-in var(--d-1) var(--ease-out);
+}
+
+/* ---------- 行内链接悬浮栏（editor/link-hover.ts）：挂 body，fixed 定位在链接下方 ----------
+ * 查看态一行：图标 + 缩略地址 | 复制 编辑；.is-editing 换成「文本 / 链接」两行表单。层级与框选工具栏同档。 */
+.link-hover {
+  position: fixed;
+  z-index: 21;
+  animation: menu-in var(--d-1) var(--ease-out);
+}
+
+.link-hover .lh-view {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.link-hover.is-editing .lh-view,
+.link-hover:not(.is-editing) .lh-form {
+  display: none;
+}
+
+.link-hover button {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  height: 30px;
+  padding: 0 6px;
+  border-radius: var(--r-sm);
+  color: var(--ink-2);
+}
+
+.link-hover button:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.link-hover button[hidden] {
+  display: none;
+}
+
+/* 缩略地址：过长省略号截断，完整地址在 title 里 */
+.link-hover .lh-addr {
+  flex: 0 1 auto;
+  gap: 6px;
+  max-width: min(320px, calc(100vw - 120px));
+  padding: 0 8px;
+  font-size: var(--t-sm);
+}
+
+.link-hover .lh-addr svg {
+  flex: none;
+  color: var(--ink-3);
+}
+
+.link-hover .lh-addr span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.link-hover .lh-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: min(360px, calc(100vw - 16px));
+  padding: 4px;
+}
+
+.link-hover .lh-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.link-hover .lh-field span {
+  flex: none;
+  width: 2.5em;
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+}
+
+.link-hover .lh-field input {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  outline: none;
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--t-sm);
+}
+
+.link-hover .lh-field input:focus {
+  border-color: var(--accent);
+}
+
+/* 底行：左「删除链接」、右键位提示 */
+.link-hover .lh-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.link-hover .lh-unlink {
+  gap: 4px;
+  height: 26px;
+  padding: 0 8px;
+  font-size: var(--t-xs);
+}
+
+.link-hover .lh-unlink:hover {
+  background: var(--danger-tint);
+  color: var(--danger);
+}
+
+.link-hover .lh-hint {
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+}

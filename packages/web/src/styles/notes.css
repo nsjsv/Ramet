@@ -1,0 +1,231 @@
+/* ---------- 收藏 / 反向链接 / 单块恢复 / 成员管理 ---------- */
+
+/* 收藏星标：亮着是警示黄；点下去弹一下（只动 transform）。块菜单项、对话气泡、过程页步骤共用 */
+.chat-act.is-on,
+.run-step-act.is-on {
+  color: var(--warn);
+}
+
+.chat-act.is-pop svg,
+.run-step-act.is-pop svg {
+  animation: star-pop var(--d-3) var(--ease-spring);
+}
+
+@keyframes star-pop {
+  0% {
+    transform: scale(1);
+  }
+  40% {
+    transform: scale(1.4) rotate(-12deg);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* ---------- 侧栏收藏列表 ----------
+ * 分区头（.dir-board-*）与行（.tree-item / .tree-twisty / .tree-label / .tree-actions）复用页面树 / 目录树的视觉（sidebar.css），
+ * 这里只补收藏独有的几条。整栏的显隐在 FavoritesList.tsx：没有收藏就不渲染。 */
+
+.fav-board {
+  flex: none;
+  margin-top: 12px; /* 与下方 .dirboards 同一条起始间距 */
+}
+
+/* 行列表限高自滚（收藏多了不把页面树挤出屏）。左右缩 8px = 树的文字线（.tree 的内缩）；
+ * 下边只留 4px：下方 .dirboards 自带 12px 上间距，合起来 16px，与两棵树之间的间距一致。 */
+.fav-list {
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 4px 8px;
+}
+
+/* 行主体是 <button>：重置同 .dirboards .tree-label（收藏不在 .dirboards 里，那条选择器够不着） */
+.fav-board .tree-label {
+  cursor: pointer;
+  background: none;
+  border: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+}
+
+.fav-board .tree-label:disabled {
+  cursor: default;
+}
+
+/* 原块 / 原页面看不到了：存档划线 */
+.fav-board .tree-item.is-gone .tree-label {
+  text-decoration: line-through;
+  text-decoration-color: var(--ink-3);
+}
+
+.fav-gone {
+  flex: none;
+  margin-left: 6px;
+  color: var(--warn);
+  font-size: var(--t-xs);
+  font-style: normal;
+}
+
+/* 键盘聚焦到行里（标签 / ✕）时取消收藏也要露出来，否则 display:none 的 ✕ 永远 Tab 不到 */
+.fav-board .tree-item:focus-within .tree-actions {
+  display: inline-flex;
+}
+
+/* 触屏无悬停：取消收藏常显（否则点行就跳走了，永远点不到它） */
+@media (hover: none) {
+  .fav-board .tree-actions {
+    display: inline-flex;
+  }
+}
+
+/* 反链面板的折叠箭头 / 计数 */
+.bl-chev.is-open {
+  transform: rotate(90deg);
+}
+
+.bl-count {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- 反向链接面板 ---------- */
+
+.backlinks {
+  margin: 48px 0 24px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.bl-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink-2);
+  font: inherit;
+  font-size: var(--t-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.bl-count {
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+  font-weight: 400;
+}
+
+.bl-chev {
+  transition: transform var(--d-1);
+}
+
+.bl-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 6px 0 0 16px;
+  animation: rise var(--d-2) var(--ease-out);
+}
+
+.bl-page {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.bl-title,
+.bl-block {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 3px 8px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--t-sm);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--d-1);
+}
+
+.bl-title {
+  font-weight: 600;
+}
+
+.bl-title svg {
+  align-self: center;
+  flex: none;
+  color: var(--ink-3);
+}
+
+.bl-block {
+  margin-left: 18px;
+  color: var(--ink-2);
+}
+
+.bl-title:hover,
+.bl-block:hover {
+  background: var(--hover);
+}
+
+.bl-kind {
+  flex: none;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: var(--bg-sunk);
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+}
+
+.bl-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bl-more {
+  padding-left: 8px;
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+}
+
+/* ---------- 历史版本里单独恢复一个被删的块 ---------- */
+
+.vh-block-restore {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 6px 0 2px;
+  padding: 2px 8px;
+  border-radius: var(--r-sm);
+  background: var(--warn-tint);
+  color: var(--warn);
+  font-size: var(--t-xs);
+}
+
+.vh-block-restore button {
+  padding: 2px 10px;
+  border: 1px solid currentColor;
+  border-radius: var(--r-pill);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.vh-block-restore button:hover:not(:disabled) {
+  background: var(--bg);
+}
+
+.vh-block-restore button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}

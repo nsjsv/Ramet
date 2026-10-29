@@ -1,0 +1,10 @@
+node_modules/
+packages/server/data/
+packages/server/uploads/
+dist/
+postgres-data/
+agents.json
+.ace-tool/
+.env
+.env.*
+!.env.example

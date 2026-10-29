@@ -1,0 +1,108 @@
+/* 文字颜色 / 背景高亮（editor/color-marks.ts）与颜色下拉（color-menu.ts）。
+ * 文档里只存颜色名，色值是这里的令牌，深色在 dark.css 翻转。选择器不带 .ProseMirror 前缀：
+ * 对话气泡 / 历史预览是 DOMSerializer 直接序列化的，同样要上色。 */
+
+:root {
+  --mk-text-gray: #787774;
+  --mk-text-brown: #9f6b53;
+  --mk-text-orange: #d9730d;
+  --mk-text-yellow: #cb912f;
+  --mk-text-green: #448361;
+  --mk-text-blue: #337ea9;
+  --mk-text-purple: #9065b0;
+  --mk-text-pink: #c14c8a;
+  --mk-text-red: #d44c47;
+  --mk-bg-gray: #f1f1ef;
+  --mk-bg-brown: #f4eeee;
+  --mk-bg-orange: #fbecdd;
+  --mk-bg-yellow: #fbf3db;
+  --mk-bg-green: #edf3ec;
+  --mk-bg-blue: #e7f3f8;
+  --mk-bg-purple: #f6f3f9;
+  --mk-bg-pink: #faf1f5;
+  --mk-bg-red: #fdebec;
+}
+
+.tc-gray { color: var(--mk-text-gray); }
+.tc-brown { color: var(--mk-text-brown); }
+.tc-orange { color: var(--mk-text-orange); }
+.tc-yellow { color: var(--mk-text-yellow); }
+.tc-green { color: var(--mk-text-green); }
+.tc-blue { color: var(--mk-text-blue); }
+.tc-purple { color: var(--mk-text-purple); }
+.tc-pink { color: var(--mk-text-pink); }
+.tc-red { color: var(--mk-text-red); }
+
+mark[data-color] {
+  color: inherit;
+  border-radius: 3px;
+  padding: 0 1px;
+}
+
+.hl-gray { background: var(--mk-bg-gray); }
+.hl-brown { background: var(--mk-bg-brown); }
+.hl-orange { background: var(--mk-bg-orange); }
+.hl-yellow { background: var(--mk-bg-yellow); }
+.hl-green { background: var(--mk-bg-green); }
+.hl-blue { background: var(--mk-bg-blue); }
+.hl-purple { background: var(--mk-bg-purple); }
+.hl-pink { background: var(--mk-bg-pink); }
+.hl-red { background: var(--mk-bg-red); }
+
+/* 选区菜单的「颜色」按钮：一个带下划线的 A */
+.selection-menu .sel-color-a {
+  font-weight: 600;
+  border-bottom: 2px solid var(--ink-3);
+  line-height: 1.1;
+}
+
+.color-menu {
+  position: fixed;
+  z-index: 60;
+  width: 232px;
+}
+
+.color-row {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 4px;
+  padding: 2px 4px 6px;
+}
+
+.color-swatch {
+  height: 28px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line);
+  font-weight: 600;
+  font-size: var(--t-sm);
+  color: var(--ink);
+}
+
+.color-swatch:hover {
+  border-color: var(--line-strong);
+}
+
+.color-swatch.is-current {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.color-swatch.is-bg[data-color='default'] { background: var(--surface); }
+.color-swatch.is-text[data-color='gray'] { color: var(--mk-text-gray); }
+.color-swatch.is-text[data-color='brown'] { color: var(--mk-text-brown); }
+.color-swatch.is-text[data-color='orange'] { color: var(--mk-text-orange); }
+.color-swatch.is-text[data-color='yellow'] { color: var(--mk-text-yellow); }
+.color-swatch.is-text[data-color='green'] { color: var(--mk-text-green); }
+.color-swatch.is-text[data-color='blue'] { color: var(--mk-text-blue); }
+.color-swatch.is-text[data-color='purple'] { color: var(--mk-text-purple); }
+.color-swatch.is-text[data-color='pink'] { color: var(--mk-text-pink); }
+.color-swatch.is-text[data-color='red'] { color: var(--mk-text-red); }
+.color-swatch.is-bg[data-color='gray'] { background: var(--mk-bg-gray); }
+.color-swatch.is-bg[data-color='brown'] { background: var(--mk-bg-brown); }
+.color-swatch.is-bg[data-color='orange'] { background: var(--mk-bg-orange); }
+.color-swatch.is-bg[data-color='yellow'] { background: var(--mk-bg-yellow); }
+.color-swatch.is-bg[data-color='green'] { background: var(--mk-bg-green); }
+.color-swatch.is-bg[data-color='blue'] { background: var(--mk-bg-blue); }
+.color-swatch.is-bg[data-color='purple'] { background: var(--mk-bg-purple); }
+.color-swatch.is-bg[data-color='pink'] { background: var(--mk-bg-pink); }
+.color-swatch.is-bg[data-color='red'] { background: var(--mk-bg-red); }

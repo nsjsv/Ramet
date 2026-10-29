@@ -1,0 +1,12 @@
+# 本地开发 Postgres:docker compose up -d;数据 bind mount 落盘 ./postgres-data,重启不丢(不用命名卷)
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ramet
+    ports:
+      - '5432:5432'
+    volumes:
+      - ./postgres-data:/var/lib/postgresql/data

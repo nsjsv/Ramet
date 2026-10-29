@@ -1,0 +1,482 @@
+/* ---------- 项目面板的终端分页（project/TerminalTab.tsx · TermPane.tsx · AgentCommands.tsx）----------
+ * 终端屏幕是 xterm（懒加载，自带 xterm.css），这里只管外围：标签条、屏幕容器、提示条、其他终端、agent 命令列表。 */
+
+.project-body[data-tab='terminal'] {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.project-body[data-tab='terminal'][hidden] {
+  display: none;
+}
+
+.term-tab {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+.term-top {
+  flex: none;
+}
+
+.term-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  overflow-x: auto;
+}
+
+.term-tab-btn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  color: var(--ink-2);
+  font-size: var(--t-xs);
+  transition: background var(--d-1), color var(--d-1);
+}
+
+.term-tab-btn button {
+  padding: 3px 6px;
+  color: inherit;
+}
+
+.term-tab-btn button:first-child {
+  padding-left: 9px;
+}
+
+.term-tab-btn:hover {
+  background: var(--hover);
+}
+
+.term-tab-btn.is-on {
+  border-color: var(--line-strong);
+  background: var(--bg-sunk);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.term-tab-btn.is-exited {
+  color: var(--ink-3);
+}
+
+.term-tab-btn button:focus-visible,
+.term-new:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.term-tab-close {
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--r-sm);
+  opacity: 0.6;
+}
+
+.term-tab-close:hover {
+  opacity: 1;
+  color: var(--danger);
+}
+
+.term-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 0 14px 12px;
+}
+
+.term-empty .project-note {
+  padding-inline: 0;
+}
+
+/* 屏幕区占面板的大头，下面的 agent 命令列表在剩下的空间里滚动 */
+.term-screens {
+  flex: 1 0 260px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.term-pane {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.term-pane[hidden] {
+  display: none;
+}
+
+.term-banner {
+  flex: none;
+  margin: 0;
+  padding: 5px 12px;
+  background: var(--bg-sunk);
+  color: var(--ink-2);
+  font-size: var(--t-xs);
+}
+
+.term-banner.is-warn {
+  background: var(--warn-tint);
+  color: var(--warn);
+}
+
+.term-banner.is-error {
+  background: var(--danger-tint);
+  color: var(--danger);
+}
+
+.project-term {
+  flex: 1;
+  min-height: 0;
+  padding: 6px 8px;
+  background: var(--bg-sunk);
+  overflow: hidden;
+}
+
+.project-term .xterm {
+  height: 100%;
+}
+
+.project-term .xterm-viewport {
+  background: transparent !important;
+}
+
+/* 本地回显预测（project/typeahead-view.ts）：浮层里每格一个 span，不透明地盖住下面那格 */
+.term-typeahead-cell {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  overflow: hidden;
+  white-space: pre;
+}
+
+/* 有假光标时把 xterm 自己的光标藏掉（它还停在服务器的位置） */
+.project-term.term-typeahead .xterm-rows .xterm-cursor {
+  background-color: transparent !important;
+  color: inherit !important;
+  outline: none !important;
+  box-shadow: none !important;
+  animation: none !important;
+}
+
+/* 机器主人看到的其他人的终端 */
+.term-others,
+.term-agent {
+  flex: none;
+  border-top: 1px solid var(--line);
+  padding-bottom: 8px;
+}
+
+.term-others h4,
+.term-agent h4 {
+  margin: 0;
+  padding: 8px 12px 2px;
+}
+
+.term-others ul {
+  margin: 0;
+  padding: 0 12px;
+  list-style: none;
+}
+
+.term-others li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  font-size: var(--t-xs);
+  color: var(--ink-2);
+}
+
+.term-other-who {
+  flex: none;
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.term-other-root {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+  font-family: var(--mono);
+}
+
+.term-other-state {
+  flex: none;
+  color: var(--ink-3);
+}
+
+/* agent 跑的命令（只读） */
+.term-cmds {
+  margin: 0;
+  padding: 0 8px;
+  list-style: none;
+}
+
+.term-cmd {
+  padding: 4px 4px 6px;
+  border-bottom: 1px solid var(--line);
+}
+
+.term-cmd:last-child {
+  border-bottom: 0;
+}
+
+.term-cmd-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.term-cmd-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  text-align: left;
+  font-family: var(--mono);
+  font-size: var(--t-xs);
+  color: var(--ink);
+}
+
+.term-cmd-main:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.term-cmd-prompt {
+  flex: none;
+  color: var(--ink-3);
+}
+
+.term-cmd-line {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.term-cmd-state {
+  flex: none;
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+}
+
+.term-cmd.is-running .term-cmd-state {
+  color: var(--accent);
+}
+
+.term-cmd.is-failed .term-cmd-state {
+  color: var(--danger);
+}
+
+.term-cmd-meta {
+  padding-left: 14px;
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+}
+
+.term-cmd-body {
+  margin-top: 4px;
+  max-height: 260px;
+  overflow: auto;
+}
+
+/* 回复里运行中的托盘，ACP 终端里还在跑的命令那一行的「停止这条命令」 */
+.trow-kill {
+  flex: none;
+  margin-right: 8px;
+  padding: 0 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-pill);
+  color: var(--ink-2);
+  font-size: var(--t-xs);
+  line-height: 18px;
+  white-space: nowrap;
+  transition: background var(--d-1), color var(--d-1);
+}
+
+.trow-kill:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--danger);
+}
+
+.trow-kill:disabled {
+  opacity: 0.5;
+}
+
+/* 终端里的 ⌘J（说人话）：输入条和建议的命令 */
+.term-pane {
+  position: relative;
+}
+
+/* 右上角的连接标签：传输方式和往返延迟，诊断模式下多一行 p50 / p95。不挡操作 */
+.term-link {
+  position: absolute;
+  top: 8px;
+  right: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  padding: 1px 8px;
+  border-radius: var(--r-pill);
+  background: var(--bg);
+  color: var(--ink-3);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+  pointer-events: none;
+  z-index: 8;
+}
+
+.term-link[data-status='reconnecting'] {
+  color: var(--warn);
+}
+
+.term-link-detail {
+  font-size: 10px;
+  color: var(--ink-4, var(--ink-3));
+}
+
+.term-ask-open {
+  position: absolute;
+  right: 14px;
+  bottom: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-pill);
+  background: var(--bg);
+  color: var(--live);
+  font-size: var(--t-xs);
+  opacity: 0.55;
+  transition: opacity var(--d-1);
+}
+
+.term-ask-open span {
+  color: var(--ink-3);
+}
+
+.term-ask-open:hover,
+.term-ask-open:focus-visible {
+  opacity: 1;
+}
+
+.term-ask {
+  flex: none;
+  border-top: 1px solid var(--line-strong);
+  background: var(--bg);
+}
+
+.term-ask-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+}
+
+.term-ask-spark {
+  flex: none;
+  color: var(--live);
+}
+
+.term-ask-input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--t-sm);
+}
+
+.term-ask-input:disabled {
+  color: var(--ink-3);
+}
+
+.term-ask-status {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 2px 12px 8px;
+  color: var(--ink-2);
+  font-size: var(--t-xs);
+}
+
+.term-ask-status.is-error {
+  color: var(--danger);
+}
+
+.term-ask-suggest {
+  padding: 2px 12px 8px;
+  outline: none;
+}
+
+.term-ask-cmd {
+  margin: 0 0 6px;
+  padding: 8px 10px;
+  max-height: 160px;
+  overflow: auto;
+  border-radius: var(--r-md);
+  background: var(--bg-sunk);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.term-ask-suggest:focus-visible .term-ask-cmd {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.term-ask-warn {
+  margin: 0 0 6px;
+  color: var(--warn);
+  font-size: var(--t-xs);
+}
+
+.term-ask-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: var(--t-xs);
+}
+
+.term-ask-where {
+  margin-left: auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-3);
+  font-family: var(--mono);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .term-ask-open {
+    transition: none;
+  }
+}

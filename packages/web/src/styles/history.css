@@ -1,0 +1,368 @@
+/* ---------- 历史版本（页面快照） ---------- */
+
+/* 右侧抽屉壳（更新/历史双 Tab）：上头部，下内容面板 */
+.hd-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 380px;
+  max-width: 100vw;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border-left: 1px solid var(--line);
+  box-shadow: var(--shadow-2);
+}
+
+.vh-header {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+/* Tab 行：更新（默认）| 历史版本 */
+.hd-tabs {
+  display: inline-flex;
+  gap: 4px;
+  min-width: 0;
+}
+
+.hd-tab {
+  font-size: 14px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  color: var(--ink-3);
+}
+
+.hd-tab:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.hd-tab.active {
+  background: var(--press);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.vh-close {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  color: var(--ink-3);
+}
+
+.vh-close:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.vh-error {
+  flex: none;
+  margin: 8px 16px 0;
+  font-size: 13px;
+  color: var(--danger);
+}
+
+/* 历史版本面板内容：壳移入 hd-drawer 后只占抽屉剩余空间 */
+.vh-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.vh-list {
+  flex: 1 1 40%;
+  min-height: 96px;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.vh-empty {
+  padding: 12px;
+  color: var(--ink-3);
+  font-size: 13px;
+}
+
+/* 「加载更多」：版本/动态流水分页续拉（版本永不删除，历史可以很长，一次只给一页） */
+.vh-more {
+  display: block;
+  width: 100%;
+  padding: 6px;
+  margin-top: 4px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ink-3);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.vh-more:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.vh-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 6px;
+}
+
+.vh-item:hover {
+  background: var(--hover);
+}
+
+.vh-item.active {
+  background: var(--press);
+}
+
+.vh-item-title {
+  display: block;
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.vh-item-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.vh-time {
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+.vh-badge {
+  flex: none;
+  display: inline-block;
+  font-size: 11px;
+  line-height: 16px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--hover);
+  color: var(--ink-3);
+}
+
+.vh-badge.manual {
+  background: var(--accent-tint);
+  color: var(--accent);
+}
+
+.vh-detail {
+  flex: 1 1 60%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--line);
+}
+
+.vh-actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 16px;
+}
+
+.vh-mode {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.vh-mode button {
+  font-size: 13px;
+  padding: 4px 10px;
+  color: var(--ink-3);
+}
+
+.vh-mode button.active {
+  background: var(--press);
+  color: var(--ink);
+}
+
+.vh-write-actions {
+  flex: none;
+  display: inline-flex;
+  gap: 6px;
+}
+
+.vh-restore {
+  font-size: 13px;
+  padding: 4px 10px;
+  border-radius: 5px;
+  background: var(--accent);
+  color: var(--on-accent);
+  white-space: nowrap;
+}
+
+.vh-restore:hover {
+  background: color-mix(in srgb, var(--accent) 85%, var(--ink));
+}
+
+.vh-save {
+  font-size: 13px;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: inherit;
+  white-space: nowrap;
+}
+
+.vh-save:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.vh-save:disabled,
+.vh-restore:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.vh-preview-title {
+  flex: none;
+  font-size: 18px;
+  font-weight: 700;
+  padding: 4px 16px 8px;
+}
+
+.vh-diff-empty {
+  flex: none;
+  margin: 0 16px 10px;
+  padding: 6px 10px;
+  font-size: 13px;
+  color: var(--ink-3);
+  background: var(--bg-sunk);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.vh-view {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 16px 24px;
+}
+
+.vh-view .ProseMirror {
+  outline: none;
+  font-size: 14px;
+  line-height: 1.7;
+  word-break: break-word;
+}
+
+/* 对比装饰（所选版本 vs 上一版本）：绿 = 该版本新增的内容；
+   红 = 相对上一版被删的内容（widget 塞回插入点，红色删除线） */
+.snap-ins {
+  background: color-mix(in srgb, var(--ok) 18%, transparent);
+  border-radius: 2px;
+}
+
+.snap-del {
+  color: var(--danger);
+  text-decoration: line-through;
+  opacity: 0.85;
+}
+
+/* ---------- 集合（collection-history）：行版本预览的属性区、集合页版本的属性 / 视图清单 ---------- */
+
+/* 行页面版本预览：正文上方那个版本的属性（只读），与当前不同的右侧一个点 */
+.vh-props {
+  flex: none;
+  max-height: 40%;
+  overflow-y: auto;
+  margin: 0 16px 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+}
+
+.vh-prop {
+  display: grid;
+  grid-template-columns: minmax(96px, 140px) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+}
+
+.vh-prop-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--ink-3);
+}
+
+.vh-prop-name > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vh-prop-value {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.vh-prop-diff {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+/* 集合页版本：动作行左侧的说明、分区标题、每个属性 / 视图一行 */
+.vh-hint {
+  min-width: 0;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+.vh-section {
+  margin: 10px 0 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-3);
+}
+
+.vh-entity {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  padding: 4px 0;
+  font-size: 13px;
+}
+
+.vh-entity .vh-prop-name {
+  color: var(--ink);
+}
+
+.vh-entity-meta {
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+.vh-entity-options {
+  flex-basis: 100%;
+  padding-left: 20px;
+}

@@ -1,0 +1,387 @@
+/* ---------- 设置 → 机器（MachinesPane / MachinePanels / MachineGrantWizard） ----------
+ * 复用设置页的卡片 / 列表行（.set-card / .set-line），这里只补机器特有的：展开区、状态徽标、授权流程弹窗。 */
+
+.machine-intro {
+  margin: 0 2px;
+  font-size: var(--t-xs);
+  line-height: 1.5;
+  color: var(--ink-3);
+}
+
+/* 一台机器 = 卡片里的一个块：头（在线点 + 名字 + 次行 + 操作）→ 状态行 → 展开区 / 申请表 */
+.machine-head .role-badge,
+.machine-badge {
+  margin-left: 6px;
+}
+
+.set-line-sub.machine-wrap {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+}
+
+.machine-wrap {
+  overflow-wrap: anywhere;
+}
+
+.machine-state-row {
+  margin-top: -4px;
+  padding: 0 14px 10px 40px;
+}
+
+.machine-state {
+  font-size: var(--t-xs);
+  color: var(--ink-3);
+}
+
+.machine-state.is-ok {
+  color: var(--ok);
+}
+
+.machine-state.is-warn {
+  color: var(--warn);
+}
+
+/* 「管理」按钮上的小红点：有待处理的使用申请 */
+.machine-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: var(--danger);
+}
+
+.machine-detail {
+  border-top: 1px solid var(--line);
+  background: var(--bg-sunk);
+}
+
+.machine-detail > * + * {
+  border-top: 1px solid var(--line);
+}
+
+.machine-tabs {
+  padding: 10px 14px;
+}
+
+.machine-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 14px;
+}
+
+.machine-panel-head .set-desc {
+  flex: 1;
+  min-width: 0;
+}
+
+.machine-more {
+  display: block;
+  width: 100%;
+  padding: 8px 14px;
+  font-size: var(--t-xs);
+  color: var(--ink-3);
+  text-align: left;
+}
+
+.machine-more:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.machine-badge {
+  display: inline-block;
+  padding: 0 7px;
+  border-radius: var(--r-pill);
+  background: var(--hover);
+  color: var(--ink-3);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.machine-badge.is-active {
+  background: color-mix(in srgb, var(--ok) 14%, transparent);
+  color: var(--ok);
+}
+
+.machine-badge.is-pending {
+  background: var(--warn-tint);
+  color: var(--warn);
+}
+
+.machine-when {
+  margin-left: 8px;
+  font-size: var(--t-xs);
+  font-weight: 400;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+
+/* 使用记录：谁 做了什么 · 页面 / 补充 / 命令；时间在右 */
+.machine-use {
+  align-items: flex-start;
+}
+
+.machine-use .set-line-main {
+  gap: 2px;
+}
+
+.machine-use .machine-when {
+  flex: none;
+  margin-left: 0;
+}
+
+.machine-link {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.machine-link:hover {
+  text-decoration: underline;
+}
+
+.machine-cmd {
+  align-self: flex-start;
+  max-width: 100%;
+  padding: 2px 6px;
+  border-radius: var(--r-sm);
+  background: var(--hover);
+  color: var(--ink-2);
+  font-family: var(--mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.machine-bad {
+  color: var(--danger);
+}
+
+/* 勾选行（范围、已读后果）：整行可点 */
+.machine-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 14px;
+  font-size: var(--t-sm);
+  cursor: pointer;
+}
+
+.machine-check input {
+  flex: none;
+  margin: 0;
+}
+
+.machine-apply {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border-top: 1px solid var(--line);
+  background: var(--bg-sunk);
+}
+
+.machine-apply .machine-check {
+  padding: 2px 0;
+}
+
+.machine-apply-title {
+  font-size: var(--t-sm);
+  font-weight: 500;
+}
+
+/* ---------- 授权流程弹窗：叠在设置弹窗上，四步（选人与范围 → 读懂后果 → 手输确认 → 机器上确认） ---------- */
+
+.modal.machine-wizard {
+  display: flex;
+  flex-direction: column;
+  width: 520px;
+  max-height: min(680px, 90vh);
+  padding: 0;
+  overflow: hidden;
+}
+
+.mw-head {
+  flex: none;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 18px 20px 10px;
+}
+
+.mw-titles {
+  flex: 1;
+  min-width: 0;
+}
+
+.mw-step {
+  margin: 2px 0 0;
+  font-size: var(--t-xs);
+  color: var(--ink-3);
+}
+
+.mw-bar {
+  flex: none;
+  display: flex;
+  gap: 4px;
+  margin: 0 20px;
+}
+
+.mw-bar span {
+  flex: 1;
+  height: 3px;
+  border-radius: var(--r-pill);
+  background: var(--line);
+  transition: background var(--d-2);
+}
+
+.mw-bar span.is-on {
+  background: var(--accent);
+}
+
+.mw-form {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.mw-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px 20px;
+}
+
+.mw-body .set-field {
+  gap: 6px;
+}
+
+.mw-foot {
+  flex: none;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--line);
+}
+
+.mw-lead {
+  margin: 0;
+  font-weight: 500;
+}
+
+.mw-muted {
+  margin: 0;
+  font-size: var(--t-xs);
+  line-height: 1.5;
+  color: var(--ink-3);
+}
+
+.mw-bad {
+  margin: 0;
+  font-size: var(--t-xs);
+  color: var(--danger);
+}
+
+.mw-days {
+  width: 120px;
+}
+
+/* 后果说明：醒目的警示块 */
+.mw-warn {
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
+  border-radius: var(--r-md);
+  background: var(--danger-tint);
+}
+
+.mw-warn-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  color: var(--danger);
+}
+
+.mw-warn ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  line-height: 1.55;
+}
+
+.mw-warn li + li {
+  margin-top: 4px;
+}
+
+.mw-sum {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 14px;
+  margin: 0;
+  font-size: var(--t-sm);
+}
+
+.mw-sum dt {
+  color: var(--ink-3);
+}
+
+.mw-sum dd {
+  margin: 0;
+}
+
+.mw-ack {
+  padding: 4px 0;
+  font-weight: 500;
+}
+
+.mw-code {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: var(--r-sm);
+  background: var(--bg-sunk);
+}
+
+.mw-code code {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink);
+  word-break: break-all;
+  user-select: all;
+}
+
+.mw-code .admin-btn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mw-ok {
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--ok) 40%, transparent);
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--ok) 10%, transparent);
+}
+
+.mw-ok-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  color: var(--ok);
+}
+
+.mw-ok p {
+  margin: 6px 0 0;
+}

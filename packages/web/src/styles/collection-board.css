@@ -1,0 +1,287 @@
+/* 集合的看板视图（collection/board/）。
+ * 列宽固定、横向滚动（不撑破正文里集合块的宽度；块里的看板伸出正文列，见 collection-block.css）；列内各自纵向滚动，高度上限跟视口走。
+ * 动效只动 opacity / transform；拖动落下的重排由 motion.ts 的 flip() 做。落点提示是伪元素横线，不改 margin。 */
+
+.cl-board {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-width: 0;
+  padding: 4px 0 12px;
+  overflow-x: auto;
+}
+
+.cl-col {
+  display: flex;
+  flex: 0 0 260px;
+  flex-direction: column;
+  min-width: 0;
+  border-radius: var(--r-md);
+  background: var(--bg-sunk);
+}
+
+/* 按状态 / 单选分列：列底色与计数跟选项颜色走（同 Notion）；「无值」列和没颜色的保持中性底 */
+.cl-col[data-color='gray'] { --col-ink: var(--mk-text-gray); }
+.cl-col[data-color='brown'] { --col-ink: var(--mk-text-brown); }
+.cl-col[data-color='orange'] { --col-ink: var(--mk-text-orange); }
+.cl-col[data-color='yellow'] { --col-ink: var(--mk-text-yellow); }
+.cl-col[data-color='green'] { --col-ink: var(--mk-text-green); }
+.cl-col[data-color='blue'] { --col-ink: var(--mk-text-blue); }
+.cl-col[data-color='purple'] { --col-ink: var(--mk-text-purple); }
+.cl-col[data-color='pink'] { --col-ink: var(--mk-text-pink); }
+.cl-col[data-color='red'] { --col-ink: var(--mk-text-red); }
+
+.cl-col[data-color] {
+  background: color-mix(in srgb, var(--col-ink, transparent) 8%, var(--surface));
+}
+
+.cl-col[data-color] .cl-col-head .cl-section-count {
+  color: var(--col-ink);
+}
+
+.cl-col.is-drop-target {
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.cl-col-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 6px 8px 4px 10px;
+  font-size: var(--t-sm);
+}
+
+.cl-col-head .cl-opt {
+  min-width: 0;
+}
+
+.cl-col-add {
+  margin-left: auto;
+  color: var(--ink-3);
+  opacity: 0;
+}
+
+.cl-col:hover .cl-col-add,
+.cl-col-add:focus-visible {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .cl-col-add {
+    opacity: 1;
+  }
+}
+
+/* 列不是独立滚动区（同 Notion）：列高随内容增长，滚轮只滚页面；续取靠列底哨兵进视口（BoardColumn） */
+.cl-col-body {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 48px;
+  padding: 6px 8px 8px;
+}
+
+.cl-card {
+  position: relative;
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  font-size: var(--t-sm);
+  line-height: 1.5; /* 定死行高：line-height: normal 下中文行比输入框（按西文字体算）高，进编辑会跳 */
+  cursor: pointer;
+  transition: opacity var(--d-1) var(--ease-out);
+}
+
+.cl-card:hover {
+  border-color: var(--line-strong);
+}
+
+.cl-card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.cl-card[draggable='true'] {
+  cursor: grab;
+}
+
+.cl-card.is-dragging {
+  opacity: 0.4;
+}
+
+.cl-card.is-picked {
+  border-color: var(--accent);
+  background: var(--accent-tint);
+}
+
+.cl-card-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding-right: 36px; /* 给角上的「打开」按钮让位 */
+  font-weight: 500;
+}
+
+.cl-card-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.cl-card-name.is-empty {
+  color: var(--ink-3);
+}
+
+/* 卡片里的输入框和展示时一样高：日期框高度锁成一行（自带的内边距也压住），其余是随内容长高的 textarea，
+ * 按展示时的宽度折行（InlineInput 的 wrap）；边框 / 内边距用负外边距抵掉，进编辑文字不挪位、卡片不变高；横向铺满这一行 */
+.cl-card .cl-input {
+  flex: 1;
+  width: calc(100% + 8px);
+  height: calc(1lh + 2px);
+  margin: -1px -4px;
+  padding: 0 3px;
+}
+
+textarea.cl-input {
+  display: block;
+  overflow: hidden;
+  resize: none;
+  overflow-wrap: anywhere;
+}
+
+.cl-card-prop {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--ink-2);
+}
+
+/* 可编辑的卡片：标题文字 / 属性点了就地改，悬停给个底色提示可点；属性只占内容宽，旁边的空白点了是打开 */
+.cl-card.is-editable .cl-card-name {
+  cursor: text;
+}
+
+.cl-card.is-editable .cl-card-prop {
+  align-self: flex-start;
+  max-width: 100%;
+}
+
+.cl-card.is-editable .cl-card-prop.is-editing {
+  align-self: stretch;
+}
+
+.cl-card.is-editable .cl-card-prop:not(.is-locked) {
+  margin: 0 -4px;
+  padding: 1px 4px;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+
+.cl-card.is-editable .cl-card-prop:not(.is-locked):hover {
+  background: var(--hover);
+}
+
+
+/* 打开行页面：右上角，悬停 / 聚焦时出现（触屏常显，见 .cl-open） */
+.cl-card-open {
+  position: absolute;
+  top: 7px;
+  right: 8px;
+}
+
+.cl-card:hover .cl-card-open,
+.cl-card:focus-within .cl-card-open {
+  opacity: 1;
+}
+
+.cl-card-prop .cl-chips {
+  flex-wrap: wrap;
+}
+
+.cl-card-prop .cl-text.is-num {
+  margin-left: 0;
+}
+
+.cl-card-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-3);
+}
+
+/* 落点提示：卡片前后的横线（在 6px 的间隙正中，绝对定位不占位）；落在列尾 = 末张卡片之后 */
+.cl-card.is-drop-before::before,
+.cl-card.is-drop-after::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+  pointer-events: none;
+}
+
+.cl-card.is-drop-before::before {
+  top: -5px;
+}
+
+.cl-card.is-drop-after::after {
+  bottom: -5px;
+}
+
+.cl-col-foot {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: var(--r-sm);
+  color: var(--ink-3);
+  font-size: var(--t-sm);
+  text-align: left;
+}
+
+.cl-col-foot:hover {
+  background: var(--hover);
+  color: var(--ink-2);
+}
+
+.cl-col-body .cl-more {
+  padding: 2px 0;
+}
+
+/* 还不能分列 */
+
+.cl-board-setup {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px 12px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--r-md);
+  color: var(--ink-3);
+  font-size: var(--t-sm);
+}
+
+.cl-board-setup-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink-2);
+}
+
+.cl-board-choices {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}

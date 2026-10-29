@@ -1,0 +1,188 @@
+/* 登录与会话 */
+
+.auth-loading {
+  height: 100vh;
+  height: 100dvh; /* 同 .app：dvh 躲手机浏览器底部工具栏 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.login-page {
+  height: 100vh;
+  height: 100dvh; /* 同上 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-sunk);
+}
+
+.login-card {
+  width: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow-2);
+  padding: 32px 28px;
+}
+
+.login-logo {
+  margin: 0 0 4px;
+  font-size: 22px;
+  text-align: center;
+}
+.login-logo::before {
+  content: '';
+  display: block;
+  width: 56px;
+  height: 56px;
+  margin: 0 auto 12px;
+  background: url('/icon.svg') center / contain no-repeat;
+}
+
+.login-subtitle {
+  margin: 0;
+  font-size: 13px;
+  color: var(--ink-3);
+  text-align: center;
+}
+
+.login-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--ink-3);
+}
+
+.login-input {
+  font: inherit;
+  font-size: 14px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  outline: none;
+  color: var(--ink);
+  background: var(--surface); /* 不写 background 时 UA 默认白底，深色模式下浅字不可读 */
+}
+
+.login-input:focus {
+  border-color: var(--accent);
+}
+
+.login-error {
+  font-size: 13px;
+  color: var(--danger);
+}
+
+.login-submit {
+  margin-top: 4px;
+  padding: 8px;
+  border-radius: 5px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 14px;
+}
+
+.login-submit:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* 改密页的次要动作（返回登录）：不抢主按钮视觉 */
+.login-secondary {
+  padding: 6px;
+  border-radius: 5px;
+  color: var(--ink-3);
+  font-size: 13px;
+}
+
+.login-secondary:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+/* 侧栏底栏：不画分隔线；底部让出手机的 home 指示条 */
+.sidebar-footer {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 4px 8px max(12px, env(safe-area-inset-bottom));
+  position: relative; /* 空间菜单的定位锚点：向上弹出 */
+}
+
+/* 用户头像（people.ts / Avatar.tsx）：有图是方图铺满；没图是首字 + 按用户名取的固定色；不认识的是中性人形。
+ * 尺寸与圆角归宿主：对话气泡的 .chat-avatar 自带 28px 圆角方块，React 侧用 .avatar-round + --avatar-size */
+.avatar {
+  display: inline-grid;
+  place-items: center;
+  overflow: hidden;
+  user-select: none;
+}
+
+.avatar > img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.avatar.is-initial {
+  background: var(--avatar-bg, var(--ink-3));
+  color: #fff;
+  font-weight: 600;
+  font-size: calc(var(--avatar-size, 28px) * 0.46);
+  line-height: 1;
+}
+
+.avatar.is-none {
+  background: color-mix(in srgb, var(--ink) 10%, var(--surface));
+  color: var(--ink-3);
+}
+
+.avatar-round {
+  flex: none;
+  width: var(--avatar-size, 20px);
+  height: var(--avatar-size, 20px);
+  border-radius: 50%;
+}
+
+.sidebar-user {
+  min-width: 0;
+  font-size: var(--t-sm);
+  color: var(--ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.btn-admin {
+  flex: none;
+  font-size: var(--t-sm);
+  color: var(--accent);
+  padding: 2px 6px;
+  border-radius: var(--r-sm);
+}
+
+.btn-admin:hover {
+  background: var(--hover);
+}
+
+.btn-logout {
+  flex: none;
+  font-size: var(--t-sm);
+  color: var(--ink-3);
+  padding: 2px 6px;
+  border-radius: var(--r-sm);
+}
+
+.btn-logout:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+

@@ -1,0 +1,663 @@
+/* 编辑器挂件：框选菜单、块菜单、手机端手柄、区块链接、块提及、同步块、查找替换。styles.css 里紧跟 editor.css 引入，层叠顺序依赖这点。 */
+
+/* 文字框选菜单（selection-menu.ts，TooltipProvider 定位在选区上方）：这里只管定位与显隐，外观在 menus.css */
+.selection-menu {
+  position: absolute;
+  z-index: 10;
+  /* 用 visibility 而非 display:none 藏菜单：floating-ui 在 show 前就要量元素尺寸做水平居中，
+     display:none 量出 0 宽会把菜单左缘钉在选区中点 */
+  visibility: hidden;
+  animation: block-menu-in var(--d-1) var(--ease-out);
+}
+
+.selection-menu[data-show='true'] {
+  visibility: visible;
+}
+
+/* 块拖拽手柄（editor/block-handle.ts：BlockHandleProvider 定位 content，data-show 控显隐） */
+.block-handle {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 5;
+  opacity: 0;
+  visibility: hidden;
+  /* 位置 = --x/--y（block-handle.ts 写入 floating-ui 算出的坐标），隐藏时再叠 -4px 横向让位；只动 transform */
+  transform: translate(calc(var(--x, 0px) - 4px), var(--y, 0px));
+  transition:
+    opacity var(--d-1),
+    transform var(--d-1) var(--ease-out),
+    visibility var(--d-1);
+  cursor: grab;
+  user-select: none;
+  color: var(--ink-3);
+  padding: 2px;
+  border-radius: 4px;
+}
+.block-handle[data-show='true'] {
+  opacity: 1;
+  visibility: visible;
+  transform: translate(var(--x, 0px), var(--y, 0px));
+}
+.block-handle svg {
+  display: block;
+}
+.block-handle:hover {
+  background: var(--hover);
+  color: var(--ink-3);
+}
+
+/* 落点指示横条（editor/block-handle.ts 的 BlockDropCursorView）。列表条目的三段落点拖拽由 .list-drop-line 接管，这里只画普通拖拽落点。 */
+.block-drop-cursor {
+  position: absolute;
+  z-index: 50;
+  pointer-events: none;
+  height: 2px;
+  background: var(--accent);
+  border-radius: 1px;
+}
+
+/* 块选择高亮。文本流块：::before 层向左伸 6px 进 gutter、向右伸 6px（右缘与代码块 6px 外环右缘对齐）；
+   代码块：整块换同色底 + 6px 同色外环；卡片块（图片 / 附件）：同款 6px 外环包边，不位移（img 是 replaced 元素，没有 ::before）。
+   ::before 必须 pointer-events:none；不能落在 .page-ref 上，它的 ::before 被页面图标（CSS mask）占用，子页面块改成直接换底色（见下方 page-ref 规则）。
+   相邻块间隙由顶层列表 4px margin 提供，高亮各自是完整圆角矩形；box-shadow 外环方案会截断先绘块的圆角。 */
+.editor-root .ProseMirror .selected-block:not(:is(img, .page-ref, .attachment, pre, .code-block)) {
+  position: relative;
+  background: none;
+}
+.editor-root .ProseMirror .selected-block:not(:is(img, .page-ref, .attachment, pre, .code-block))::before {
+  content: '';
+  position: absolute;
+  inset: 0 -6px 0 -6px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  pointer-events: none;
+}
+/* 嵌套列表条目选中：li 盒左缘是文字起点，圆点挂在父 ul 的 padding 区（li 盒外），
+   所以 ::before 左缘要向左扩一层缩进（ul padding-left 1.6em）加 6px 基准前缘，把圆点包进高亮。只命中嵌套 li（顶层条目块的 deco 落在 ul 上，盒本就含 padding 区）。
+   父列表是待办列表（padding-left 0，复选框在 li 自己的 padding 内）时不左扩，包括待办里的普通子条目，否则会戳进父级勾选框列。 */
+.editor-root .ProseMirror :is(ul, ol):not(:has(> li[data-item-type='task'])) > li.selected-block:not(:is(img, .page-ref, .attachment, pre, .code-block))::before {
+  inset: 0 -6px 0 calc(-1.6em - 6px);
+}
+/* 纯图片条目 / 块选中：不用整行横条（li / p 盒是全列宽，图片只有内容宽，横条会拖出大片空蓝），
+   行高亮关闭，改贴图：6px 包边 + 图片本体同款淡蓝遮罩（wrapper ::after）。
+   类由 Editor.tsx 的 deco 按 doc 结构打：DOM 里 PM 尾部 <br> 会破坏 CSS 结构选择器，别用 :has / :only-child。
+   wrapper 自带 margin 8px，大于环宽 6px，不会压到上下文字。 */
+.editor-root .ProseMirror .selected-img-item::before {
+  display: none;
+}
+.editor-root .ProseMirror .selected-img-item .img-wrap {
+  outline: 6px solid color-mix(in srgb, var(--accent) 55%, transparent);
+}
+.editor-root .ProseMirror .selected-img-item .img-wrap::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 20%, transparent); /* 遮罩与行高亮同色同浓度 */
+  pointer-events: none;
+}
+.editor-root .ProseMirror .selected-block:is(.img-wrap, .attachment) {
+  outline: 6px solid color-mix(in srgb, var(--accent) 20%, transparent); /* deco 直接落在图片节点（wrapper）/ 附件节点时：同款包边 */
+}
+
+/* 子页面块选中：直接换底色（::before 被图标占用），前后各伸 6px 同色 box-shadow。
+   不用 translateX 左移，那样整卡内容会跳一下。 */
+.editor-root .ProseMirror .selected-block.page-ref {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  box-shadow: -6px 0 0 0 color-mix(in srgb, var(--accent) 20%, transparent), 6px 0 0 0 color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+/* 代码块选中：四周 6px 深蓝环 + 内部淡蓝底。outline 不占布局，左缘落在 -6px 基准线；自带灰描边设为透明，避免环和面之间露灰线。
+   不用遮罩：pre 是 overflow:auto 的滚动容器，绝对定位遮罩会撑出滚动条，还会随滚动偏移。 */
+.editor-root .ProseMirror pre.selected-block,
+.editor-root .ProseMirror .code-block.selected-block > pre,
+.editor-root .ProseMirror .code-block.selected-block > .mermaid-view {
+  outline: 6px solid color-mix(in srgb, var(--accent) 20%, transparent); /* 环 = 基准高亮色 */
+  background-color: var(--accent-tint); /* 内部更淡一档 */
+  border-color: transparent;
+}
+
+/* 块选激活期间（点击手柄 / 拖放落点），PM 会把 NodeSelection 写成盖住整块的原生 DOM 选区
+   （focus() / dispatch / collab 同步每次都重写，JS 清除只能异步跑，先画后清必闪）。
+   在绘制层压掉：原生选区透明，块选视觉只留上面 selected-block 的行高亮。 */
+.editor-root .ProseMirror.block-select-active ::selection,
+.editor-root .ProseMirror.block-select-active::selection {
+  background: transparent;
+}
+
+/* 协作光标（y-prosemirror：span.ProseMirror-yjs-cursor > div 标签，颜色内联） */
+.ProseMirror-yjs-cursor {
+  position: absolute;
+  height: 1.75em; /* 与 .ProseMirror 行高 1.75 一致，撑满整行 */
+  border-left: 2px solid;
+  border-right: none;
+  margin-left: -1px;
+  pointer-events: none;
+}
+
+.ProseMirror-yjs-cursor > div {
+  position: absolute; /* 脱流：不撑布局，悬浮在线上方 */
+  top: -1.35em;
+  left: -2px;
+  font-size: 12px;
+  line-height: normal;
+  font-weight: 500;
+  padding: 1px 6px;
+  border-radius: 4px;
+  color: var(--on-accent);
+  white-space: nowrap;
+  user-select: none;
+}
+
+/* 标题编辑器行高 1.2（正文 1.75），光标竖线高度随标题行 */
+.title-editor .ProseMirror-yjs-cursor {
+  height: 1.2em;
+}
+
+/* 图片灯箱（lightboxPlugin，挂在 document.body，不在编辑器 DOM 里）：fixed 全屏黑底，点浮层或 Esc 关闭。
+   z-index 60 盖过现有最高浮层（members 50）。 */
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--backdrop);
+  cursor: zoom-out;
+}
+
+.lightbox img {
+  max-width: 95vw;
+  max-height: 95vh;
+  border-radius: 4px;
+}
+
+/* 「显示原图」：默认显示压缩版，点了才拉原图（media.ts originalButton）。钉在浮层底部居中，底色不透明，浮在图片上也读得清。 */
+.lightbox-original {
+  position: absolute;
+  left: 50%;
+  bottom: calc(20px + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  padding: 6px 16px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
+  color: var(--ink);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.lightbox-original:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--ink) 6%, var(--surface));
+}
+
+.lightbox-original:disabled {
+  cursor: default;
+  color: var(--ink-3);
+}
+
+/* 块手柄点击菜单（block-menu.ts，挂 document.body，left/top 由 JS 写入） */
+
+/* 视觉照抄 .slash-menu；深色模式靠 CSS 变量在 dark.css 里翻转，无需单独适配。
+   z-index 20：盖过手柄（5）和 slash 菜单（10），低于灯箱（60）。 */
+.block-menu {
+  position: fixed;
+  z-index: 20;
+  /* fixed 元素默认 shrink-to-fit，宽度跟随最长文字行，min-width 兜底防太窄 */
+  min-width: 140px;
+  max-height: 60vh;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow-2);
+  padding: 6px;
+  animation: block-menu-in var(--d-1) var(--ease-out);
+}
+
+@keyframes block-menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* 退场：close() 加 .closing，--d-1 后 JS 摘 DOM（block-menu.ts 用 motionMs 读同一个令牌）；pointer-events 立即失效防误点 */
+.block-menu.closing {
+  pointer-events: none;
+  animation: block-menu-out var(--d-1) var(--ease-out) forwards;
+}
+
+@keyframes block-menu-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+}
+
+.block-menu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  padding: 6px 10px;
+  border-radius: 5px;
+  font-size: 14px;
+}
+
+.block-menu button:hover {
+  background: var(--hover);
+}
+
+.block-menu button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.block-menu button:disabled:hover {
+  background: transparent;
+}
+
+/* 菜单项左侧图标格（block-menu.ts 的 menuIcon，主菜单与转换面板共用） */
+.block-menu-ic {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  color: var(--ink-2);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+/* 转换行：图标 + 文字（撑满）+ 展开箭头。箭头是按钮的直接子 svg，图标的 svg 在 .block-menu-ic 里，不跟着转 */
+.block-menu-turn > span:not(.block-menu-ic) {
+  flex: 1;
+}
+.block-menu-turn > svg {
+  opacity: 0.55;
+}
+.block-menu-turn.expanded > svg {
+  transform: rotate(90deg);
+}
+
+/* 「转换」飞出面板：独立的 fixed 弹层，挂 body，left/top 由 JS 写入（贴主菜单右缘、与「转换」按钮顶对齐，放不下时翻到左侧 / 向上收）。
+   视觉与 .block-menu 同；z-index 21 盖过主菜单（20）；动画复用同一对 keyframes。 */
+.block-menu-sub {
+  position: fixed;
+  z-index: 21;
+  width: 150px;
+  max-height: 60vh;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow-2);
+  padding: 6px;
+  animation: block-menu-in var(--d-1) var(--ease-out);
+}
+.block-menu-sub.closing {
+  pointer-events: none;
+  animation: block-menu-out var(--d-1) var(--ease-out) forwards;
+}
+/* 面板挂在 body 上，吃不到 .block-menu button 的规则，这里单列铺满并保持与主菜单一致 */
+.block-menu-sub button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  font-size: 13px;
+  padding: 5px 8px;
+}
+.block-menu-sub button:hover {
+  background: var(--hover);
+}
+
+
+/* 手机端块手柄（editor/block-touch.ts，decoration widget 常显）。
+   触屏没有 hover，所有顶层块常驻一个淡灰手柄。widget div 自身 0×0 不占布局，svg 绝对定位到左 gutter。
+   touch-action: none 把手柄上的触摸完全交给 JS：用 pan-y 时，长按等待期手指漂几 px 就被合成线程抢去滚 .main，
+   之后 touchmove 不再送达页面，拖拽变成死手势；同时禁掉双击缩放，-webkit-touch-callout 压掉 iOS 长按放大镜。
+   代价是从手柄上起手无法滚动页面。触区放大成 20px 图标 + 6px padding（桌面 14px 无 padding）。 */
+.block-handle-touch {
+  position: relative;
+  display: block;
+  width: 0;
+  height: 0;
+  color: var(--ink-3);
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+.block-handle-touch svg {
+  position: absolute;
+  left: -40px; /* 左 gutter 32px + 页容器 30px：抓握区离屏边 28px，避开安卓侧滑返回手势区（屏边约 20-25px）；右缘距正文 8px，避开块选高亮向左的 6px 伸出 */
+  top: -2px; /* 兜底值，实际由 alignSelf() 按块首行实测写入 */
+  padding: 6px;
+  border-radius: 6px;
+  box-sizing: content-box;
+  opacity: 0.55; /* 常显要更淡，不与正文抢注意力 */
+}
+.block-handle-touch:active svg {
+  background: var(--hover);
+  opacity: 0.9;
+}
+.ProseMirror[contenteditable='false'] .block-handle-touch {
+  display: none; /* viewer / 只读：手柄不出现（桌面走 #show 的 editable 守卫，这里 CSS 兜底） */
+}
+
+/* 长按拖拽：块克隆 ghost 跟手（内层 .ProseMirror 保住排版选择器），蓝线指示落点 */
+.block-drag-ghost {
+  position: fixed;
+  left: 0;
+  top: 0;
+  will-change: transform; /* 位移走 transform，提成独立层免逐帧 layout */
+  z-index: 70;
+  pointer-events: none;
+  background: var(--bg);
+  border-radius: 6px;
+  box-shadow: var(--shadow-2);
+  opacity: 0.92;
+}
+/* 子代链特异性 (0,3,0)：压过 .editor-root .ProseMirror 基础规则及其手机端 media 覆盖
+   （min-height 撑满视口、32px 左 gutter 都不能进 ghost）；字号行高等正文排版照常命中，ghost 与源块一致 */
+.block-drag-ghost > .editor-root > .ProseMirror {
+  min-height: 0;
+  padding: 4px 10px; /* 覆盖左 gutter，ghost 内容贴边更紧凑 */
+}
+/* ghost 是单块快照：块自带的上下 margin（标题 1em/0.3em、段落 0.35em）是块间间距，不该出现在快照内部。
+   编辑器里它们靠 margin 塌陷逸出块盒，ghost 内层有 padding 挡着塌不出去，所以要裁掉首尾 margin 才贴边。 */
+.block-drag-ghost > .editor-root > .ProseMirror > :first-child {
+  margin-top: 0;
+}
+.block-drag-ghost > .editor-root > .ProseMirror > :last-child {
+  margin-bottom: 0;
+}
+.block-drop-line {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 69;
+  height: 3px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--accent) 80%, transparent);
+  pointer-events: none;
+  display: none;
+}
+
+/* 桌面列表条目拖拽落点指示线（editor/list-drag.ts）：fixed 挂 body，坐标为视口坐标；显隐和位置全由 JS 控制（display 默认 none，dragover 时置 block）。与手机端 block-drop-line 同色系。 */
+.list-drop-line {
+  position: fixed;
+  z-index: 69;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+  pointer-events: none;
+  display: none;
+}
+
+/* 手机端正文字号略放大，触屏阅读舒适，行也更好点；分割线上下留白加宽。
+   左右加宽：安卓手势导航的侧滑返回区（屏边约 20-25px）会抢走从边缘起手的触摸，手柄长按拖拽就整个被断。
+   页容器 17→30px、手柄左移量 44→40px，把抓握区起点推到离屏边 28px，留在手势区外。标题 padding 同步对齐 gutter。
+   拖拽采样点读的是 computedStyle.paddingLeft（block-touch.ts），加宽后自动跟随。 */
+@media (max-width: 768px) {
+  .editor-page {
+    padding-left: 30px;
+    padding-right: 30px;
+  }
+  .editor-root .ProseMirror {
+    font-size: 17px;
+    padding-left: 32px;
+  }
+  .editor-page .page-title {
+    padding-left: 32px;
+  }
+  .editor-root .ProseMirror hr {
+    margin: 28px 0;
+  }
+}
+
+/* 区块链接直访定位闪烁（editor/block-id.ts focusBlockById）：打开 /page/:id?block=:bid 时滚到目标块并整行高亮淡出。
+   类由 JS 挂 / 摘（animationend + 兜底 timeout），只动背景色，不与选中文字冲突。
+   1.6s 是让人看清是哪一块的停留时长，不是位移动效，不走 --d-* 令牌。 */
+.block-link-flash {
+  animation: block-link-flash 1.6s ease-out;
+}
+@keyframes block-link-flash {
+  0% {
+    background-color: color-mix(in srgb, var(--accent) 28%, transparent);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+/* 文字定位链接（editor/text-anchor.ts）：块里那段字高亮，停一会儿再淡出（插件约 2.6s 后摘掉装饰） */
+.text-link-flash {
+  border-radius: 2px;
+  animation: text-link-flash 2.4s ease-out forwards;
+}
+@keyframes text-link-flash {
+  0%,
+  55% {
+    background-color: color-mix(in srgb, var(--accent) 32%, transparent);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+/* @ 提及 chip（页面 page-mention.ts / 块引用 block-ref.ts / agent agent-mention.ts / 成员 user-mention.ts）。
+   四种提及同一形体：浅底胶囊，同高同字号、单行、无边框；颜色区分叫的是谁，agent 强调蓝、成员「你」绿、页面 / 块引用中性灰。
+   打头的记号：agent / 成员是文字里自带的 `@`，页面 / 块引用是文档轮廓图标（--page-icon，mask 上色）。颜色只改各类的 --mention-fg / --mention-bg。
+   选择器不带 .ProseMirror 前缀：聊天气泡把文档节点序列化成 DOM 直接塞进去，没有 .ProseMirror 祖先，带了就画不出来。
+   overflow 用 clip 不用 hidden：hidden 会让行内盒的基线掉到底边，chip 跟正文对不齐。 */
+.page-mention,
+.block-ref,
+.agent-mention,
+.user-mention {
+  display: inline-flex;
+  align-items: baseline;
+  max-width: 16em;
+  padding: 0 7px;
+  border-radius: 4px;
+  background: var(--mention-bg);
+  color: var(--mention-fg);
+  font-size: 0.92em;
+  line-height: 1.6;
+  vertical-align: baseline;
+  white-space: nowrap;
+  overflow: clip;
+  position: relative;
+}
+.page-mention,
+.block-ref {
+  --mention-fg: var(--ink);
+  --mention-bg: var(--press);
+}
+.agent-mention {
+  --mention-fg: var(--accent);
+  --mention-bg: var(--accent-tint);
+}
+.user-mention {
+  --mention-fg: var(--you);
+  --mention-bg: var(--you-tint);
+}
+
+/* 页面 / 块引用：可点（跳页），打头画图标 */
+.page-mention,
+.block-ref {
+  padding-left: 21px;
+  cursor: pointer;
+}
+.page-mention::before,
+.block-ref::before {
+  content: '';
+  position: absolute;
+  left: 7px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 11px;
+  height: 11px;
+  background: var(--ink-3);
+  -webkit-mask: var(--page-icon) center / contain no-repeat;
+  mask: var(--page-icon) center / contain no-repeat;
+}
+.page-mention:hover,
+.block-ref:hover {
+  background: color-mix(in srgb, var(--ink) 12%, transparent);
+}
+.page-mention-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+/* agent / 成员：不可点 */
+.agent-mention,
+.user-mention {
+  user-select: none;
+}
+
+/* 粘贴块链接三选弹窗（editor/block-link-paste.ts，挂 document.body）。
+   卡片外观复用 block-menu，按钮带说明副行。z-index 20 同块菜单，低于灯箱（60）；动画同 block-menu-in；left/top 由 JS 写入。 */
+.block-link-choices {
+  position: fixed;
+  z-index: 20;
+  width: 240px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow-2);
+  padding: 6px;
+  animation: block-menu-in var(--d-1) var(--ease-out);
+}
+.block-link-choices button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 6px 10px;
+  border-radius: 5px;
+}
+.block-link-choices button:hover {
+  background: var(--hover);
+}
+.block-link-choices .label {
+  display: block;
+  font-size: 14px;
+}
+.block-link-choices .hint {
+  display: block;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+/* 同步块（editor/block-sync.ts，块级原子节点）：编辑器内 nodeView 渲染源块实时内容，外层虚线框标记内容来自别处。
+   .block-sync-static 是没有 nodeView 的场景（PublicPage / 快照 / 占位）的静态态。 */
+.ProseMirror .block-sync {
+  border: 1px dashed var(--line);
+  border-radius: 6px;
+  padding: 4px 12px;
+  margin: 0.4em 0;
+  min-height: 1.75em;
+  color: var(--ink-3);
+  font-size: 0.95em;
+}
+.ProseMirror .block-sync .block-sync-content {
+  color: var(--ink);
+  font-size: 1em;
+}
+.ProseMirror .block-sync-static {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-3);
+}
+/* 快照面板 / 公开页（无 .ProseMirror 前缀上下文也成立） */
+.block-sync-static {
+  color: var(--ink-3);
+}
+
+/* 页内查找 / 替换浮条（FindBar.tsx + editor/find.ts，Ctrl+F / Ctrl+H）：fixed 钉在顶栏（.topbar，48px + 刘海安全区）下方右侧，z-index 6 同顶栏。
+   命中高亮 .find-hit（decoration 挂 inline span）；当前命中不另画，跳转即 PM 选区。 */
+.find-bar {
+  position: fixed;
+  top: calc(52px + env(safe-area-inset-top));
+  right: 12px;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow-2);
+  animation: block-menu-in var(--d-1) var(--ease-out);
+}
+.find-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.find-input {
+  width: 180px;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--ink);
+  font-size: 13px;
+  outline: none;
+}
+.find-input:focus {
+  border-color: var(--accent, var(--ink));
+}
+.find-count {
+  min-width: 48px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+.find-count.none {
+  color: var(--danger);
+}
+.find-btn {
+  padding: 3px 8px;
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 5px;
+  color: var(--ink);
+}
+.find-btn:hover:not(:disabled) {
+  background: var(--hover);
+}
+.find-btn:disabled {
+  opacity: 0.4;
+}
+.find-btn.case.on {
+  background: var(--hover);
+  font-weight: 600;
+}
+.ProseMirror .find-hit {
+  background: var(--find-hit);
+  border-radius: 2px;
+}

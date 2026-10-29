@@ -1,0 +1,902 @@
+/* 集合：整页集合与正文里的集合块共用 .collection-surface 以下的样式。
+ * 表格是 CSS grid：每一行各自 grid，列模板是表格上的 --cl-cols（拖宽时只改这个变量，松手才写文档）。
+ * 动效只动 opacity / transform（令牌 --d-*）；布局变化（折叠段、拖行、删行）由 motion.ts 的 flip() 做。 */
+
+/* 集合页比正文列宽：表格要横向空间（不收 720 列，同全宽页） */
+.editor-page.collection-page {
+  max-width: none;
+}
+
+@media (min-width: 769px) {
+  .editor-page.collection-page {
+    padding-left: 56px;
+    padding-right: 56px;
+  }
+}
+
+.collection-surface {
+  margin-top: 12px;
+}
+
+.collection-empty {
+  padding: 12px 4px;
+  color: var(--ink-3);
+  font-size: var(--t-sm);
+}
+
+/* 标签栏：左边视图标签、右边工具栏，共用一条底线 */
+
+.cl-viewbar {
+  position: relative; /* 批量操作栏的插槽盖在上面（整页集合，见 collection/bulk-slot.tsx） */
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+/* 标签多了在自己这段里横向滚动，不把工具栏挤走 */
+.cl-tabs {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  align-items: center;
+  gap: 2px;
+  padding-bottom: 4px;
+  font-size: var(--t-sm);
+  overflow-x: auto;
+}
+
+.cl-tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  padding: 4px 8px;
+  border-radius: var(--r-sm);
+  color: var(--ink-3);
+  white-space: nowrap;
+  transition: background var(--d-1), color var(--d-1);
+}
+
+.cl-tab:hover {
+  background: var(--hover);
+  color: var(--ink-2);
+}
+
+/* 选中：文字转实色 + 下划线压在标签栏底线上（不画在按钮圆角里；容器 padding-bottom 4px，底线在外层 .cl-viewbar 上） */
+.cl-tab.is-active {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.cl-tab.is-active::after {
+  content: '';
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: -4px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--ink);
+  pointer-events: none;
+}
+
+.cl-tab[data-drop='before'] {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.cl-tab[data-drop='after'] {
+  box-shadow: inset -2px 0 0 var(--accent);
+}
+
+.cl-tab-add {
+  color: var(--ink-3);
+}
+
+/* 工具栏 */
+
+.cl-bar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  padding-bottom: 4px;
+}
+
+.cl-bar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: var(--r-sm);
+  color: var(--ink-3);
+  font-size: var(--t-sm);
+  white-space: nowrap;
+}
+
+.cl-bar-btn:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--ink-2);
+}
+
+.cl-bar-btn.is-on {
+  color: var(--accent);
+}
+
+.cl-bar-btn.is-danger {
+  color: var(--danger);
+}
+
+.cl-bar-btn:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.cl-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0;
+  padding: 6px 10px;
+  border-radius: var(--r-sm);
+  background: var(--danger-tint);
+  color: var(--danger);
+  font-size: var(--t-sm);
+}
+
+.cl-error > span {
+  flex: 1;
+}
+
+.cl-picked-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  padding: 4px 0;
+  font-size: var(--t-sm);
+  color: var(--ink-2);
+}
+
+/* 批量操作栏的插槽：选中条目后盖住集合的标题行（块标题 / 整页的视图标签栏），不另占一行把内容往下顶。
+ * 空着不显示；底线留给标签栏自己（盖层不压到底线上） */
+.cl-bulk-slot {
+  position: absolute;
+  inset: 0 0 1px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  background: var(--bg);
+}
+
+.cl-bulk-slot:empty {
+  display: none;
+}
+
+.cl-bulk-slot > .cl-picked-bar {
+  flex-wrap: nowrap;
+  min-width: 0;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+/* 弹层 */
+
+@keyframes cl-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+.cl-pop {
+  position: fixed;
+  z-index: 60;
+  max-width: min(420px, calc(100vw - 16px));
+  max-height: min(480px, calc(100vh - 16px));
+  overflow-y: auto;
+  font-size: var(--t-sm);
+  animation: cl-pop-in var(--d-1) var(--ease-out);
+}
+
+.cl-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 220px;
+}
+
+.cl-menu > *,
+.cl-prop-editor > * {
+  flex: 0 0 auto;
+}
+
+.cl-hint {
+  padding: 6px 8px;
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+}
+
+.cl-sep {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--line);
+}
+
+.cl-add {
+  color: var(--ink-3);
+  gap: 8px;
+}
+
+.cl-back {
+  color: var(--ink-3);
+  gap: 6px;
+}
+
+.cl-rot-back {
+  transform: rotate(180deg);
+}
+
+.cl-rot-left {
+  transform: rotate(-90deg);
+}
+
+.cl-cond {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px;
+}
+
+.cl-cond[data-drop='before'],
+.cl-option-row[data-drop='before'],
+.cl-prop-row[data-drop='before'] {
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+
+.cl-cond[data-drop='after'],
+.cl-option-row[data-drop='after'],
+.cl-prop-row[data-drop='after'] {
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.cl-cond select,
+.cl-field select {
+  max-width: 140px;
+  padding: 3px 4px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+}
+
+.cl-grip {
+  display: inline-flex;
+  width: 12px;
+  flex: none;
+  color: var(--ink-3);
+  cursor: grab;
+}
+
+.cl-input,
+.cl-name-input {
+  min-width: 0;
+  padding: 3px 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  outline: none;
+}
+
+.cl-input:focus,
+.cl-name-input:focus {
+  border-color: var(--accent);
+}
+
+.cl-input.is-bad {
+  border-color: var(--danger);
+}
+
+.cl-cond .cl-input {
+  flex: 1;
+  width: 120px;
+}
+
+.cl-prop-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 260px;
+}
+
+.cl-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 8px;
+  color: var(--ink-2);
+}
+
+.cl-field > span {
+  flex: 1;
+}
+
+.cl-option-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px;
+}
+
+.cl-option-row .cl-name-input {
+  flex: 1;
+}
+
+.cl-colors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  width: 100%;
+  padding: 2px 0 4px 18px;
+}
+
+.cl-color {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  border-radius: 4px;
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+
+.cl-color.is-on {
+  box-shadow: inset 0 0 0 1px var(--line-strong), 0 0 0 2px var(--surface), 0 0 0 3px var(--ink-3);
+}
+
+.cl-prop-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px;
+}
+
+.cl-prop-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  padding: 4px;
+  border-radius: var(--r-sm);
+  text-align: left;
+}
+
+button.cl-prop-name:hover {
+  background: var(--hover);
+}
+
+.cl-prop-name > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 选择器（单元格编辑） */
+.cl-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 220px;
+}
+
+.cl-picker > * {
+  flex: 0 0 auto;
+}
+
+.cl-picker-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px;
+}
+
+.cl-picker-q {
+  margin: 2px;
+  padding: 4px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  outline: none;
+}
+
+.cl-picker-q:focus {
+  border-color: var(--accent);
+}
+
+.cl-picker-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.cl-picker-list > *,
+.cl-picker-row {
+  flex: 0 0 auto;
+}
+
+.cl-picker-check {
+  margin-left: auto;
+  color: var(--ink-2);
+}
+
+.cl-picker-clear {
+  color: var(--ink-3);
+}
+
+.cl-picker-empty {
+  padding: 6px 8px;
+  color: var(--ink-3);
+}
+
+/* 表格 */
+
+.cl-table-wrap {
+  overflow-x: auto;
+  padding-bottom: 8px;
+}
+
+.cl-table {
+  /* 行首格（拖动手柄 + 勾选框）的宽度：能悬停的宽屏归零，两者溢出到表格左外侧，表格贴齐正文左缘；
+     触屏 / 窄屏左边没有外边距，留在列里 */
+  --cl-gutter-w: 44px;
+  width: max-content;
+  min-width: 100%;
+  font-size: var(--t-sm);
+  outline: none;
+}
+
+.cl-row {
+  display: grid;
+  grid-template-columns: var(--cl-gutter-w) var(--cl-cols);
+  border-bottom: 1px solid var(--line);
+  position: relative;
+}
+
+.cl-row.is-picked {
+  background: var(--accent-tint);
+}
+
+.cl-row.is-drop-before {
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+
+.cl-row.is-drop-after {
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.cl-head {
+  color: var(--ink-3);
+  border-top: 1px solid var(--line);
+}
+
+/* 宽度为 0 时靠 flex-end 把手柄与勾选框溢出到左边 */
+.cl-gutter {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  min-width: 0;
+  padding-right: 6px;
+}
+
+@media (hover: hover) and (min-width: 769px) {
+  .cl-table-wrap {
+    /* 横向滚动容器会裁掉溢出的部分：把左外侧那一段并进自己的内边距 */
+    margin-left: -44px;
+    padding-left: 44px;
+  }
+
+  .cl-table {
+    --cl-gutter-w: 0px;
+  }
+
+  /* 列宽 0 时内边距会挤进首列：改成整体左挪，和表格边缘留同样的空 */
+  .cl-gutter {
+    position: relative;
+    right: 6px;
+    padding-right: 0;
+  }
+}
+
+/* 同正文的块手柄（editor-widgets.css 的 .block-handle）：同一个图标、同尺寸 */
+.cl-handle {
+  display: inline-flex;
+  flex: none;
+  padding: 2px;
+  border-radius: 4px;
+  color: var(--ink-3);
+  cursor: grab;
+  opacity: 0;
+}
+
+.cl-handle:hover {
+  background: var(--hover);
+}
+
+/* 勾选框同拖动手柄：悬停才出现；只有已勾的（表头全选：全选 / 部分选）和键盘聚焦的常显 ——
+ * 多选时不把所有行的框都亮出来，选中哪行亮哪行。外观是全站复选框（base.css） */
+.cl-pick {
+  opacity: 0;
+}
+
+/* 取消勾选（含拖选时框缩回去）：框不能一下子消失，要看得到勾收回 —— 淡出比勾收回慢一拍。
+ * 选择器带 input[type] 才压得过 base.css 的全局复选框过渡 */
+input.cl-pick[type='checkbox'] {
+  transition: var(--check-transition), background-size var(--d-1) var(--ease-out), opacity var(--d-2) var(--ease-out);
+}
+
+input.cl-pick[type='checkbox']:is(:checked, :indeterminate) {
+  transition: var(--check-transition), background-size var(--d-2) var(--ease-spring), opacity var(--d-1) var(--ease-out);
+}
+
+.cl-row:hover .cl-handle,
+.cl-row:hover .cl-pick,
+.cl-pick:checked,
+.cl-pick:indeterminate,
+.cl-pick:focus-visible {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .cl-handle,
+  .cl-pick {
+    opacity: 1;
+  }
+}
+
+.cl-th {
+  position: relative;
+  min-width: 0;
+  border-left: 1px solid var(--line);
+}
+
+.cl-gutter + .cl-th {
+  border-left: 0;
+}
+
+.cl-th-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  height: 32px;
+  padding: 0 8px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.cl-th-btn > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cl-th-btn:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.cl-th-btn:disabled {
+  cursor: default;
+}
+
+.cl-resize {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  bottom: 0;
+  z-index: 1;
+  width: 6px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.cl-resize:hover,
+.cl-th.is-resizing .cl-resize {
+  background: var(--resizer-hl);
+  opacity: 0.6;
+}
+
+.cl-th-add {
+  border-left: 1px solid var(--line);
+}
+
+.cl-th-add .cl-th-btn {
+  width: 44px;
+  justify-content: center;
+}
+
+.cl-cell {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  min-height: 34px;
+  padding: 4px 8px;
+  border-left: 1px solid var(--line);
+  overflow: hidden;
+  cursor: default;
+}
+
+.cl-gutter + .cl-cell {
+  border-left: 0;
+}
+
+.cl-cell.is-selected {
+  box-shadow: inset 0 0 0 2px var(--accent);
+  border-radius: 2px;
+}
+
+.cl-cell[data-type='checkbox']:not(.is-locked) {
+  cursor: pointer;
+}
+
+.cl-cell > .cl-input {
+  position: absolute;
+  inset: 2px;
+  width: auto;
+  z-index: 1;
+}
+
+.cl-cell-pad {
+  min-height: 0;
+}
+
+.cl-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cl-text.is-num {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.cl-text.is-dim {
+  color: var(--ink-3);
+}
+
+.cl-link {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-2);
+  text-decoration: underline;
+  text-decoration-color: var(--line-strong);
+}
+
+.cl-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  font-weight: 500;
+}
+
+.cl-title-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cl-open {
+  flex: none;
+  padding: 1px 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--ink-2);
+  font-size: var(--t-xs);
+  font-weight: 400;
+  opacity: 0;
+}
+
+.cl-row:hover .cl-open,
+.cl-cell.is-selected .cl-open,
+.cl-open:focus-visible {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .cl-open {
+    opacity: 1;
+  }
+}
+
+.cl-chips {
+  display: flex;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.cl-opt {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  max-width: 100%;
+  padding: 0 7px;
+  border-radius: 4px;
+  line-height: 20px;
+  font-size: var(--t-xs);
+  white-space: nowrap;
+}
+
+.cl-opt.is-status {
+  border-radius: 10px;
+}
+
+.cl-opt-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cl-opt-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.cl-opt[data-color='gray'],
+.cl-color[data-color='gray'] { color: var(--mk-text-gray); background: var(--mk-bg-gray); }
+.cl-opt[data-color='brown'],
+.cl-color[data-color='brown'] { color: var(--mk-text-brown); background: var(--mk-bg-brown); }
+.cl-opt[data-color='orange'],
+.cl-color[data-color='orange'] { color: var(--mk-text-orange); background: var(--mk-bg-orange); }
+.cl-opt[data-color='yellow'],
+.cl-color[data-color='yellow'] { color: var(--mk-text-yellow); background: var(--mk-bg-yellow); }
+.cl-opt[data-color='green'],
+.cl-color[data-color='green'] { color: var(--mk-text-green); background: var(--mk-bg-green); }
+.cl-opt[data-color='blue'],
+.cl-color[data-color='blue'] { color: var(--mk-text-blue); background: var(--mk-bg-blue); }
+.cl-opt[data-color='purple'],
+.cl-color[data-color='purple'] { color: var(--mk-text-purple); background: var(--mk-bg-purple); }
+.cl-opt[data-color='pink'],
+.cl-color[data-color='pink'] { color: var(--mk-text-pink); background: var(--mk-bg-pink); }
+.cl-opt[data-color='red'],
+.cl-color[data-color='red'] { color: var(--mk-text-red); background: var(--mk-bg-red); }
+
+.cl-person {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  min-width: 0;
+}
+
+.cl-person-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 分组 */
+.cl-section-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 4px 6px;
+}
+
+.cl-section-head .chev {
+  display: block;
+}
+
+.cl-section-head .chev.open {
+  transform: rotate(90deg);
+}
+
+.cl-section-none {
+  color: var(--ink-3);
+}
+
+.cl-section-count {
+  color: var(--ink-3);
+}
+
+.cl-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 8px 6px calc(var(--cl-gutter-w) + 8px);
+  border-bottom: 1px solid var(--line);
+  color: var(--ink-3);
+  text-align: left;
+}
+
+.cl-foot:hover {
+  background: var(--hover);
+  color: var(--ink-2);
+}
+
+.cl-more {
+  display: flex;
+  justify-content: center;
+  padding: 8px 0;
+}
+
+/* 行页面的属性区（RowProperties：标题下面、正文上面） */
+
+.cl-rowprops {
+  display: flex;
+  flex-direction: column;
+  margin: 4px 0 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+  font-size: var(--t-sm);
+}
+
+.cl-rowprop {
+  display: grid;
+  grid-template-columns: minmax(120px, 180px) minmax(0, 1fr);
+  align-items: center;
+  border-radius: var(--r-sm);
+}
+
+.cl-rowprop-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 4px 6px;
+  color: var(--ink-3);
+}
+
+.cl-rowprop-name[draggable='true'] {
+  cursor: grab;
+}
+
+.cl-rowprop-name > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cl-rowprop-name[data-drop='before'] {
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+
+.cl-rowprop-name[data-drop='after'] {
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.cl-rowprops .cl-cell {
+  border-left: 0;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+
+.cl-rowprops .cl-cell:hover:not(.is-locked) {
+  background: var(--hover);
+}
+
+.cl-rowprops .cl-cell.is-locked {
+  cursor: default;
+}
+
+.cl-rowprops .cl-cell.is-selected {
+  box-shadow: none;
+}

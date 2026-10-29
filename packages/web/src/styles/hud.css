@@ -1,0 +1,883 @@
+/* ---------- 右上角工作台：岛（浮 / 停靠）与面板（hud/） ----------
+ * 动效只动 transform / opacity，时长走令牌。 */
+
+.hud {
+  position: fixed;
+  top: 58px; /* 顶栏 48 + 10 */
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.hud > * {
+  pointer-events: auto;
+}
+
+.hud-islands:empty {
+  display: none;
+}
+
+/* ---------- 岛 ---------- */
+
+.island {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  height: 36px;
+  max-width: min(560px, calc(100vw - 32px));
+  padding: 3px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
+  color: var(--ink-2);
+  font-size: var(--t-sm);
+  animation: hud-in var(--d-3) var(--ease-spring) both;
+  transform-origin: top right;
+}
+
+.il-seg {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--r-pill);
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--d-1), color var(--d-1);
+}
+
+.il-seg:hover,
+.il-seg[aria-current='true'] {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.il-seg + .il-seg::before {
+  content: '';
+  position: absolute;
+  top: 9px;
+  bottom: 9px;
+  left: -1px;
+  width: 1px;
+  background: var(--line-strong);
+}
+
+.il-seg b {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.island .dim {
+  color: var(--ink-3);
+}
+
+.il-agent {
+  padding-left: 4px;
+}
+
+.il-now {
+  max-width: 190px;
+  overflow: hidden;
+  color: var(--ink);
+  text-overflow: ellipsis;
+}
+
+.il-time {
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+}
+
+.il-delta .add,
+.hud-panel .add {
+  color: var(--ok);
+}
+
+.il-delta .del,
+.hud-panel .del {
+  color: var(--danger);
+}
+
+.il-delta {
+  font-size: var(--t-xs);
+}
+
+/* 任务进度：小圆环（--p 0..1）+ 岛底边一条细线（scaleX） */
+.il-ring,
+.hp-ring {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  border-radius: 50%;
+  background: conic-gradient(var(--live) calc(var(--p, 0) * 360deg), var(--line-strong) 0);
+  -webkit-mask: radial-gradient(circle, transparent 4px, #000 4.5px);
+  mask: radial-gradient(circle, transparent 4px, #000 4.5px);
+}
+
+.il-bar {
+  position: absolute;
+  right: 14px;
+  bottom: 0;
+  left: 14px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--live);
+  opacity: 0.85;
+  transform: scaleX(var(--p, 0));
+  transform-origin: left;
+  transition: transform var(--d-3) var(--ease-out);
+}
+
+.island.is-done .il-bar {
+  opacity: 0;
+}
+
+/* 协作的 agent 头像叠放 */
+.il-stack {
+  display: inline-flex;
+}
+
+.il-stack .hud-av + .hud-av {
+  margin-left: -5px;
+}
+
+/* agent 头像 + 状态环：运行中转圈、等你琥珀、完成绿勾 */
+.hud-av {
+  position: relative;
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--bg-sunk);
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.hud-av .agent-mark {
+  width: 15px;
+  height: 15px;
+}
+
+.hud-av.is-sm {
+  width: 20px;
+  height: 20px;
+  box-shadow: 0 0 0 2px var(--surface);
+}
+
+.hud-av.is-sm .agent-mark {
+  width: 12px;
+  height: 12px;
+}
+
+.hud-av::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border: 2px solid transparent;
+  border-radius: 50%;
+}
+
+.hud-av.is-live::after {
+  border-color: var(--live);
+  border-right-color: transparent;
+  animation: hud-spin 1.1s linear infinite;
+}
+
+.hud-av.is-ask::after {
+  border-color: var(--warn);
+}
+
+.hud-av-badge {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  display: grid;
+  place-items: center;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--ok);
+  box-shadow: 0 0 0 2px var(--surface);
+  color: #fff;
+}
+
+.hud-av-text {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* 等你：岛变审批条 */
+.island.is-ask {
+  border-color: color-mix(in srgb, var(--warn) 35%, transparent);
+  background: color-mix(in srgb, var(--warn) 9%, var(--surface));
+}
+
+.il-asktext {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--ink);
+}
+
+.il-q {
+  max-width: 220px;
+  overflow: hidden;
+  color: var(--ink-2);
+  text-overflow: ellipsis;
+}
+
+.il-acts {
+  display: inline-flex;
+  gap: 4px;
+  padding-left: 4px;
+}
+
+.il-mini {
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--r-pill);
+  background: var(--hover);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--t-xs);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.il-mini:hover {
+  background: var(--press);
+}
+
+.il-mini.is-primary {
+  background: var(--ink);
+  color: var(--bg);
+}
+
+.il-mini:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.il-mini kbd {
+  margin-left: 2px;
+  font: inherit;
+  opacity: 0.6;
+}
+
+/* ---------- 停靠在回复抬头的岛 ---------- */
+
+.island.is-docked {
+  height: 24px;
+  padding: 1px;
+  border: 0;
+  background: var(--hover);
+  box-shadow: none;
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+  animation: none;
+}
+
+.island.is-docked .il-seg {
+  gap: 4px;
+  padding: 0 8px;
+}
+
+.island.is-docked .il-seg + .il-seg::before {
+  top: 6px;
+  bottom: 6px;
+}
+
+.island.is-docked .il-seg:hover {
+  background: var(--press);
+}
+
+.island.is-docked.is-static .il-seg {
+  cursor: default;
+}
+
+.island.is-docked.is-static .il-seg:hover {
+  background: none;
+}
+
+.il-ok {
+  display: inline-grid;
+  place-items: center;
+  color: var(--ok);
+}
+
+.il-ok.is-cancelled {
+  color: var(--ink-3);
+}
+
+.il-ok.is-error,
+.il-ok.is-broken {
+  color: var(--danger);
+}
+
+/* 飞行中的幽灵（island-flight.ts） */
+.island-ghost {
+  animation: none;
+}
+
+/* ---------- 面板 ---------- */
+
+.hud-panel {
+  display: flex;
+  flex-direction: column;
+  width: 420px;
+  max-height: calc(100dvh - 120px);
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
+  color: var(--ink);
+  animation: hud-in var(--d-3) var(--ease-out) both;
+  transform-origin: top right;
+}
+
+/* 项目面板「本轮」分页里：铺满，不浮 */
+.hud-panel.is-embedded {
+  width: auto;
+  max-height: none;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  animation: none;
+}
+
+.hp-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 10px 10px 14px;
+}
+
+.hp-title {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.35;
+}
+
+.hp-title b {
+  font-size: var(--t-md);
+}
+
+.hp-sub {
+  overflow: hidden;
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hp-sub.is-live {
+  color: var(--live);
+}
+
+.hp-mini {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--r-pill);
+  background: var(--hover);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--t-xs);
+  cursor: pointer;
+}
+
+.hp-mini.is-danger {
+  background: var(--danger-tint);
+  color: var(--danger);
+}
+
+.hp-icon {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+
+.hp-icon:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+/* 审批区：运行条那张卡（ask-card.ts），在面板里铺满、不另加投影 */
+.hp-askbox {
+  padding: 0 10px 10px;
+}
+
+.hp-askbox .ask {
+  width: 100%;
+  border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent);
+  background: color-mix(in srgb, var(--warn) 7%, var(--surface));
+  box-shadow: none;
+}
+
+/* 分页：五段，滑块平移（transform） */
+.hp-tabs {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  margin: 0 10px;
+  padding: 2px;
+  border-radius: var(--r-md);
+  background: var(--hover);
+}
+
+.hp-tabs::before {
+  content: '';
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: 2px;
+  width: calc((100% - 4px) / 5);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+  transform: translateX(calc(var(--i, 0) * 100%));
+  transition: transform var(--d-2) var(--ease-out);
+}
+
+.hp-tab {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 30px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--ink-2);
+  font: inherit;
+  font-size: var(--t-sm);
+  cursor: pointer;
+  transition: color var(--d-2);
+}
+
+.hp-tab[aria-selected='true'] {
+  color: var(--ink);
+}
+
+.hp-tab .n {
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: var(--r-pill);
+  background: var(--press);
+  color: var(--ink-2);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+}
+
+.hp-body {
+  flex: 1;
+  min-height: 120px;
+  padding: 12px 10px 10px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.hud-panel.is-embedded .hp-body {
+  overflow: visible;
+}
+
+.hp-empty {
+  margin: 0;
+  padding: 22px 8px;
+  color: var(--ink-3);
+  font-size: var(--t-sm);
+  text-align: center;
+}
+
+.hp-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px 10px;
+  border-top: 1px solid var(--line);
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+}
+
+.hp-ctx {
+  display: inline-flex;
+  flex: 1;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.hp-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--ink-3);
+  font: inherit;
+  cursor: pointer;
+}
+
+.hp-link:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+/* 步骤：运行条的托盘，在面板里不封顶高度 */
+.hud-panel .tray {
+  max-height: none;
+}
+
+/* ---------- 总览 ---------- */
+
+.ov-tiles {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+}
+
+.ov-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--d-1);
+}
+
+.ov-tile:hover {
+  background: var(--hover);
+}
+
+.ov-k {
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+}
+
+.ov-v {
+  font-size: 20px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+
+.ov-v small {
+  color: var(--ink-3);
+  font-size: var(--t-sm);
+  font-weight: 400;
+}
+
+.ov-s {
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ov-sec {
+  margin: 14px 2px 6px;
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+}
+
+/* 时间花在哪：分段条，颜色跟类别走、顺序固定（shared/run-tally.ts 的 SPEND_KEYS） */
+.ov-bar {
+  display: flex;
+  gap: 2px;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 4px;
+}
+
+.ov-part {
+  min-width: 2px;
+}
+
+
+.ov-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: 8px 0 0;
+  padding: 0;
+  color: var(--ink-2);
+  font-size: var(--t-xs);
+  list-style: none;
+}
+
+.ov-legend li::before {
+  content: '';
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 5px;
+  border-radius: 2px;
+  background: var(--c);
+  vertical-align: 0;
+}
+
+.ov-part.is-edit,
+.ov-legend .is-edit {
+  --c: var(--accent);
+}
+
+.ov-part.is-term,
+.ov-legend .is-term {
+  --c: var(--ok);
+}
+
+.ov-part.is-call,
+.ov-legend .is-call {
+  --c: var(--live);
+}
+
+.ov-part.is-read,
+.ov-legend .is-read {
+  --c: var(--warn);
+}
+
+.ov-part.is-think,
+.ov-legend .is-think {
+  --c: var(--line-strong);
+}
+
+.ov-part {
+  background: var(--c);
+}
+
+.ov-notes {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--ink-2);
+  font-size: var(--t-sm);
+  line-height: 1.7;
+}
+
+/* ---------- 改动 ---------- */
+
+.hp-files,
+.hp-agents {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hp-file-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 6px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--t-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.hp-file-row:hover,
+.hp-file.is-open .hp-file-row {
+  background: var(--hover);
+}
+
+.hp-file-name {
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.hp-file-dir {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+
+.hp-file-row .add,
+.hp-file-row .del {
+  font-size: var(--t-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.hp-file-diff {
+  padding: 6px 0 10px;
+}
+
+.hp-file-n {
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+}
+
+/* ---------- 协作 ---------- */
+
+.hp-agent {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  column-gap: 8px;
+  padding: 8px 6px;
+  border-radius: var(--r-sm);
+  font-size: var(--t-sm);
+}
+
+.hp-agent-kind {
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+}
+
+.hp-agent-who {
+  font-weight: 500;
+}
+
+.hp-agent-st {
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+}
+
+.hp-agent.is-running .hp-agent-st {
+  color: var(--live);
+}
+
+.hp-agent.is-done .hp-agent-st {
+  color: var(--ok);
+}
+
+.hp-agent.is-failed .hp-agent-st {
+  color: var(--danger);
+}
+
+.hp-agent-task {
+  grid-column: 2 / 4;
+  overflow: hidden;
+  color: var(--ink-2);
+  font-size: var(--t-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@keyframes hud-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.96);
+  }
+}
+
+@keyframes hud-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hud-av.is-live::after {
+    animation: none;
+  }
+}
+
+/* ---------- 手机：岛精简，面板变底部抽屉 ---------- */
+
+@media (max-width: 760px) {
+  .hud {
+    top: calc(56px + env(safe-area-inset-top));
+    left: 8px;
+    right: 8px !important;
+  }
+
+  .island:not(.is-docked) {
+    height: 34px;
+  }
+
+  .il-now {
+    max-width: 110px;
+  }
+
+  .il-time,
+  .il-agents,
+  .il-files .il-delta,
+  .il-q {
+    display: none;
+  }
+
+  .hud-panel:not(.is-embedded) {
+    position: fixed;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 50;
+    width: auto;
+    max-height: 82dvh;
+    padding-bottom: env(safe-area-inset-bottom);
+    border-radius: var(--r-lg) var(--r-lg) 0 0;
+    animation-name: hud-sheet-in;
+  }
+
+  .hud[data-open='true']::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: 45;
+    background: var(--scrim);
+    pointer-events: auto;
+  }
+}
+
+@keyframes hud-sheet-in {
+  from {
+    transform: translateY(100%);
+  }
+}

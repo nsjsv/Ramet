@@ -1,0 +1,267 @@
+/* ---------- 表格（gfm table；编辑器 nodeView 在 editor/table-view.ts，公开页用 schema toDOM，两边共用这里的格线 / 内边距） ---------- */
+
+/* gfm 表格：milkdown 不附样式，裸 <table> 浏览器默认无边框 → 看不见格线。补边框/内边距/表头底色。
+ * 单元格内容是块级 <p>，清掉其 margin（行高由 td padding 给，0.35em 会让行距虚胖）。
+ * .ProseMirror-selectedCell 是 prosemirror-tables 打的选中格类，不画出来选中就像没反应。 */
+/* 默认拉满编辑区宽度（列宽 auto，多余空间按内容比例分给各列） */
+/* 满格线不用 collapse：合并边框的外框有一半画在 table 盒外，会被 .table-wrap 的横向滚动裁掉右框 /
+   撑出 1px 滚动条。改成 separate + 零间距，每格只画右、下两条，首列补左、首行补上，线全在格内 */
+.ProseMirror table {
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100%;
+  margin: 0.6em 0;
+  font-size: var(--t-md);
+}
+
+/* 表头靠字重 + 次要色区分。两个宿主（table-view.ts / 公开页 toDOM）都只有一个 tbody，tr:first-child 就是表头行 */
+.ProseMirror th,
+.ProseMirror td {
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  padding: 7px 10px;
+  min-width: 3em;
+  vertical-align: top;
+  text-align: left;
+}
+
+.ProseMirror tr > :first-child {
+  border-left: 1px solid var(--line);
+}
+
+.ProseMirror tr:first-child > * {
+  border-top: 1px solid var(--line);
+}
+
+.ProseMirror th {
+  color: var(--ink-2);
+  font-size: var(--t-sm);
+  font-weight: 600;
+}
+
+.ProseMirror th p,
+.ProseMirror td p {
+  margin: 0;
+}
+
+/* 表格 nodeView（editor/table-view.ts）：外层定位块（宽 = 正文列）> 横向滚动层 > table；
+ * 调过列宽（has-colwidths）按 colgroup 定宽 */
+.ProseMirror .table-block {
+  position: relative;
+  margin: 0.6em 0;
+}
+
+/* 滚动层伸出正文列（editor/bleed.ts 量出 --bleed-l / --bleed-r）：负外边距伸出去、同量内边距把表格推回正文列，
+ * 宽表格滚动时格子滑进两侧留白；右侧「+」条落在右边伸出的那段里。横向滑到头不触发浏览器的左右滑动翻页 */
+.ProseMirror .table-scroll {
+  position: relative;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  margin-left: calc(-1 * var(--bleed-l, 0px));
+  margin-right: calc(-1 * var(--bleed-r, 0px));
+  padding-left: var(--bleed-l, 0px);
+  padding-right: var(--bleed-r, 0px);
+}
+
+.ProseMirror .table-scroll > table {
+  margin: 0;
+}
+
+.ProseMirror table.has-colwidths {
+  table-layout: fixed;
+  max-width: none;
+}
+
+.ProseMirror .table-block.is-col-resize,
+.ProseMirror .table-block.is-col-resize td,
+.ProseMirror .table-block.is-col-resize th {
+  cursor: col-resize;
+}
+
+/* 列分隔线高亮（table-view.ts 的 showLine 按列右框定位、拉满表高）。不设 display，靠 hidden 属性收起 */
+.ProseMirror .table-col-line {
+  position: absolute;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+  pointer-events: none; /* 指针要落到下面的格子上，edgeAt 才认得出是哪根线 */
+}
+
+/* 「⋯」表格操作：光标在表格里（is-active）时出现在表格看得见那段的右上角（--table-r，editor/table-scroll.ts 跟着横向滚动写） */
+.ProseMirror .table-menu-btn {
+  position: absolute;
+  top: 4px;
+  right: calc(var(--table-r, 0px) + 4px);
+  z-index: 1;
+  display: none;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+  color: var(--ink-2);
+}
+
+.ProseMirror .table-block.is-active > .table-menu-btn:not([hidden]) {
+  display: grid;
+}
+
+.ProseMirror .table-menu-btn:hover {
+  color: var(--ink);
+}
+
+/* 底部 / 右侧「+」条（editor/table-grow.ts 按表格尺寸摆在滚动层里，跟着表格滚）：平时透明但能命中，指针落在条上才显示。
+ * 底部条落在滚动层底 padding 留出的位里（只读 / 触屏不留），右侧条落在滚动层右边伸出的那段里 */
+@media (hover: hover) {
+  .ProseMirror[contenteditable='true'] .table-block {
+    margin-bottom: 0;
+  }
+
+  .ProseMirror[contenteditable='true'] .table-scroll {
+    padding-bottom: 18px;
+  }
+}
+
+/* 块选中高亮（editor-widgets.css 的 selected-block ::before，左右各外扩 6px）只盖表格看得见的那段：宽表格伸出正文列、横向滚动时跟着表格，
+ * 底下不盖「+」条留位和横向滚动条（--table-l / -r / -b，editor/table-scroll.ts）。多一个类型选择器，压过后加载的通用规则 */
+.editor-root .ProseMirror div.table-block.selected-block::before {
+  left: calc(var(--table-l, 0px) - 6px);
+  right: calc(var(--table-r, 0px) - 6px);
+  bottom: var(--table-b, 0px);
+}
+
+.ProseMirror .table-add {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  color: var(--ink-3);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--d-1);
+}
+
+.ProseMirror .table-add.is-row {
+  height: 18px;
+}
+
+.ProseMirror .table-add.is-col {
+  width: 18px;
+}
+
+/* 看得见的条比命中区窄一圈，和表格之间留缝；命中区贴着表格边，指针从表格移过去不会中途掉出表格块 */
+.ProseMirror .table-add::before {
+  content: '';
+  position: absolute;
+  inset: 4px 0 0;
+  border-radius: var(--r-sm);
+  background: var(--hover);
+}
+
+.ProseMirror .table-add.is-col::before {
+  inset: 0 0 0 4px;
+}
+
+.ProseMirror .table-add > svg {
+  position: relative; /* 压在 ::before 的底色上面 */
+}
+
+.ProseMirror .table-add:hover,
+.ProseMirror .table-add.is-dragging {
+  opacity: 1;
+  color: var(--ink-2);
+}
+
+/* 拖起来以后原位的条让给跟手的 .table-grow-handle */
+.ProseMirror .table-block.is-growing .table-add {
+  opacity: 0;
+}
+
+.ProseMirror .table-add:hover::before,
+.ProseMirror .table-add.is-dragging::before {
+  background: var(--press);
+}
+
+/* 只读 / 触屏没有这两条（触屏没有悬停，加行加列走「⋯」菜单），块底也不留位 */
+.ProseMirror[contenteditable='false'] .table-add {
+  display: none;
+}
+
+@media (hover: none) {
+  .ProseMirror .table-add {
+    display: none;
+  }
+}
+
+/* 拖「+」条的预览（挂 body，fixed）：往外拉是虚线框 + 按预估行高 / 列宽（--step）画的格线，往回收是把要删的末尾行列标红；
+ * 条跟着吸附后的新边走；标签跟着指针写「几行 × 几列」 */
+.table-grow-ghost {
+  position: fixed;
+  z-index: 59;
+  box-sizing: border-box;
+  border: 1px dashed var(--accent);
+  border-radius: 2px;
+  background-color: var(--accent-tint);
+  pointer-events: none;
+}
+
+.table-grow-ghost.is-row {
+  background-image: repeating-linear-gradient(to bottom, transparent 0 calc(var(--step) - 1px), var(--line) calc(var(--step) - 1px) var(--step));
+}
+
+.table-grow-ghost.is-col {
+  background-image: repeating-linear-gradient(to right, transparent 0 calc(var(--step) - 1px), var(--line) calc(var(--step) - 1px) var(--step));
+}
+
+.table-grow-ghost.is-remove {
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
+  background: var(--danger-tint);
+}
+
+.table-grow-handle {
+  position: fixed;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-sm);
+  background: var(--press);
+  color: var(--ink-2);
+  pointer-events: none;
+}
+
+.table-grow-handle.is-row {
+  height: 14px;
+  margin-top: 4px; /* 与原位的条同一道缝 */
+}
+
+.table-grow-handle.is-col {
+  width: 14px;
+  margin-left: 4px;
+}
+
+.table-grow-label {
+  position: fixed;
+  z-index: 61;
+  padding: 2px 8px;
+  border-radius: var(--r-sm);
+  background: var(--ink);
+  color: var(--bg);
+  box-shadow: var(--shadow-1);
+  font-size: var(--t-sm);
+  line-height: 20px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.table-menu {
+  position: fixed;
+  z-index: 60;
+  min-width: 180px;
+  max-height: min(70vh, 520px);
+  overflow-y: auto;
+}
+
+.ProseMirror .selectedCell {
+  background: var(--accent-tint); /* 与全站 accent 淡底一致（admin-role 用同色） */
+}

@@ -1,0 +1,184 @@
+/* ---------- 端口预览（project/PreviewTab.tsx · PreviewRow.tsx · PreviewToggle.tsx）----------
+ * 项目面板的「预览」分页：共享表单 + 共享中的预览列表 + 面板内 iframe；顶栏「预览」弹层与列表同一套行。
+ * 颜色全走令牌，深色自动跟随；不对布局属性做过渡。 */
+
+.project-body[data-tab='preview'] {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.project-body[data-tab='preview'][hidden] {
+  display: none;
+}
+
+.preview-tab {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+.preview-form {
+  flex: none;
+  padding: 0 12px;
+}
+
+.preview-form .project-round-title {
+  margin-left: 0;
+}
+
+.preview-fields {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.preview-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+}
+
+.preview-fields input {
+  width: 110px;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: var(--t-sm);
+  outline: none;
+}
+
+.preview-fields label:nth-child(2) input {
+  width: 150px;
+}
+
+.preview-fields input:focus-visible {
+  border-color: var(--accent);
+}
+
+.preview-fields .project-chip-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.preview-list-wrap {
+  flex: none;
+}
+
+.preview-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.preview-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border-top: 1px solid var(--line);
+  transition: background var(--d-1);
+}
+
+.preview-row.is-on {
+  background: var(--hover);
+}
+
+.preview-row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.preview-target {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: var(--t-sm);
+}
+
+.preview-meta {
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+}
+
+.preview-row-actions {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* 面板内的预览窗：头 + iframe。iframe 撑满剩余高度，最少留出一屏能看的高度 */
+.preview-view {
+  flex: 1;
+  min-height: 280px;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--line);
+}
+
+.preview-view header {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px 4px 12px;
+}
+
+.preview-view-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-2);
+  font-size: var(--t-xs);
+}
+
+.preview-view iframe {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  border: 0;
+  background: #fff;
+}
+
+/* 顶栏「预览」弹层：和 ⋮ 菜单同一张浮层卡片 */
+.preview-toggle {
+  position: relative;
+}
+
+.preview-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 7;
+  width: 320px;
+  max-width: calc(100vw - 24px);
+  padding: 4px 0 0;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-2);
+  animation: block-menu-in var(--d-1) var(--ease-out);
+}
+
+.preview-pop .project-round-title {
+  margin: 8px 12px 4px;
+}
+
+.preview-pop .preview-row:first-of-type {
+  border-top: 0;
+}

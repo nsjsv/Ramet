@@ -1,0 +1,251 @@
+/* ---------- 空间公共记忆（memory/MemoryPanel.tsx）与输入卡里 /记住 的轻提示 ---------- */
+
+.memory-page {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 48px 32px 96px;
+}
+
+.memory-title {
+  font-size: 24px;
+  font-weight: 700;
+  margin: 0 0 4px;
+}
+
+.memory-sub {
+  color: var(--ink-3);
+  font-size: var(--t-sm);
+  margin: 0 0 8px;
+}
+
+.memory-stats {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 12px 0 16px;
+  font-size: var(--t-sm);
+  color: var(--ink-2);
+}
+
+.memory-bar {
+  flex: none;
+  width: 120px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.memory-bar i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width var(--d-2);
+}
+
+.memory-bar.is-near i {
+  background: var(--warn, #d9a441);
+}
+
+.memory-bar.is-full i {
+  background: var(--danger);
+}
+
+.memory-slim {
+  flex: 1 1 220px;
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+}
+
+.memory-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
+  border-radius: var(--r-sm);
+  background: var(--danger-tint);
+  color: var(--danger);
+  font-size: var(--t-sm);
+}
+
+.memory-error-close {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.memory-add {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--bg-sunk);
+}
+
+.memory-add textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--t-sm);
+  resize: vertical;
+}
+
+.memory-add textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.memory-add-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.memory-counter {
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+}
+
+.memory-counter.is-over {
+  color: var(--danger);
+}
+
+.memory-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--t-sm);
+  cursor: pointer;
+  transition: background var(--d-1), filter var(--d-1);
+}
+
+.memory-btn.is-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+
+.memory-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.memory-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 32px 0;
+  color: var(--ink-3);
+  font-size: var(--t-sm);
+  text-align: center;
+}
+
+.memory-empty b {
+  color: var(--ink-2);
+  font-size: var(--t-md);
+}
+
+.memory-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.memory-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  border-bottom: 1px solid var(--line);
+}
+
+.memory-row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 8px;
+}
+
+.memory-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: var(--t-md);
+}
+
+.memory-meta {
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+}
+
+.memory-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+}
+
+.memory-link:hover {
+  text-decoration: underline;
+}
+
+.memory-row-del {
+  flex: none;
+  align-self: center;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+
+.memory-row-del:hover {
+  background: var(--hover);
+  color: var(--danger);
+}
+
+/* 输入卡里 /记住 的轻提示：几秒后自己消失 */
+.chat-hint {
+  padding: 4px 12px 0;
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+}
+
+.chat-hint.is-error {
+  color: var(--danger);
+}

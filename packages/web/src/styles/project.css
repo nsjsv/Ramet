@@ -1,0 +1,746 @@
+/* ---------- 项目面板（project/ProjectDock.tsx）：App 外壳右侧的可开合面板 ----------
+ * 面板是 .app（flex 行）里 .main 右边的兄弟：开着时 .main 变窄，正文列自己重新居中。宽度走 --project-w（拖动期间直接写
+ * :root，松手才提交 state，同侧栏手柄）。不对 width 做过渡（会触发整页布局）：入场只动 opacity / transform，
+ * 时长用 --d-* 令牌，「减弱动效」下自动归零。颜色全走令牌，深色自动跟随。 */
+
+.project-panel {
+  position: relative;
+  flex: none;
+  width: var(--project-w, 440px);
+  height: 100vh;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--line);
+  background: var(--bg);
+  animation: project-in var(--d-2) var(--ease-out);
+}
+
+@keyframes project-in {
+  from {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+}
+
+/* 左缘宽度手柄：4px 宽，跨出面板左边框一点 */
+.project-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -3px;
+  width: 6px;
+  z-index: 3;
+  cursor: col-resize;
+}
+
+.project-resizer:hover {
+  background: var(--accent-tint);
+}
+
+.project-head {
+  flex: none;
+  padding: 10px 12px 6px;
+}
+
+.project-head-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.project-head-gap {
+  flex: 1;
+}
+
+.project-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ink-3);
+}
+
+.project-dot.is-on {
+  background: var(--ok);
+}
+
+.project-machine {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--t-sm);
+  font-weight: 600;
+}
+
+.project-branch {
+  flex: none;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 1px 8px;
+  border-radius: var(--r-pill);
+  background: var(--bg-sunk);
+  color: var(--ink-2);
+  font-family: var(--mono);
+  font-size: var(--t-xs);
+}
+
+/* 目录太长时保留末尾（direction: rtl 让省略号落在左边；bdi 把路径本身还原成从左往右读） */
+.project-root {
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+  color: var(--ink-3);
+  font-family: var(--mono);
+  font-size: var(--t-xs);
+}
+
+.project-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--r-sm);
+  color: var(--ink-2);
+  transition: background var(--d-1), color var(--d-1);
+}
+
+.project-icon-btn:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.project-icon-btn:focus-visible,
+.project-chip-btn:focus-visible,
+.project-tabs button:focus-visible,
+.project-tree-row:focus-visible,
+.project-change-row:focus-visible,
+.project-quick-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.project-banner {
+  flex: none;
+  margin: 0;
+  padding: 7px 12px;
+  background: var(--bg-sunk);
+  color: var(--ink-2);
+  font-size: var(--t-xs);
+  line-height: 1.5;
+}
+
+.project-banner.is-warn {
+  background: var(--warn-tint);
+  color: var(--warn);
+}
+
+.project-banner.is-error {
+  background: var(--danger-tint);
+  color: var(--danger);
+}
+
+.project-tabs {
+  flex: none;
+  display: flex;
+  gap: 2px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.project-tabs button {
+  margin-bottom: -1px;
+  padding: 8px 10px;
+  border-bottom: 2px solid transparent;
+  color: var(--ink-2);
+  font-size: var(--t-sm);
+  transition: color var(--d-1);
+}
+
+.project-tabs button:hover {
+  color: var(--ink);
+}
+
+.project-tabs button.is-on {
+  border-bottom-color: var(--accent);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.project-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.project-body[hidden] {
+  display: none;
+}
+
+.project-note {
+  margin: 0;
+  padding: 16px 14px;
+  color: var(--ink-2);
+  font-size: var(--t-sm);
+  line-height: 1.6;
+}
+
+.project-note.is-error {
+  color: var(--danger);
+}
+
+.project-note.is-warn {
+  padding: 6px 12px;
+  background: var(--warn-tint);
+  color: var(--warn);
+  font-size: var(--t-xs);
+}
+
+.project-fineprint {
+  margin: 0;
+  padding: 8px 12px 14px;
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+  line-height: 1.5;
+}
+
+.project-chip-btn {
+  flex: none;
+  padding: 2px 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-pill);
+  color: var(--ink-2);
+  font-size: var(--t-xs);
+  transition: background var(--d-1), color var(--d-1);
+}
+
+.project-chip-btn:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.project-hint {
+  flex: none;
+  color: var(--ok);
+  font-size: var(--t-xs);
+}
+
+/* ---------- 文件树 ---------- */
+
+.project-tree {
+  padding: 4px 0 24px;
+}
+
+.project-tree-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  height: 26px;
+  padding-right: 12px;
+  text-align: left;
+  font-size: var(--t-sm);
+  color: var(--ink);
+  transition: background var(--d-1);
+}
+
+.project-tree-row:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.project-tree-row:disabled {
+  color: var(--ink-3);
+  cursor: default;
+}
+
+.project-tree-chev {
+  flex: none;
+  display: inline-flex;
+  justify-content: center;
+  width: 14px;
+  color: var(--ink-3);
+}
+
+.project-chev {
+  transition: transform var(--d-1);
+}
+
+.project-chev.is-open {
+  transform: rotate(90deg);
+}
+
+.project-tree-ico {
+  flex: none;
+  color: var(--ink-3);
+}
+
+.project-tree-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-tree-note {
+  margin: 0;
+  height: 24px;
+  line-height: 24px;
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+}
+
+.project-tree-note.is-error {
+  color: var(--danger);
+}
+
+/* 改动标记：字母 + 颜色（颜色不是唯一信息）。文件树的行和改动列表共用 */
+.project-mark {
+  flex: none;
+  width: 16px;
+  text-align: center;
+  font-family: var(--mono);
+  font-size: var(--t-xs);
+  font-weight: 700;
+  color: var(--warn);
+}
+
+.project-mark.is-add,
+.project-tree-row.is-add .project-mark {
+  color: var(--ok);
+}
+
+.project-mark.is-del,
+.project-mark.is-conflict,
+.project-tree-row.is-del .project-mark,
+.project-tree-row.is-conflict .project-mark {
+  color: var(--danger);
+}
+
+.project-tree-row.is-mod .project-tree-name {
+  color: var(--warn);
+}
+
+.project-tree-row.is-add .project-tree-name {
+  color: var(--ok);
+}
+
+.project-tree-row.is-del .project-tree-name,
+.project-tree-row.is-conflict .project-tree-name {
+  color: var(--danger);
+}
+
+/* ---------- 查看器（文件 / diff 共用的外框） ---------- */
+
+.project-viewer {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.project-viewer-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.project-viewer-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: var(--t-xs);
+  color: var(--ink-2);
+}
+
+.project-back-ico {
+  transform: rotate(180deg);
+}
+
+.project-viewer-foot {
+  flex: none;
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 12px;
+  border-top: 1px solid var(--line);
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+}
+
+/* 行号和代码是并排的两个 <pre>（同字体同行高，一起横向滚，行号 sticky 在左） */
+.project-code {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: flex-start;
+  overflow: auto;
+  background: var(--bg-sunk);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.6;
+  outline: none;
+}
+
+.project-gutter,
+.project-source {
+  margin: 0;
+  padding: 8px 0;
+  font: inherit;
+  line-height: inherit;
+  white-space: pre;
+  background: transparent;
+  border: 0;
+}
+
+.project-gutter {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  min-width: 44px;
+  padding: 8px 8px 8px 10px;
+  text-align: right;
+  color: var(--ink-3);
+  background: var(--bg-sunk);
+  user-select: none;
+}
+
+.project-source {
+  flex: 1;
+  min-width: max-content;
+  padding: 8px 14px 8px 8px;
+  tab-size: 2;
+}
+
+.project-source code {
+  font: inherit;
+  padding: 0;
+  background: none;
+  color: var(--ink);
+}
+
+/* ---------- 改动 ---------- */
+
+.project-changes-head {
+  margin: 0;
+  padding: 10px 12px 4px;
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+}
+
+.project-change-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.project-change-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 12px;
+  text-align: left;
+  font-size: var(--t-sm);
+  transition: background var(--d-1);
+}
+
+.project-change-row:hover {
+  background: var(--hover);
+}
+
+.project-change-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-change-dir {
+  color: var(--ink-3);
+}
+
+.project-staged {
+  flex: none;
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+}
+
+.project-by {
+  flex: none;
+  padding: 0 7px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  color: var(--ink-2);
+  font-size: var(--t-xs);
+  line-height: 18px;
+}
+
+.project-by.is-agent {
+  border-color: transparent;
+  background: var(--live-tint);
+  color: var(--live);
+}
+
+.project-diff-stat {
+  flex: none;
+  margin: 0;
+  padding: 6px 12px;
+  font-family: var(--mono);
+  font-size: var(--t-xs);
+  color: var(--ink-3);
+}
+
+.project-diff-stat .is-add {
+  color: var(--ok);
+}
+
+.project-diff-stat .is-del {
+  color: var(--danger);
+}
+
+.project-diff {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding-bottom: 12px;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.55;
+  outline: none;
+}
+
+.project-diff-line,
+.project-diff-hunk {
+  display: grid;
+  grid-template-columns: 40px 40px max-content;
+  min-width: 100%;
+  width: max-content;
+}
+
+.project-diff-no {
+  padding-right: 8px;
+  text-align: right;
+  color: var(--ink-3);
+  user-select: none;
+}
+
+.project-diff-text {
+  padding: 0 14px 0 6px;
+  white-space: pre;
+}
+
+.project-diff-line.is-add {
+  background: var(--hl-add-bg);
+}
+
+.project-diff-line.is-add .project-diff-no {
+  color: var(--hl-add-fg);
+}
+
+.project-diff-line.is-del {
+  background: var(--hl-del-bg);
+}
+
+.project-diff-line.is-del .project-diff-no {
+  color: var(--hl-del-fg);
+}
+
+.project-diff-hunk {
+  margin: 6px 0 2px;
+  background: var(--accent-tint);
+  color: var(--ink-2);
+}
+
+.project-diff-note {
+  padding: 4px 12px;
+  color: var(--ink-3);
+  font-family: var(--font);
+  font-size: var(--t-xs);
+}
+
+.project-raw {
+  margin: 0;
+  padding: 10px 12px;
+  overflow: auto;
+  font-family: var(--mono);
+  font-size: 12px;
+  white-space: pre;
+}
+
+/* 分页里的小节标题（预览分页在用；「本轮」是右上角工作台的嵌入面板，见 hud.css） */
+.project-round-title {
+  margin: 12px 0 6px;
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+  font-weight: 600;
+}
+
+.project-round-title span {
+  font-weight: 400;
+}
+
+/* ---------- ⌘P 找文件 ---------- */
+
+.project-quick {
+  position: absolute;
+  top: 70px;
+  left: 12px;
+  right: 12px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  max-height: 60%;
+  padding: 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
+}
+
+.project-quick-input {
+  flex: none;
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--t-sm);
+}
+
+.project-quick-input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.project-quick-list {
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  overflow: auto;
+}
+
+.project-quick-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 8px;
+  border-radius: var(--r-sm);
+  text-align: left;
+  font-size: var(--t-sm);
+}
+
+.project-quick-row.is-on {
+  background: var(--accent-tint);
+}
+
+.project-quick-name {
+  flex: none;
+  color: var(--ink);
+}
+
+.project-quick-dir {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+}
+
+/* 手机：面板盖住整屏（没有并排的位置） */
+@media (max-width: 768px) {
+  .project-panel {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    width: auto;
+    border-left: 0;
+  }
+
+  .project-resizer {
+    display: none;
+  }
+}
+
+.project-by.is-quick {
+  border-color: transparent;
+  background: var(--accent-tint);
+  color: var(--accent);
+}
+
+/* ---------- 代码查看器里的 ⌘J（随手 AI）：选区旁的小提示 + 就地 diff 预览 ---------- */
+.project-quick-hint {
+  position: fixed;
+  z-index: 40;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-pill);
+  background: var(--bg);
+  color: var(--live);
+  font-size: var(--t-xs);
+  box-shadow: var(--shadow-2);
+  cursor: pointer;
+  animation: block-menu-in var(--d-1) var(--ease-out);
+}
+
+.project-quick-hint span {
+  color: var(--ink-3);
+}
+
+.project-quick-hint:hover {
+  background: var(--hover);
+}
+
+.project-quick-diff {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  max-height: 46%;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-sunk);
+  outline: none;
+}
+
+.project-quick-title {
+  flex: none;
+  margin: 0;
+  padding: 5px 12px 2px;
+  color: var(--live);
+  font-size: var(--t-xs);
+}
+
+.project-quick-diff .project-diff {
+  padding-bottom: 6px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .project-quick-hint {
+    animation: none;
+  }
+}
+
+.project-quick-diff .project-diff-line.is-picked {
+  background: var(--accent-tint);
+}

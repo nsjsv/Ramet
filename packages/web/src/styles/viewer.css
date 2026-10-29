@@ -1,0 +1,14 @@
+/* ---------- viewer 只读 ---------- */
+
+/* 禁用的标题输入保持正文观感（UA 默认会把 disabled 输入置灰） */
+.page-title:disabled {
+  color: var(--ink);
+  opacity: 1;
+  -webkit-text-fill-color: var(--ink);
+  cursor: default;
+}
+
+.ProseMirror[contenteditable='false'] {
+  cursor: default;
+}
+

@@ -1,0 +1,185 @@
+/* ---------- 手机端 / 触屏补充（排在最后，覆盖前面各块的桌面默认） ----------
+ * 桌面外观不变；触屏下触控目标 ≥ 36-40px、输入框字号 ≥ 16px（iOS 聚焦时低于 16px 会放大页面）、弹窗改底部抽屉、软键盘不遮输入卡。
+ * 视觉尺寸尽量不变，放大的是命中区。 */
+
+/* 软键盘：--kb 由 viewport.ts 写（iOS Safari 键盘不改布局视口）；没有键盘 / Chrome 安卓时恒 0，等于 100dvh */
+.app {
+  height: calc(100vh - var(--kb, 0px));
+  height: calc(100dvh - var(--kb, 0px));
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+@media (pointer: coarse) {
+  /* 小图标按钮：命中区放大到 36-40px（图标本身不变） */
+  .chat-act {
+    width: 40px;
+    height: 40px;
+  }
+
+  /* 文档模式抬头行：和名字、用量标签挤在一行，命中区收一点（doc-acts.ts） */
+  .chat-acts.is-head .chat-act {
+    width: 30px;
+    height: 30px;
+  }
+
+  .run-step-act,
+  .fav-board .tree-actions .icon-btn,
+  .skill-row-del {
+    width: 36px;
+    height: 36px;
+  }
+
+  .modal-close,
+  .vh-close,
+  .topbar-btn,
+  .btn-collapse {
+    min-width: 40px;
+    min-height: 40px;
+  }
+
+  /* 菜单项 / 列表行：一行至少 40px 高，手指点得准 */
+  .block-menu button,
+  .block-menu-sub button,
+  .page-menu button,
+  .pop-row,
+  .space-item,
+  .set-nav-item,
+  .set-pick,
+  .vh-item,
+  .side-nav-item,
+  .bl-title,
+  .bl-block {
+    min-height: 40px;
+  }
+
+  .tree-item {
+    min-height: 38px;
+  }
+
+  /* 输入框字号：iOS 聚焦时低于 16px 会把整页放大 */
+  input:not([type='checkbox']):not([type='radio']):not([type='file']):not([type='range']),
+  select,
+  textarea {
+    font-size: 16px;
+  }
+
+  /* 悬停才出现的行内操作，触屏常显（没有悬停；收藏的 ✕ 在 notes.css 里单独处理） */
+  .skill-row-del {
+    opacity: 1;
+  }
+}
+
+@media (max-width: 640px) {
+  /* 弹窗（设置 / 回收站）：改成贴底的抽屉，宽度撑满，留出底部安全区 */
+  .modal-overlay {
+    padding: 0;
+    align-items: flex-end;
+  }
+
+  .modal,
+  .modal.settings-modal,
+  .modal.trash-modal {
+    width: 100%;
+    max-width: 100%;
+    max-height: 92vh;
+    max-height: 92dvh;
+    border-radius: 14px 14px 0 0;
+  }
+
+  .modal {
+    padding-bottom: max(14px, env(safe-area-inset-bottom));
+  }
+
+  /* 设置：左分组导航改成顶部横滑的一排标签（分组标题 / 「设置」字样收起），正文在下面滚 */
+  .modal.settings-modal {
+    flex-direction: column;
+    height: 92dvh;
+  }
+
+  .set-nav {
+    flex: none;
+    flex-direction: row;
+    gap: 4px;
+    padding: 10px 12px;
+    overflow-x: auto;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .set-nav-title,
+  .set-nav-group {
+    display: none;
+  }
+
+  .set-nav-item {
+    flex: none;
+  }
+
+  .set-main-head {
+    padding: 14px 16px 10px;
+  }
+
+  .set-main-body {
+    padding: 2px 16px max(16px, env(safe-area-inset-bottom));
+  }
+
+  /* 设置行放不下：控件换到说明下面 */
+  .set-row,
+  .set-profile {
+    flex-wrap: wrap;
+  }
+
+  /* 回收站：底部说明与清空按钮贴安全区；删除时间让位给标题 */
+  .trash-foot {
+    padding-bottom: max(12px, env(safe-area-inset-bottom));
+  }
+
+  .trash-when {
+    display: none;
+  }
+
+  .hd-drawer {
+    width: 100vw;
+  }
+
+  /* 管理页 / 表格：窄屏收内边距，宽表格横向滑动而不是把页面撑宽 */
+  .admin-page {
+    padding: 24px 16px 72px;
+  }
+
+  .admin-table {
+    display: block;
+    overflow-x: auto;
+  }
+
+  /* 正文里引用菜单别超出屏宽 */
+  .doc-mention {
+    max-width: calc(100vw - 16px);
+  }
+
+  /* 空间设置里的添加成员一行放不下：换行 */
+  .member-add {
+    flex-wrap: wrap;
+  }
+
+  .member-add input {
+    flex-basis: 100%;
+  }
+}
+
+/* 触屏块手柄：只给正在编辑 / 选中的那一块露手柄（editor/block-touch.ts 给该块打 touch-active），
+   其余块的手柄既不显示也不接事件，先点一下块，手柄再出来。 */
+@media (hover: none) and (pointer: coarse) {
+  .block-handle-touch svg {
+    visibility: hidden;
+    pointer-events: none;
+  }
+
+  .block-handle-touch:has(+ .touch-active) svg {
+    visibility: visible;
+    pointer-events: auto;
+  }
+}

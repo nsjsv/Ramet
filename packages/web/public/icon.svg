@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f7efe4"/><stop offset="1" stop-color="#efe2d1"/></linearGradient>
+    <linearGradient id="front" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#d4613f"/><stop offset="1" stop-color="#b9472f"/></linearGradient>
+    <!-- 投影单独成层：滤镜区域取局部坐标下足够大的固定范围（userSpaceOnUse），旋转元素的包围盒不会把模糊裁出直边 -->
+    <filter id="blur" filterUnits="userSpaceOnUse" x="-1024" y="-1024" width="2048" height="2048" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="12"/></filter>
+    <rect id="card" x="-96" y="-150" width="192" height="244" rx="32"/>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <g transform="translate(256 286)">
+    <g filter="url(#blur)" fill="#5a2a18" fill-opacity=".2">
+      <use href="#card" transform="translate(0 10) rotate(-18) translate(-58 6)"/>
+      <use href="#card" transform="translate(0 10) rotate(16) translate(58 6)"/>
+    </g>
+    <use href="#card" fill="#588b8b" transform="rotate(-18) translate(-58 6)"/>
+    <use href="#card" fill="#f28f3b" transform="rotate(16) translate(58 6)"/>
+    <use href="#card" filter="url(#blur)" fill="#5a2a18" fill-opacity=".24" transform="translate(0 -2)"/>
+    <use href="#card" fill="url(#front)" transform="translate(0 -12)"/>
+    <g fill="#f7efe4" transform="translate(0 -46) scale(.88) translate(0 46)">
+      <path d="M-12 -40 H 12 V 16 A 12 12 0 0 1 -12 16 Z"/>
+      <path d="M12 -36 C 2 -82, -34 -106, -82 -104 C -84 -58, -50 -28, -12 -30 Z"/>
+      <path d="M-12 -34 C -6 -94, 36 -128, 86 -128 C 88 -76, 52 -38, 12 -38 Z"/>
+    </g>
+  </g>
+</svg>

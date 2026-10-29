@@ -1,0 +1,452 @@
+/* ---------- 过程页时间线 · 行 · 详情（editor/run-rows.ts / run-detail.ts） ----------
+   运行中的运行条（胶囊 / 托盘 / 审批）在 run-strip.css。动画只动 transform / opacity。 */
+
+/* ---------- 过程页时间线的行（run-rows.ts / run-board.tsx / history.css 共用；运行条在 run-strip.css） ---------- */
+
+.run-row {
+  display: grid;
+  grid-template-columns: 34px 16px minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 8px;
+  min-height: 26px;
+  padding: 3px 8px;
+  border-radius: 8px;
+  line-height: 1.5;
+}
+
+.run-row.is-enter {
+  animation: run-row-in var(--d-2) var(--ease-out);
+}
+
+.run-row-at,
+.run-row-dur {
+  font-size: 11.5px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.run-row-dur {
+  text-align: right;
+}
+
+.run-row-ic {
+  display: grid;
+  place-items: center;
+  color: var(--ink-3);
+}
+
+.run-row-main {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 6px;
+}
+
+.run-row-verb {
+  flex: 0 0 auto;
+  color: var(--ink-3);
+}
+
+.run-row-obj {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink);
+}
+
+.run-row.k-thought .run-row-obj,
+.run-row.k-say .run-row-obj {
+  color: color-mix(in srgb, var(--ink) 72%, transparent);
+}
+
+.run-row.can-expand {
+  cursor: pointer;
+}
+
+.run-row.can-expand:hover {
+  background: var(--hover);
+}
+
+.run-row.can-expand:hover .run-row-obj {
+  color: var(--ink);
+}
+
+.run-row.is-full {
+  align-items: start;
+}
+
+.run-row.is-full .run-row-obj {
+  flex-basis: 100%;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.run-row.is-child {
+  padding-left: 28px;
+}
+
+.run-row.is-running .run-row-ic {
+  color: var(--accent);
+  animation: run-breathe 1.2s ease-in-out infinite;
+}
+
+.run-row.is-failed .run-row-ic,
+.run-row.is-failed .run-row-verb {
+  color: var(--danger);
+}
+
+.run-row-note {
+  flex-basis: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+  color: var(--danger);
+}
+
+/* ---------- 条目展开详情（工具 rawInput / rawOutput / content / diff / locations、子代理输出、_meta，思考 / 说明全文；
+   实时状态条与过程页共用，见 run-detail.ts）。长内容落在自己的滚动区里，不撑破页面。 ---------- */
+
+.run-detail {
+  flex-basis: 100%;
+  max-width: 100%;
+  max-height: 420px;
+  overflow: auto;
+  margin: 6px 0 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg) 70%, transparent);
+  font-size: 12.5px;
+  user-select: text; /* 状态条整体 user-select:none，详情要能选中复制原始数据 */
+}
+
+.rd-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-bottom: 6px;
+  color: var(--ink-3);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.rd-meta-item {
+  display: inline-flex;
+  gap: 5px;
+}
+
+.rd-meta-k {
+  color: var(--ink-3);
+}
+
+.rd-item {
+  margin-top: 8px;
+}
+
+.rd-label {
+  margin-bottom: 3px;
+  color: var(--ink-3);
+  font-size: 11.5px;
+}
+
+.rd-pre {
+  margin: 0;
+  padding: 6px 8px;
+  max-height: 320px;
+  overflow: auto;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--ink) 4%, transparent);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.rd-del {
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+}
+
+.rd-add {
+  background: color-mix(in srgb, var(--ok) 10%, transparent);
+}
+
+.rd-loc {
+  padding: 2px 0;
+  font-family: var(--mono);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.rd-loc-meta {
+  margin-left: 8px;
+  color: var(--ink-3);
+  font-size: 11px;
+}
+
+.rd-stop {
+  margin-top: 8px;
+  color: var(--ink-3);
+  font-size: 12px;
+}
+
+.rd-trunc {
+  margin-top: 6px;
+  color: var(--danger);
+  font-size: 11.5px;
+}
+
+/* ---------- 步骤的常规展示（editor/run-view.ts）：过程页卡片与运行中托盘共用 ---------- */
+
+/* 托盘里点开的那张卡片（过程页的卡片在 run-step.css 的 .run-step-card） */
+.run-card {
+  flex-basis: 100%;
+  max-width: 100%;
+  max-height: 480px;
+  overflow: auto;
+  margin: 6px 0 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  font-size: 12.5px;
+  color: var(--ink-2);
+  user-select: text; /* 状态条整体 user-select:none，卡片里的命令 / 输出要能选中复制 */
+}
+
+.rv-cmd {
+  margin: 0;
+  padding: 7px 10px;
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--ink) 5%, var(--surface));
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.rv-prompt {
+  color: var(--ink-3);
+  user-select: none;
+}
+
+.rv-note {
+  margin-top: 4px;
+  font-size: var(--t-xs);
+  color: var(--ink-3);
+}
+
+.rv-note.is-bad,
+.rv-fail {
+  color: var(--danger);
+}
+
+.rv-fail {
+  margin-bottom: 6px;
+  font-size: var(--t-sm);
+}
+
+.rv-out {
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  max-height: 320px;
+  overflow: auto;
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--ink) 3%, var(--surface));
+  color: var(--ink-2);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.rv-out:first-child {
+  margin-top: 0;
+}
+
+.rv-path,
+.rv-query {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--ink-2);
+  font-family: var(--mono);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.rv-path svg,
+.rv-query svg {
+  flex: none;
+  color: var(--ink-3);
+}
+
+.rv-where {
+  margin-left: auto;
+  color: var(--ink-3);
+}
+
+.rv-diff + .rv-diff {
+  margin-top: 10px;
+}
+
+.rv-lines {
+  margin-top: 6px;
+  max-height: 360px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.rv-dl {
+  display: flex;
+  color: var(--ink);
+  white-space: pre-wrap;
+}
+
+.rv-sign {
+  flex: none;
+  width: 20px;
+  color: var(--ink-3);
+  text-align: center;
+  user-select: none;
+}
+
+.rv-code {
+  flex: 1;
+  min-width: 0;
+  padding-right: 8px;
+  overflow-wrap: anywhere;
+}
+
+.rv-dl.is-add {
+  background: color-mix(in srgb, var(--ok) 13%, transparent);
+}
+
+.rv-dl.is-add .rv-sign {
+  color: var(--ok);
+}
+
+.rv-dl.is-del {
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
+
+.rv-dl.is-del .rv-sign {
+  color: var(--danger);
+}
+
+.rv-dl.is-fold {
+  justify-content: center;
+  padding: 2px 0;
+  background: color-mix(in srgb, var(--ink) 3%, transparent);
+  color: var(--ink-3);
+  font-family: var(--font);
+  font-size: var(--t-xs);
+}
+
+.rv-text {
+  max-height: 420px;
+  overflow: auto;
+  color: var(--ink);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.rv-empty {
+  color: var(--ink-3);
+  font-size: var(--t-sm);
+}
+
+/* 「高级」开关：卡片底部的小号灰字；展开后箭头转下 */
+.run-adv-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-top: 8px;
+  padding: 2px 6px 2px 4px;
+  border-radius: var(--r-sm);
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+  cursor: pointer;
+}
+
+.run-adv-toggle:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.run-adv-toggle svg {
+  transition: transform var(--d-1);
+}
+
+.run-adv-toggle[aria-expanded='true'] svg {
+  transform: rotate(90deg);
+}
+
+/* 高级里的原始调用信息：比常规内容淡，去掉外框（外面已经有卡片） */
+.run-step-raw .run-detail,
+.run-card-adv .run-detail {
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  opacity: 0.85;
+}
+
+.run-card-adv {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--line);
+}
+
+/* 实时状态条展开时的停止原因 / 截断提示页脚 */
+.run-info:empty {
+  display: none;
+}
+
+/* 换段与收尾时飞行的幽灵（克隆出来、fixed 定位，WAAPI 驱动） */
+.run-ghost {
+  position: fixed;
+  z-index: 40;
+  margin: 0;
+  pointer-events: none;
+  transform-origin: top left;
+}
+
+/* 文档模式的抬头行（ai-block.ts 的 replyChipView，样式本体在 chat.css 的 .reply-head）：绝对定位在块顶部留白里 */
+.editor-root .ProseMirror > .agent-reply > .reply-head {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+}
+
+@keyframes run-breathe {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 1; }
+}
+
+@keyframes run-row-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* 呼吸循环的周期不走时长令牌；减弱动效时显式关掉（其余动效的时长令牌已归零） */
+@media (prefers-reduced-motion: reduce) {
+  .run-row.is-running .run-row-ic {
+    animation: none;
+  }
+}

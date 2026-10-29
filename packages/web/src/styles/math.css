@@ -1,0 +1,104 @@
+/* ---------- 公式（editor/math-view.ts 的 nodeView、rich-render.ts 的静态画法、编辑弹层） ---------- */
+
+.math-inline {
+  display: inline-block;
+  padding: 0 2px;
+  border-radius: 4px;
+  vertical-align: baseline;
+}
+
+.ProseMirror[contenteditable='true'] .math-inline {
+  cursor: pointer;
+}
+
+.ProseMirror[contenteditable='true'] .math-inline:hover,
+.math-inline.is-selected {
+  background: var(--hover);
+}
+
+.math-inline.is-selected {
+  outline: 2px solid var(--accent-tint);
+}
+
+.math-inline.is-empty,
+.math-render.is-empty {
+  color: var(--ink-3);
+  font-size: var(--t-sm);
+}
+
+/* 块：上面画好的结果，下面源码（光标在块里或空公式时才显示） */
+.ProseMirror .math-block,
+.math-block {
+  margin: 0.6em 0;
+}
+
+.math-render {
+  overflow-x: auto;
+  padding: 8px 4px;
+  text-align: center;
+}
+
+.ProseMirror[contenteditable='true'] .math-block .math-render {
+  cursor: pointer;
+  border-radius: var(--r-md);
+}
+
+.ProseMirror[contenteditable='true'] .math-block .math-render:hover {
+  background: var(--hover);
+}
+
+.ProseMirror .math-block > pre.math-src {
+  display: none;
+  margin: 4px 0 0;
+}
+
+.ProseMirror .math-block.is-active > pre.math-src,
+.ProseMirror .math-block.is-empty > pre.math-src {
+  display: block;
+}
+
+/* 静态宿主：画好之后藏源码 */
+.math-block.is-rendered > pre {
+  display: none;
+}
+
+/* 行内公式编辑弹层（挂 body） */
+.math-editor {
+  position: fixed;
+  z-index: 60;
+  width: min(420px, calc(100vw - 16px));
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.math-editor-input {
+  width: 100%;
+  resize: none;
+  overflow: hidden;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: var(--t-sm);
+  line-height: 1.5;
+  outline: none;
+}
+
+.math-editor-input:focus {
+  border-color: var(--accent);
+}
+
+.math-editor-preview {
+  min-height: 24px;
+  overflow-x: auto;
+  padding: 4px 2px;
+}
+
+.math-editor-hint {
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+}

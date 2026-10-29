@@ -1,0 +1,595 @@
+/* ---------- 正文排版与正文块 ----------
+ * 范围：.ProseMirror 里的内容：标题 / 段落 / 列表 / 待办 / 引用 / 代码 / 表格 / 图片 / 分隔线、页面链接与子页面块、附件、用户消息块（含调用配置 chip）、AI 回复块。
+ * 选择器同时覆盖 .editor-root（编辑器）与 .public-body（公开页只读）两套上下文；级联位置紧跟 editor.css（见 styles.css）。 */
+
+/* 圈进 .editor-root：标题编辑器的 PM 根节点也叫 .ProseMirror，
+   这套正文排版（尤其 min-height 撑满视口）不能漏进去 */
+.editor-root .ProseMirror {
+  outline: none;
+  min-height: calc(100vh - 240px); /* 撑满视口（扣除页边距 + 标题），短页面不半屏空 */
+  font-size: var(--t-body);
+  line-height: var(--lh);
+  word-break: break-word;
+  /* ProseMirror 要求的编辑根样式（prosemirror-view/style/prosemirror.css 同款，本项目没引那份）。
+     不设的话段尾的空格是「可折叠空白」，程序写进去的尾空格（斜杠带参命令的 `/name `）会在下一个字符输入时被浏览器吃掉，参数直接粘在命令名上。 */
+  white-space: break-spaces;
+  /* 左 gutter：给拖拽手柄落脚，避免手柄与文字重叠；底部留一段可点的空白（点了在末尾建块，editor/blank-click.ts）。
+     不用 30vh：正文下面还有反链面板 / 过程页的最终输出，隔太远像断了。
+     全局 border-box：min-height 已含这段 padding，短页面不会因此多出滚动。 */
+  padding: 0 0 96px 40px;
+}
+
+/* 标题：字号走令牌（h1 与页面标题同为 --t-h1）；上边距大于下边距，让标题归属它下面的内容 */
+.ProseMirror h1 {
+  margin: 1.2em 0 0.4em;
+  font-size: var(--t-h1);
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+}
+
+.ProseMirror h2 {
+  margin: 1.4em 0 0.4em;
+  font-size: var(--t-h2);
+  line-height: 1.3;
+}
+
+.ProseMirror h3 {
+  margin: 1.2em 0 0.3em;
+  font-size: var(--t-h3);
+  line-height: 1.35;
+}
+
+/* 4–6 级只会从 markdown 来（agent 回复 / 导入 / 粘贴 / 源码；主动建标题最多 3 级，见 editor/heading-level.ts）：
+ * 与正文同号加粗，不用浏览器默认的 0.83em / 0.67em（比正文还小） */
+.ProseMirror :is(h4, h5, h6) {
+  margin: 1em 0 0.3em;
+  font-size: var(--t-body);
+  line-height: var(--lh);
+}
+
+/* 正文第一个内容块贴着页面标题走：标题自己有 24px 下边距，再叠标题的大上边距会空出一大截
+ * （上边距会穿过 .editor-root / .ProseMirror 与标题的下边距合并，取大者）。
+ * 「第一个内容块」不等于 :first-child —— 触屏模式下每个块前面有一个零高度的
+ * .block-handle-touch 小部件（ProseMirror-widget），所以要把「排在首位的小部件后面那一块」也算上 */
+.editor-root .ProseMirror > :first-child:not(.ProseMirror-widget),
+.editor-root .ProseMirror > .ProseMirror-widget:first-child + *,
+.public-body .ProseMirror > :first-child:not(.ProseMirror-widget),
+.public-body .ProseMirror > .ProseMirror-widget:first-child + * {
+  margin-top: 0;
+}
+
+.editor-root .ProseMirror p {
+  margin: 0.35em 0;
+}
+
+.ProseMirror ul,
+.ProseMirror ol {
+  margin: 0.3em 0;
+  padding-left: 1.4em;
+}
+
+.ProseMirror li {
+  margin: 0.15em 0;
+}
+
+/* 列表符号按嵌套层级轮换：无序 • ◦ ▪、有序 1. a. i.，第四层起回到首个符号。
+   层级按所有列表祖先算（有序里套无序也算深一层）。不靠浏览器默认：默认的有序嵌套全是 1. 2.。
+   待办 / 纯图片条目在 li 上 list-style: none，压过这里从 ul 继承来的符号。
+   整条包 :where() 把特异性压到 0,0,1：nodeView 里带类名的 UI 列表（计划卡 .plan-list 等）照样 list-style: none */
+:where(.ProseMirror) ul {
+  list-style-type: disc;
+}
+:where(.ProseMirror :is(ul, ol)) ul {
+  list-style-type: circle;
+}
+:where(.ProseMirror :is(ul, ol) :is(ul, ol)) ul {
+  list-style-type: square;
+}
+:where(.ProseMirror :is(ul, ol) :is(ul, ol) :is(ul, ol)) ul {
+  list-style-type: disc;
+}
+:where(.ProseMirror) ol {
+  list-style-type: decimal;
+}
+:where(.ProseMirror :is(ul, ol)) ol {
+  list-style-type: lower-alpha;
+}
+:where(.ProseMirror :is(ul, ol) :is(ul, ol)) ol {
+  list-style-type: lower-roman;
+}
+:where(.ProseMirror :is(ul, ol) :is(ul, ol) :is(ul, ol)) ol {
+  list-style-type: decimal;
+}
+
+/* 拆块后的顶层列表条目（单条目 ul/ol，含待办）紧凑排版：
+   - 顶层 ul/ol 外距 4px：相邻条目块之间留一点真间隙（0.35em 太散，0 又会让块选高亮连成一片互相截断）；
+     与段落 / 标题的间距由对方 margin 塌陷提供（max(4px, 5.6px)）。
+   - 顶层 li 直属 p 零外距，条目内段落不吃段距，文本按行高自然堆叠。
+   只打 doc 直接子代（> ul > li > p），嵌套列表照旧吃全局规则。
+   带上下文类是为了压过 .editor-root / .public-body 的 p margin 规则（那边同源特异性更高）。 */
+.ProseMirror > ul,
+.ProseMirror > ol {
+  margin: 4px 0;
+}
+
+/* 条目里的段落不吃段距，嵌套条目同理，否则嵌套的条目间距比外层大，节奏不齐；
+ * 一个条目里的第二段起才留段距 */
+.editor-root .ProseMirror li > p,
+.chat-root .ProseMirror li > p,
+.public-body .ProseMirror li > p {
+  margin: 0;
+}
+
+.editor-root .ProseMirror li > p + p,
+.chat-root .ProseMirror li > p + p,
+.public-body .ProseMirror li > p + p {
+  margin-top: 0.35em;
+}
+
+/* 普通引用：中性灰条，与消息块的色条同宽同缩进（2px / 14px），只是没有颜色；
+ * 文字用 --ink-2，--ink-3 在白底上对比度不够读 */
+.ProseMirror blockquote {
+  margin: 0.6em 0;
+  padding: 0.1em 0 0.1em 14px;
+  border-left: 2px solid var(--line-strong);
+  color: var(--ink-2);
+}
+
+/* 引用块是用户的普通引用（`> `），中性灰条；嵌套引用也是普通引用（消息是独立节点 user_message / agent_reply，见 message-blocks.ts），所以这里不给任何「角色」样式。
+ * 用户消息块：2px --you 色条，正文用正文色，与引用块的灰条一眼可分。
+ * 块操作（复制 / 引用 / 删除等）的位置不在这里定，归 wb-chat-ops。is-new 只在插入时挂上（messageEnterView）。 */
+.editor-root .ProseMirror > .user-message,
+.public-body .ProseMirror > .user-message {
+  margin: 18px 0;
+  padding: 6px 0 6px 14px;
+  box-shadow: inset 2px 0 0 var(--you); /* 色条画在内阴影上：不占宽，不影响内容对齐 */
+}
+
+.editor-root .ProseMirror > .user-message.is-new,
+.public-body .ProseMirror > .user-message.is-new,
+.editor-root .ProseMirror > .agent-reply.is-new,
+.public-body .ProseMirror > .agent-reply.is-new {
+  animation: rise var(--d-3) var(--ease-out) both;
+}
+
+.editor-root .ProseMirror > .user-message > :first-child,
+.public-body .ProseMirror > .user-message > :first-child {
+  margin-top: 0;
+}
+
+.editor-root .ProseMirror > .user-message > :last-child,
+.public-body .ProseMirror > .user-message > :last-child {
+  margin-bottom: 0;
+}
+
+/* ---------- 用户消息署名行（message-chips.tsx 的块首 widget；控件本体是 chip-bar.css 的 ChipBar） ----------
+ * 「你 → agent」常显；chip 与发送钮：草稿（.is-draft，文档最后一条、其后没有回复）常显，
+ * 已发出的消息鼠标停在块上（或焦点在 chip 里；菜单打开时鼠标可以离开）才展开。
+ * 聊天模式不画，输入卡已经有同一排控件。值的唯一存放处是节点 attrs。 */
+.editor-root .ProseMirror > .user-message > .msg-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  font-size: var(--t-xs);
+  color: var(--ink-3);
+  user-select: none;
+}
+
+/* 署名行占了块的第一个孩子位：正文第一块的上外距归零，作用同 :first-child */
+.editor-root .ProseMirror > .user-message > .msg-head + * {
+  margin-top: 0;
+}
+
+.msg-head .msg-who {
+  flex: none;
+}
+
+.msg-head .chip-bar.is-inline {
+  display: none;
+  flex: 0 1 auto;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+}
+
+.msg-head .msg-send {
+  display: none;
+  flex: none;
+  margin-left: auto;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--ink);
+  color: var(--bg);
+  cursor: pointer;
+}
+
+/* 在跑时发过的草稿：排着「这一轮结束后继续」（message-chips.tsx），点了撤掉。和发送钮一样只在草稿上出现 */
+.msg-head .msg-queued {
+  display: none;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  height: 22px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--r-pill);
+  background: var(--live-tint);
+  color: var(--live);
+  font: inherit;
+  font-size: var(--t-xs);
+  cursor: pointer;
+}
+
+.editor-root .ProseMirror > .user-message.is-draft > .msg-head .msg-queued {
+  display: inline-flex;
+}
+
+.msg-head .msg-send:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.msg-head .msg-send:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* 草稿：色条减淡（还没发出去），控件常显 */
+.editor-root .ProseMirror > .user-message.is-draft {
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--you) 45%, transparent);
+}
+
+.editor-root .ProseMirror > .user-message.is-draft > .msg-head .chip-bar.is-inline,
+.editor-root .ProseMirror > .user-message:hover > .msg-head .chip-bar.is-inline,
+.editor-root .ProseMirror > .user-message:focus-within > .msg-head .chip-bar.is-inline,
+.msg-head .chip-bar.is-inline:has(.chip[aria-expanded='true']) {
+  display: flex;
+  animation: chips-in var(--d-2) var(--ease-out);
+}
+
+.editor-root .ProseMirror > .user-message.is-draft > .msg-head .msg-send {
+  display: grid;
+}
+
+/* 触屏没有悬浮：控件保持可见，否则这条消息的配置改不了 */
+@media (hover: none) {
+  .msg-head .chip-bar.is-inline {
+    display: flex;
+    animation: none;
+  }
+}
+
+@keyframes chips-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* ---------- AI 回复块（agent_reply）：无引用感 + 顶栏「icon + 名字」 ----------
+ * 不画左色条、不缩进（引用形状属于 `>`），只留一块顶部留白给顶栏。
+ * 编辑器里顶栏是真元素 .reply-head（ai-block.ts 的 replyChipView 挂的块首 widget，与对话模式同一套，样式在 chat.css），
+ * 文档 ⇄ 对话切换时整行平移（view-morph.ts）。公开页不装那个插件，用两个伪元素画在留白里：
+ * ::before = icon（文本 logo 走 content，品牌 mark 走掩膜图，属性由 ai-block.ts 的装饰写：
+ * data-agent-logo / data-agent-mark / --agent-mark），::after = 名字（data-agent-name，空串时 CSS 自然不画）。 */
+.editor-root .ProseMirror > .agent-reply,
+.public-body .ProseMirror > .agent-reply {
+  position: relative;
+  margin: 18px 0;
+  padding-top: 34px; /* 抬头一行 28px（22px 标识居上）+ 与正文 6px */
+}
+
+/* 品牌 mark 的掩膜会裁掉自身背景，底托画在块上：22px 圆斑，图标叠在正中 */
+.public-body .ProseMirror > .agent-reply[data-agent-mark]:not([data-agent-mark='']) {
+  background-image: radial-gradient(
+    circle at 11px 11px,
+    color-mix(in srgb, var(--ink) 14%, var(--surface)) 0 11px,
+    transparent 11.5px
+  );
+}
+
+.public-body .ProseMirror > .agent-reply::before {
+  content: attr(data-agent-logo);
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  overflow: hidden;
+  border-radius: 7px;
+  background: var(--hover);
+  font-size: 13px;
+  line-height: 1;
+}
+
+/* 两套属性都空：不留一块空白底托，名字贴左 */
+.public-body .ProseMirror > .agent-reply[data-agent-logo=''][data-agent-mark='']::before {
+  display: none;
+}
+
+.public-body .ProseMirror > .agent-reply[data-agent-logo=''][data-agent-mark='']::after {
+  left: 0;
+}
+
+/* 品牌 mark：--agent-mark（装饰写 var(--mark-<key>)）指向 agent-marks.css 的掩膜图，
+ * background-color 用正文色让品牌描形认得出。底托是块上的圆斑，掩膜会裁掉 ::before 自己的背景 */
+.public-body .ProseMirror > .agent-reply[data-agent-mark]:not([data-agent-mark=''])::before {
+  content: '';
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  overflow: visible;
+  border-radius: 4px;
+  background-color: var(--ink);
+  -webkit-mask: var(--agent-mark) center / contain no-repeat;
+  mask: var(--agent-mark) center / contain no-repeat;
+}
+
+.public-body .ProseMirror > .agent-reply::after {
+  content: attr(data-agent-name);
+  position: absolute;
+  left: 30px;
+  top: 0;
+  height: 22px;
+  font-size: var(--t-sm);
+  line-height: 22px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--ink);
+}
+
+/* 代码块：比正文底再沉一档（--bg-sunk）+ 1px 描边；保留 border（块选中态靠 border-color 去掉灰线，见 editor-widgets.css） */
+.ProseMirror pre {
+  margin: 0.6em 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--bg-sunk);
+  overflow-x: auto;
+  font-size: var(--t-sm);
+  line-height: 1.6;
+}
+
+.ProseMirror code {
+  font-family: var(--mono);
+}
+
+.ProseMirror :not(pre) > code {
+  background: var(--hover);
+  border-radius: 4px;
+  padding: 0.1em 0.35em;
+  font-size: 0.88em;
+}
+
+.ProseMirror a {
+  color: var(--accent);
+  cursor: pointer; /* 链接可点（普通点击开外链/跳内链）；编辑态光标定位用双击/键盘 */
+}
+
+/* 站内页面链接（/page/<id>）：页面 chip；普通外链保持纯色文字链接。内联块 + 圆角底色 + 📄 前缀，无下划线，hover 微亮 */
+.ProseMirror a[href^='/page/'] {
+  display: inline-block;
+  padding: 0 8px;
+  border: none;
+  border-radius: 5px;
+  background: var(--hover);
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.ProseMirror a[href^='/page/']::before {
+  content: '';
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  margin-right: 5px;
+  vertical-align: -2px;
+  background: currentColor;
+  -webkit-mask: var(--page-icon) center / contain no-repeat;
+  mask: var(--page-icon) center / contain no-repeat;
+}
+
+.ProseMirror a[href^='/page/']:hover {
+  background: var(--press);
+}
+
+/* 子页面块 page_ref：整行原子卡片，默认透明底，hover 圆角灰底。混排的旧行内链接仍走上面的行内 chip 样式。
+ * 整行可点进子页（Editor handleClickOn 跳 /page/、公开页跳 /p/）；atom 块光标进不去，backspace 邻接一次整块删 */
+.ProseMirror .page-ref {
+  display: flex;
+  align-items: center;
+  margin: 2px 0;
+  padding: 4px 8px;
+  border-radius: 6px;
+  color: var(--ink);
+  cursor: pointer;
+  user-select: none; /* 整行可点语义：点按选中块而不是进入文字 */
+}
+
+.ProseMirror .page-ref:hover {
+  background: var(--hover);
+}
+
+/* 拖块进子页（editor/page-drop.ts）：悬停 page_ref = 落点高亮，语义「整块进该页」 */
+.ProseMirror .page-ref.page-ref-drop-target {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  background: var(--accent-tint);
+}
+
+.ProseMirror .page-ref-icon {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-right: 8px;
+  background: currentColor;
+  -webkit-mask: var(--page-icon) center / contain no-repeat;
+  mask: var(--page-icon) center / contain no-repeat;
+}
+
+/* 附件块 attachment：仿 page_ref 的整行卡片，带边框强调「文件」感；整卡是一根下载链接
+ * （编辑器内下载点击由 media.ts lightboxPlugin 接管，公开页走原生 <a download>）。
+ * 图标复用 --page-icon（文档轮廓，与全站图标语言一致），不额外增加一份 SVG 字节 */
+.ProseMirror .attachment {
+  margin: 2px 0;
+}
+
+.ProseMirror .attachment a {
+  display: flex;
+  align-items: center;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  text-decoration: none;
+  cursor: pointer;
+  user-select: none;
+}
+
+.ProseMirror .attachment a:hover {
+  background: var(--hover);
+}
+
+.ProseMirror .attachment-icon {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-right: 8px;
+  background: currentColor;
+  -webkit-mask: var(--page-icon) center / contain no-repeat;
+  mask: var(--page-icon) center / contain no-repeat;
+}
+
+.ProseMirror .attachment-name {
+  flex: 1;
+  min-width: 0; /* 撑开 ellipsis：长文件名截断不撑破卡片 */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ProseMirror .attachment-size {
+  flex: none;
+  margin-left: 8px;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+.ProseMirror hr {
+  border: none;
+  border-top: 1px solid var(--line-strong);
+  margin: 1.4em 0;
+}
+
+/* 纯图片列表条目（media.ts imageItemMark 打的 img-item 类，由 JS 判 doc 结构；CSS 结构选择器两条路都走不通：
+   PM 尾部 <br> 破坏 :only-child，嵌套 :has 非法会整条被丢弃）：
+   不画无序点 / 有序号 / 待办框，图片块就是图片块。缩进层级保留（ul 的 padding 不动）。文字 + 图混合条目不命中，符号照常 */
+.ProseMirror li.img-item {
+  list-style: none;
+}
+.ProseMirror li.img-item[data-item-type='task'] {
+  padding-left: 0; /* 复选框藏了，左缩进收回（否则留 32px 空槽） */
+}
+.ProseMirror li.img-item[data-item-type='task']::before {
+  display: none;
+}
+/* 图片节点 wrapper（media.ts toDOM）：img 是 replaced 元素，遮罩 / 伪元素 / inset 阴影都叠不上，
+   所以包一层 inline-block 定位盒（不破坏行内流，宽度收缩贴图）；间距 / 圆角 / 选中视觉全在 wrapper */
+.ProseMirror .img-wrap {
+  display: inline-block;
+  position: relative;
+  max-width: 100%;
+  margin: 8px 0; /* 与上下内容留白：选中包边（6px outline）不占布局，间距不足会压到相邻文字 */
+  border-radius: 6px;
+}
+/* 排除 ProseMirror-separator：段落以行内原子（提及 / 块引用）结尾时 ProseMirror 补的占位 img，
+   被当成块级会在行尾多撑出一整行空白 */
+.ProseMirror img:not(.ProseMirror-separator) {
+  display: block; /* wrapper 已按内容宽度收缩，img 填满 wrapper（行内 schema 块级显示） */
+  max-width: 100%;
+  border-radius: 6px;
+  cursor: zoom-in; /* 点图弹全屏灯箱看原图（media.ts lightboxPlugin），提示可放大 */
+}
+
+/* gfm 待办项：<li data-item-type="task" data-checked="...">，复选框用 ::before 画。
+ * ::before 必须 absolute：li 内容是块级 <p>，inline ::before 会被匿名块包住独占一行（checkbox 一行、光标掉第二行）。
+ * 锚在 li 左侧固定列，与首行文字垂直居中：li 用 flow-root 挡住 p 的 margin 塌陷（否则 p 顶边距挤出 li，首行中心位算不准）。
+ * 中心位 = 半行高 0.875em，框总高 1em（13px + 两边框），所以 top = 0.375em。
+ * 嵌套子待办的直属 p 仍有 0.35em 上边距（list-blocks 拆块只归零顶层），中心位下移 0.35em 到 0.725em，见下方顶层覆盖规则。
+ * 点击切换由 editor/task-toggle.ts 的 handleClickOn 实现，框区宽 = padding-left，两处要同步改。 */
+/* 待办列表去掉 ul 默认缩进（1.6em），否则框 + 文字比正文多出一大截。
+ * 嵌套子待办的 ul 同样命中本规则，子框对齐父文字 */
+.ProseMirror ul:has(> li[data-item-type='task']) {
+  padding-left: 0;
+}
+
+.ProseMirror li[data-item-type='task'] {
+  display: flow-root;
+  position: relative;
+  padding-left: 32px;
+  list-style: none;
+}
+
+.ProseMirror li[data-item-type='task']::before {
+  content: '';
+  position: absolute;
+  /* 框的外观用全站复选框令牌（base.css）；位置按框中心定，框改大小中心不动。
+     横向中心 19px；纵向：所有层级的条目里 p 都没有上边距（见上面 li > p），16px 字号下框中心 = 0.47em + 7px ≈ 14.5px，
+     比半行高（13.6px）沉 0.9px，因为中文字形的视觉中心偏沉，这样才贴线 */
+  left: calc(19px - var(--check-size) / 2);
+  top: calc(0.47em + 7px - var(--check-size) / 2);
+  width: var(--check-size);
+  height: var(--check-size);
+  border: var(--check-border);
+  border-radius: var(--check-radius);
+  cursor: pointer; /* 可点击提示（点击切换由 task-toggle.ts 接管，::before 无 DOM） */
+}
+
+/* viewer / 只读：不可点击，不提示手型（task-toggle 有 editable 守卫） */
+.ProseMirror[contenteditable='false'] li[data-item-type='task']::before {
+  cursor: default;
+}
+
+.ProseMirror li[data-item-type='task'][data-checked='true']::before {
+  background: var(--accent) var(--check-mark) center / var(--check-mark-size) no-repeat;
+  border-color: var(--accent);
+}
+
+/* 刚点过的待办（task-toggle.ts 的装饰）：切换时整条 li 重建，base.css 的复选框过渡播不了，改用动画补：
+ * 框按一下；勾上时勾带回弹长出来，取消时底色褪掉。装饰下次文档变化就撤，页面加载时已勾的条目不动 */
+.ProseMirror li.task-flipped[data-item-type='task']::before {
+  animation: check-press var(--d-2) var(--ease-out), check-fade var(--d-1) var(--ease-out);
+}
+
+.ProseMirror li.task-flipped[data-item-type='task'][data-checked='true']::before {
+  animation: check-press var(--d-2) var(--ease-out), check-grow var(--d-2) var(--ease-spring);
+}
+
+@keyframes check-press {
+  40% {
+    transform: scale(0.86);
+  }
+}
+
+@keyframes check-grow {
+  from {
+    background-size: 0;
+  }
+}
+
+@keyframes check-fade {
+  from {
+    border-color: var(--accent);
+    background-color: var(--accent);
+  }
+}
+
+.ProseMirror li[data-item-type='task'][data-checked='true'] {
+  color: var(--ink-3);
+  text-decoration: line-through;
+}
+

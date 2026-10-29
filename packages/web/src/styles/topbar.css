@@ -1,0 +1,294 @@
+/* ---------- 页面顶栏（TopBar.tsx） ----------
+ * sticky 钉在 .main 滚动口顶部，不换滚动容器：滚动、跟随、定位都还认 .main。
+ * z-index 6：压过正文与聊天输入卡(4)，低于侧栏(20)与各类浮层。 */
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 48px;
+  padding: 0 12px 0 16px;
+  background: var(--bg);
+}
+
+.crumbs {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  font-size: var(--t-sm);
+  color: var(--ink-2);
+}
+
+.crumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 200px;
+  padding: 3px 6px;
+  border-radius: var(--r-sm);
+  color: inherit;
+}
+
+.crumb > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+button.crumb {
+  transition: background var(--d-1), color var(--d-1);
+}
+
+button.crumb:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.crumb + .crumb::before {
+  content: '/';
+  margin: 0 2px 0 -2px;
+  color: var(--ink-3);
+}
+
+.crumb.is-current {
+  color: var(--ink);
+}
+
+/* 右侧一组：菜单 / 分享弹层以它为定位祖先 */
+.topbar-actions {
+  position: relative;
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 在场头像：名字首字，底色同协作光标，叠放 */
+.presence {
+  display: flex;
+  padding-left: 6px;
+}
+
+.presence i {
+  width: 22px;
+  height: 22px;
+  margin-left: -6px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px var(--bg);
+  color: var(--on-accent);
+  font: 600 11px/22px var(--font);
+  font-style: normal;
+  text-align: center;
+}
+
+.presence i.is-more {
+  background: var(--press);
+  color: var(--ink-2);
+}
+
+/* 「3分钟前编辑」：最淡一级的小字按钮，悬停加底色，点开版本历史 */
+.topbar-edited {
+  height: 26px;
+  padding: 0 8px;
+  border-radius: var(--r-sm);
+  font-size: var(--t-sm);
+  color: var(--ink-3);
+  white-space: nowrap;
+  transition: background var(--d-1), color var(--d-1);
+}
+
+.topbar-edited:hover {
+  background: var(--hover);
+  color: var(--ink-2);
+}
+
+.topbar-btn {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--r-sm);
+  color: var(--ink-2);
+  transition: background var(--d-1), color var(--d-1);
+}
+
+.topbar-btn:hover,
+.topbar-btn[aria-expanded='true'] {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+/* 已收藏的星标用正文色，同块菜单 / 气泡的星标 */
+.topbar-btn[aria-pressed='true'] {
+  color: var(--ink);
+}
+
+/* ⋮ 下拉菜单（分享 / 源码模式）与分享弹层：同一套浮层卡片 */
+.page-menu,
+.share-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 7;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-2);
+  animation: block-menu-in var(--d-1) var(--ease-out);
+}
+
+.page-menu {
+  min-width: 180px;
+  padding: 4px;
+}
+
+.page-menu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border-radius: var(--r-sm);
+  font-size: var(--t-sm);
+  color: var(--ink);
+  white-space: nowrap;
+  text-align: left;
+}
+
+.page-menu button:hover {
+  background: var(--hover);
+}
+
+/* 每项左侧的图标：次要色，悬停 / 文字色不变 */
+.page-menu .menu-icon {
+  flex: none;
+  color: var(--ink-2);
+}
+
+/* 开关项右侧的对勾：markup 里跟按钮文字一起渲染（<Icon name="check">） */
+.page-menu .menu-check {
+  margin-left: auto;
+  color: var(--accent);
+}
+
+/* 菜单底部的字数和上次编辑（edit-info.tsx，顶栏 ⋮ 菜单与块手柄菜单共用）：分隔线下的次要色小字，不可点 */
+.edit-info:not(:empty) {
+  margin: 4px -4px -4px;
+  padding: 8px 14px 9px;
+  border-top: 1px solid var(--line);
+  font-size: var(--t-xs);
+  line-height: 1.5;
+  color: var(--ink-3);
+  cursor: default;
+  user-select: none;
+}
+
+.block-menu .edit-info:not(:empty) {
+  margin: 4px -6px -6px;
+}
+
+.edit-info > * + * {
+  margin-top: 3px;
+}
+
+.edit-info-by {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.edit-info-name {
+  min-width: 0;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--ink-2);
+}
+
+
+.share-pop {
+  width: 360px;
+  max-width: calc(100vw - 24px);
+  padding: 12px;
+}
+
+.share-hint {
+  margin: 0 0 10px;
+  font-size: var(--t-sm);
+  color: var(--ink-2);
+}
+
+.share-link-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.share-link {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: var(--t-xs);
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--hover);
+  color: var(--ink);
+  outline: none;
+}
+
+/* 发布选项：是否连 agent 过程页一起公开，与「公开页面」同一条写路径 */
+.share-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+  color: var(--ink-2);
+  font-size: var(--t-xs);
+  cursor: pointer;
+}
+
+.share-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.share-state {
+  font-size: var(--t-xs);
+  color: var(--ink-3);
+}
+
+.share-state.is-on {
+  color: var(--ok);
+}
+
+.share-error {
+  margin: 8px 0 0;
+  font-size: var(--t-sm);
+  color: var(--danger);
+}
+
+/* 窄屏：顶栏让出刘海安全区，在场头像与编辑时间收起；折叠态左上角有浮动展开按钮，面包屑让开 */
+@media (max-width: 768px) {
+  .topbar {
+    height: calc(48px + env(safe-area-inset-top));
+    padding: env(safe-area-inset-top) 8px 0;
+  }
+
+  .app.sidebar-collapsed .topbar {
+    padding-left: 44px;
+  }
+
+  .presence,
+  .topbar-edited {
+    display: none;
+  }
+}

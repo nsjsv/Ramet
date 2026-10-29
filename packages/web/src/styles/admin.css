@@ -1,0 +1,220 @@
+/* admin 用户管理 */
+
+.admin-page {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 48px 32px 96px;
+}
+
+.admin-title {
+  font-size: 24px;
+  font-weight: 700;
+  margin: 0 0 4px;
+}
+
+.admin-sub {
+  color: var(--ink-3);
+  font-size: 13px;
+  margin: 0 0 20px;
+}
+
+.admin-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  background: var(--danger-tint);
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
+  border-radius: 6px;
+  color: var(--danger);
+  font-size: 13px;
+  padding: 8px 12px;
+  margin-bottom: 16px;
+}
+
+.admin-banner-close {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  color: var(--danger);
+}
+
+.admin-banner-close:hover {
+  background: var(--danger-tint);
+}
+
+/* 建号成功的一次性临时密码提示：绿色系与错误 banner 区分 */
+.admin-banner.is-temp {
+  background: color-mix(in srgb, var(--ok) 8%, transparent);
+  border-color: color-mix(in srgb, var(--ok) 40%, transparent);
+  color: var(--ok);
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.admin-temp-code {
+  font-family: var(--mono);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--ok) 14%, transparent);
+}
+
+.admin-banner-actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.admin-banner-close.is-temp {
+  color: var(--ok);
+}
+
+.admin-banner-close.is-temp:hover {
+  background: color-mix(in srgb, var(--ok) 14%, transparent);
+}
+
+.admin-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 24px;
+}
+
+.admin-field {
+  font: inherit;
+  font-size: 14px;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--surface);
+  color: inherit;
+  outline: none;
+  min-width: 0;
+}
+
+.admin-field.grow {
+  flex: 1;
+}
+
+.admin-field:focus {
+  border-color: var(--accent);
+}
+
+.admin-form .admin-btn {
+  flex: none;
+}
+
+.admin-form-error {
+  flex-basis: 100%;
+  color: var(--danger);
+  font-size: 13px;
+  margin: 0;
+}
+
+.admin-btn {
+  font: inherit;
+  font-size: 13px;
+  padding: 5px 12px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--surface);
+  color: inherit;
+  white-space: nowrap;
+}
+
+.admin-btn:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.admin-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.admin-btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+
+.admin-btn.primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 85%, var(--ink));
+}
+
+.admin-btn.danger {
+  color: var(--danger);
+}
+
+.admin-btn.danger:hover:not(:disabled) {
+  background: var(--danger-tint);
+}
+
+.admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.admin-table th {
+  text-align: left;
+  font-weight: 500;
+  font-size: 12px;
+  color: var(--ink-3);
+  padding: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.admin-table td {
+  padding: 8px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: middle;
+  word-break: break-word;
+}
+
+.admin-col-actions {
+  text-align: right;
+  width: 1%;
+  white-space: nowrap;
+}
+
+.admin-time {
+  color: var(--ink-3);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.admin-role {
+  display: inline-block;
+  font-size: 12px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--hover);
+  color: var(--ink-3);
+}
+
+.admin-role.is-admin {
+  background: var(--accent-tint);
+  color: var(--accent);
+}
+
+.admin-row-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.admin-empty {
+  color: var(--ink-3);
+  font-size: 13px;
+}

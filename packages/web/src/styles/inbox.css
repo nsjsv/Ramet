@@ -1,0 +1,272 @@
+/* ---------- 收件箱（/inbox，inbox/InboxPage.tsx）与侧栏入口的角标 ---------- */
+
+.inbox-page {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 48px 32px 96px;
+}
+
+.inbox-title-h {
+  margin: 0 0 4px;
+  font-size: 24px;
+  font-weight: 700;
+}
+
+.inbox-intro {
+  margin: 0 0 20px;
+  color: var(--ink-3);
+  font-size: var(--t-sm);
+}
+
+.inbox-group {
+  margin-bottom: 24px;
+}
+
+.inbox-group-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+  font-weight: 600;
+}
+
+.inbox-count {
+  padding: 0 7px;
+  border-radius: var(--r-pill);
+  background: var(--hover);
+  color: var(--ink-3);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 18px;
+}
+
+.inbox-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+
+.inbox-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--bg);
+}
+
+.inbox-row + .inbox-row {
+  border-top: 1px solid var(--line);
+}
+
+.inbox-ic {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--hover);
+  color: var(--ink-2);
+}
+
+.inbox-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.inbox-title {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.inbox-title.is-link {
+  cursor: pointer;
+}
+
+.inbox-title.is-link:hover .inbox-head {
+  text-decoration: underline;
+}
+
+.inbox-head {
+  color: var(--ink);
+  font-size: var(--t-sm);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.inbox-sub,
+.inbox-hint,
+.inbox-detail-line {
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap; /* 「记住这条？」的多行内容 */
+}
+
+.inbox-hint,
+.inbox-detail-line {
+  margin-top: 4px;
+}
+
+.inbox-more {
+  margin-top: 4px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: var(--t-xs);
+  cursor: pointer;
+}
+
+.inbox-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.inbox-detail code {
+  font-family: var(--mono);
+}
+
+.inbox-code {
+  max-height: 200px;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--bg-sunk);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow: auto;
+  overflow-wrap: anywhere;
+}
+
+.inbox-acts {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  max-width: 45%;
+}
+
+.inbox-btn {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--t-sm);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--d-1), border-color var(--d-1), filter var(--d-1);
+}
+
+.inbox-btn:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.inbox-btn.is-primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.inbox-btn.is-primary:hover:not(:disabled) {
+  background: var(--accent);
+  filter: brightness(1.08);
+}
+
+.inbox-btn.is-reject {
+  border-color: color-mix(in srgb, var(--danger) 40%, transparent);
+  color: var(--danger);
+}
+
+.inbox-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.inbox-error {
+  margin-top: 6px;
+  padding: 6px 10px;
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
+  border-radius: var(--r-sm);
+  background: var(--danger-tint);
+  color: var(--danger);
+  font-size: var(--t-xs);
+}
+
+.inbox-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 48px 16px;
+  color: var(--ink-3);
+  font-size: var(--t-sm);
+  text-align: center;
+}
+
+.inbox-empty b {
+  color: var(--ink-2);
+  font-size: 15px;
+}
+
+.inbox-empty-hint {
+  color: var(--ink-3);
+  font-size: var(--t-sm);
+}
+
+.side-nav-badge {
+  flex: none;
+  min-width: 18px;
+  height: 18px;
+  margin-left: auto;
+  padding: 0 5px;
+  border-radius: var(--r-pill);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+  text-align: center;
+}
+
+@media (max-width: 768px) {
+  .inbox-page {
+    padding: 56px 16px 96px;
+  }
+
+  .inbox-row {
+    flex-wrap: wrap;
+  }
+
+  .inbox-acts {
+    justify-content: flex-start;
+    width: 100%;
+    max-width: none;
+    padding-left: 40px;
+  }
+}

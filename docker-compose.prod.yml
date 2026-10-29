@@ -1,0 +1,76 @@
+# 自托管编排：postgres + server + web 三个服务，数据全部 bind mount 在本目录（./postgres-data、./uploads）。
+# server 镜像只装依赖，源码从仓库只读挂载；web 用官方 nginx 镜像托管本地编译好的 dist。步骤（仓库根目录）：
+#   npm ci
+#   npm run build -w packages/web
+#   node scripts/pack-connector.mjs packages/web/dist/dl     # 可选：connector 安装包，供别的机器 npm i -g <地址>/dl/ramet-connector.tgz
+#   docker compose -f docker-compose.prod.yml up -d --build
+# 配置写在同目录的 .env 里（见下面各项注释）。对公网开放时在前面加一层终止 TLS 的反向代理，
+# 反代 / 时 /collab、/term、/connector 三条 WebSocket 路径必须透传 Upgrade 头。
+name: ramet
+
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: postgres
+      # 不映射宿主机端口，只在 compose 内网可达。密码只在首次建库（postgres-data 为空）时生效，之后改要进库里改
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ramet
+    volumes:
+      - ./postgres-data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d ramet']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  server:
+    build:
+      context: .
+      dockerfile: packages/server/Dockerfile
+    image: ramet-server:latest
+    environment:
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/ramet
+      # 进程时区：只影响 agent 过程归档页标题里的时间
+      TZ: ${TZ:-Asia/Shanghai}
+      # 对外地址（如 https://ramet.example.com，无尾斜杠）。agent 侧的 MCP 进程靠它回打中心：
+      # 本机 agent 不设也能用（回落到回环地址）；connector 模式（agent 在别的机器）必须设
+      RAMET_PUBLIC_URL: ${RAMET_PUBLIC_URL:-}
+      # 加密用户保存的模型 API key（32 字节，hex 或 base64；生成：openssl rand -hex 32）。
+      # 不设则「保存 API key」回 503，其它功能不受影响；丢了或换了它，已保存的 key 全部解不开
+      RAMET_SECRET_KEY: ${RAMET_SECRET_KEY:-}
+      # 端口预览：用户机器上的开发服务器经 connector 转发，在独立端口上看（与 Ramet 不同源）。
+      # RAMET_PREVIEW_PORT 不设 = 预览关闭；开启时设 3790，并把 RAMET_PREVIEW_ORIGIN 设成浏览器访问
+      # 预览的对外地址（协议 + 主机 + 宿主机端口，无尾斜杠，如 https://ramet.example.com:8790）
+      RAMET_PREVIEW_PORT: ${RAMET_PREVIEW_PORT:-}
+      RAMET_PREVIEW_ORIGIN: ${RAMET_PREVIEW_ORIGIN:-}
+      # 可选：图片镜像到 CloudFlare-ImgBed 图床（MarSeventh/CloudFlare-ImgBed），URL 与 TOKEN 都设了才开；
+      # 本地 uploads 永远是正本，图床不可用时自动本地出
+      RAMET_IMGBED_URL: ${RAMET_IMGBED_URL:-}
+      RAMET_IMGBED_PUBLIC_URL: ${RAMET_IMGBED_PUBLIC_URL:-}
+      RAMET_IMGBED_TOKEN: ${RAMET_IMGBED_TOKEN:-}
+    ports:
+      # 只给端口预览用（没开预览时这里不监听任何东西），不暴露任何 Ramet 路由
+      - '${PREVIEW_PORT:-8790}:3790'
+    volumes:
+      # 上传文件永不删除（版本历史还引用着它们），这个目录必须长期保留
+      - ./uploads:/app/packages/server/uploads
+      - ./packages/server/src:/app/packages/server/src:ro
+      - ./packages/server/tsconfig.json:/app/packages/server/tsconfig.json:ro
+      - ./packages/shared/src:/app/packages/shared/src:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  web:
+    image: nginx:alpine
+    ports:
+      - '${WEB_PORT:-8080}:80'
+    volumes:
+      - ./packages/web/dist:/usr/share/nginx/html:ro
+      - ./packages/web/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - server
+    restart: unless-stopped

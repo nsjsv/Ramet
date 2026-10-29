@@ -1,0 +1,351 @@
+/* 发起控件栏（editor/chip-bar.tsx）与弹出菜单（editor/chip-menu.tsx）。
+ * 聊天输入卡与文档 `>>` 消息行同一个组件；size 由 .is-card / .is-inline 决定。
+ * 只动 transform / opacity / 背景色，不动布局属性。 */
+
+.chip-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.chip-bar::-webkit-scrollbar {
+  display: none;
+}
+
+.chip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: var(--r-pill);
+  font-size: var(--t-sm);
+  color: var(--ink-2);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--d-1);
+}
+
+.chip:hover,
+.chip[aria-expanded='true'] {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.chip.is-risky {
+  color: var(--danger);
+  background: var(--danger-tint);
+}
+
+.chip.is-plan {
+  color: var(--live);
+  background: var(--live-tint);
+}
+
+.chip-text,
+.chip-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chip-text {
+  max-width: 160px;
+}
+
+.chip-path {
+  max-width: 120px;
+}
+
+/* 模型 chip 里跟在模型名后的思考档：淡一号，不参与截断 */
+.chip-sub {
+  flex: none;
+  color: var(--ink-3);
+}
+
+.chip-sub::before {
+  content: '· ';
+}
+
+/* 只有图标的 chip（设置项都在默认值）：收成正圆 */
+.chip.is-icon {
+  padding: 0 7px;
+}
+
+.chip-mark {
+  flex: none;
+  width: 14px;
+  height: 14px;
+}
+
+.chip-empty {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--t-xs);
+  color: var(--ink-3);
+}
+
+/* 文档消息行里的 chip 小一号 */
+.chip-bar.is-inline {
+  flex-wrap: wrap;
+  overflow: visible;
+}
+
+.chip-bar.is-inline .chip {
+  height: 24px;
+  padding: 0 8px;
+  font-size: var(--t-xs);
+}
+
+.chip-bar.is-inline .chip.is-icon {
+  padding: 0 5px;
+}
+
+@media (max-width: 760px) {
+  .chip-bar.is-card .chip {
+    height: 32px;
+  }
+
+  .chip-bar.is-card .chip.is-icon {
+    padding: 0 9px;
+  }
+}
+
+/* 弹出菜单 */
+
+.menu {
+  position: fixed;
+  z-index: 45;
+  min-width: 240px;
+  max-width: min(360px, calc(100vw - 16px));
+  overflow-y: auto;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
+  transform-origin: bottom left;
+  animation: menu-in var(--d-2) var(--ease-out);
+}
+
+.menu[data-placement='below'] {
+  transform-origin: top left;
+}
+
+@keyframes menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+}
+
+.menu-title {
+  padding: 6px 8px 4px;
+  font-size: var(--t-xs);
+  color: var(--ink-3);
+}
+
+/* 一个菜单里有多段（设置菜单：权限模式 / 工具档位）：段与段之间 */
+.menu-sep {
+  height: 1px;
+  margin: 4px 2px;
+  background: var(--line);
+}
+
+/* 菜单底部的一行说明（工具档位：换档的后果） */
+.menu-note {
+  padding: 6px 8px 4px;
+  border-top: 1px solid var(--line);
+  margin-top: 4px;
+  font-size: var(--t-xs);
+  color: var(--ink-3);
+}
+
+.menu-item {
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 7px 8px;
+  border-radius: var(--r-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.menu-item:hover,
+.menu-item:focus-visible {
+  background: var(--hover);
+  outline: none;
+}
+
+.menu-item[aria-disabled='true'] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.menu-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.menu-item .t {
+  font-size: var(--t-sm);
+  color: var(--ink);
+}
+
+.menu-item .d {
+  margin-top: 1px;
+  font-size: var(--t-xs);
+  color: var(--ink-3);
+}
+
+.menu-item.is-risky .t {
+  color: var(--danger);
+}
+
+.menu-item .tick {
+  flex: none;
+  margin-left: auto;
+  color: var(--accent);
+}
+
+/* 模型行末的 ›：点击在右侧展开思考子菜单 */
+.menu-item .next {
+  flex: none;
+  margin-left: auto;
+  color: var(--ink-3);
+}
+
+.menu-item .tick + .next {
+  margin-left: 0;
+}
+
+/* 展开着思考子菜单的那一行 */
+.menu-item[aria-expanded='true'] {
+  background: var(--hover);
+}
+
+/* 侧边子菜单（模型 › 思考）：窄一些，从父菜单那侧滑出 */
+.menu.sub {
+  min-width: 160px;
+}
+
+.menu[data-placement='side'] {
+  transform-origin: top left;
+  animation-name: menu-side-in;
+}
+
+@keyframes menu-side-in {
+  from {
+    opacity: 0;
+    transform: translateX(-4px);
+  }
+}
+
+/* 工作目录面板：列的是执行端（本机 / connector）的真实目录 */
+
+.menu.ws {
+  width: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ws-path {
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: var(--hover);
+  color: var(--ink);
+  font: var(--t-sm) var(--mono);
+  outline: 0;
+}
+
+.ws-path:focus {
+  box-shadow: 0 0 0 2px var(--accent-tint);
+}
+
+.ws-error {
+  padding: 0 2px;
+  font-size: var(--t-xs);
+  color: var(--danger);
+}
+
+.ws-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+/* 列表是滚动容器：子项不参与收缩，否则条目一多每行被压扁、文字被 overflow 整条裁掉 */
+.ws-list > * {
+  flex: none;
+}
+
+.ws-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 8px;
+  border-radius: var(--r-sm);
+  font-size: var(--t-sm);
+  color: var(--ink-2);
+  text-align: left;
+  cursor: pointer;
+}
+
+.ws-row:hover,
+.ws-row:focus-visible {
+  background: var(--hover);
+  color: var(--ink);
+  outline: none;
+}
+
+.ws-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ws-empty {
+  padding: 8px;
+  font-size: var(--t-xs);
+  color: var(--ink-3);
+}
+
+.ws-acts {
+  display: flex;
+  gap: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+}
+
+.ws-apply {
+  padding: 4px 10px;
+  border-radius: var(--r-sm);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: var(--t-sm);
+  cursor: pointer;
+  transition: opacity var(--d-1);
+}
+
+.ws-apply:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

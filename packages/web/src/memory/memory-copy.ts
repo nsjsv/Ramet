@@ -1,0 +1,36 @@
+/* ---------- 空间公共记忆的界面文案（并进 copy.ts 的 COPY.memory；单独成文件是为了让 copy.ts 不超过 800 行）---------- */
+export const MEMORY_COPY = {
+  nav: '记忆',
+  title: '记忆',
+  sub: (space: string) => `空间「${space}」的公共记忆 · 这个空间里所有 agent 共享，每一轮开跑时全部带上`,
+  loading: '加载中…',
+  loadFailed: '记忆加载失败，请稍后再试',
+  stats: (count: number, chars: number, max: number) => `${count} 条 · 合计 ${chars} / ${max} 字`,
+  slim: '每一条都会占用每一轮的上下文：只留长期有效、说得短的，过时的及时删掉。',
+  nearFull: '快满了，请精简或删掉不用的。',
+  full: '已经满了，再添加前请先删掉不用的。',
+  empty: '还没有记忆',
+  emptyHint: '把团队约定、项目事实、你的偏好记在这里，之后所有 agent 的每一轮都会看到。也可以在输入框里敲「/记住 内容」，或者在 agent 提议时点「记住」。',
+  addPlaceholder: '要记住的内容（一条只讲一件事，写成完整的一两句话）…',
+  add: '添加',
+  adding: '添加中…',
+  counter: (n: number, max: number) => `${n} / ${max}`,
+  readOnly: '你在这个空间里是只读成员，只能查看记忆。',
+  someone: '有人',
+  by: (who: string) => `${who} 记下`,
+  fromPage: '来自页面',
+  remove: '删除这条记忆',
+  confirmRemove: (text: string) => `删除这条记忆？删除后 agent 之后的每一轮都不会再带上它。\n\n${text.length > 120 ? `${text.slice(0, 120)}…` : text}`,
+  addFailed: '添加失败，请重试',
+  removeFailed: '删除失败，请重试',
+  /** 输入框里的 `/记住 内容` */
+  command: {
+    usage: '用法：/记住 要记住的内容',
+    saved: '已记住，这个空间里所有 agent 之后的每一轮都会带上',
+    failed: '没有记下',
+    noSpace: '这个页面不在任何空间里，没法记忆',
+    readOnly: '只读成员不能添加记忆',
+  },
+  /** 斜杠菜单里的 Ramet 命令 */
+  slash: { group: 'Ramet', label: '记住', hint: '把一句话记进这个空间的公共记忆（所有 agent 共享）' },
+}

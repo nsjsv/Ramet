@@ -1,0 +1,228 @@
+/* ---------- 编辑区 ---------- */
+
+.editor-page {
+  /* 正文 720px + 左 gutter 40（拖拽手柄落脚）+ 左右各 48 */
+  max-width: calc(720px + 40px + 96px);
+  margin: 0 auto;
+  /* 顶栏在流里（sticky），列顶只留一点；页尾留半屏：运行区收起时内容变短，不会触发滚动钳制把整块往下拽 */
+  padding: 32px 48px max(55vh, 400px);
+}
+
+/* 全宽（页面属性，editor/full-width.ts）：不收 720 列，铺满 .main。
+ * 桌面两边各 96px：左 56 + 手柄 gutter 40 = 正文离画面左缘 96；右 96 把右轨（文档导航，贴右缘约 64px 的触发区）让开。
+ * 窄屏本来就铺满，沿用 editor-widgets.css 的边距。 */
+.editor-page.full-width {
+  max-width: none;
+}
+
+@media (min-width: 769px) {
+  .editor-page.full-width {
+    padding-left: 56px;
+    padding-right: 96px;
+  }
+}
+
+/* 右轨：文档导航（标题 / 消息块一列小横杠；跟随指针出波浪与预览，点击跳转）。
+ * 挂载点只有一个：Editor.tsx 直出在 .main 里，两种视图共用。视口级 HUD：sticky 钉在滚动口，竖向钉视口中央、横向贴画面右缘，不跟 900px 正文列走。
+ * 横杠按地标分形：标题按层级长短递减（h1 最长）、用户消息蓝且长、AI 回复浅灰且短。
+ * Dock 式跟随：指针落在轨道盒里（比横杠大一圈的触发区）就按距离给每条横杠写 `--grow` 鼓包，给最近的一条加 `.is-near` 出预览，
+ * 由 doc-rail.tsx 直接写 DOM，不走 React state。
+ * 固定 3px 横杠 + 6px 间隔，约 80 条仍在视口内，条数更多时要改成按比例 / 合并。 */
+.doc-rail {
+  position: sticky;
+  top: 50vh;
+  top: 50dvh;
+  height: 0; /* 不占正文流 */
+  z-index: 3; /* 压住正文，仍在面包屑(5)/顶栏(6)/侧栏(30) 之下 */
+  pointer-events: none; /* 空条不挡正文点击/滚动条；真正的触发区是下面的轨道盒 */
+}
+
+.doc-rail-stack {
+  position: absolute;
+  top: 0;
+  /* 贴画面右缘（.main 铺满侧栏右侧的整块画面，12px 是滚动条右边的留白），不跟着 900px 正文列走 */
+  right: 12px;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  /* 触发区（也是点击区）比横杠大一圈：上下 12px、左侧 24px。指针落在里面就算命中，点里面任意位置都跳到最近的那条（横杠本身只有 3px 高，只认横杠太难点） */
+  padding: 12px 0 12px 24px;
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.doc-rail-tick {
+  position: relative;
+  /* 盒宽统一且固定（比最长的横条还宽一点）：提示锚在这条固定竖线上，横条怎么鼓包、种类换谁来，提示都不会左右滑。
+     横条本体画在 ::before 里，右侧对齐、向左长。 */
+  --w: 14;
+  --grow: 0;
+  --bar: var(--line-strong);
+  width: 28px;
+  height: 3px;
+}
+
+.doc-rail-tick::before {
+  content: '';
+  position: absolute;
+  right: 0;
+  top: 0;
+  height: 100%;
+  /* 长度走 scaleX，不动 width：按最长 30（h1 的 20 + 鼓包上限 GROW_MAX 10）画满，右缘为原点缩放。--w / --grow 是无单位数（doc-rail.tsx 写 --grow） */
+  width: 30px;
+  transform-origin: right center;
+  transform: scaleX(calc((var(--w) + var(--grow)) / 30));
+  border-radius: 2px;
+  background: var(--bar);
+  transition: transform var(--d-1) var(--ease-out), background var(--d-1);
+}
+
+/* 标题层级：越上层越长（h1 最长） */
+.doc-rail-tick.rail-h1 {
+  --w: 20;
+  --bar: var(--ink-3);
+}
+
+.doc-rail-tick.rail-h2 {
+  --w: 17;
+  --bar: var(--ink-3);
+}
+
+.doc-rail-tick.rail-h3 {
+  --w: 14;
+  --bar: var(--ink-3);
+}
+
+.doc-rail-tick.rail-h4 {
+  --w: 12;
+}
+
+.doc-rail-tick.rail-h5 {
+  --w: 10;
+}
+
+.doc-rail-tick.rail-h6 {
+  --w: 9;
+}
+
+/* 消息块：用户条长、AI 条短，与聊天气泡的左右 / 配色口径一致 */
+.doc-rail-tick.rail-user {
+  --w: 18;
+  --bar: var(--accent);
+}
+
+.doc-rail-tick.rail-ai {
+  --w: 10;
+}
+
+/* 指针最近的一条：提亮 + 出预览（键盘焦点同理，见下面的 :focus-visible） */
+.doc-rail-tick.is-near {
+  --bar: var(--ink);
+}
+
+.doc-rail-tick.is-near::after,
+.doc-rail-tick:focus-visible::after {
+  opacity: 1;
+}
+
+.doc-rail-tick:focus-visible {
+  --bar: var(--ink);
+}
+
+.doc-rail-tick::after {
+  content: attr(data-title);
+  position: absolute;
+  right: calc(100% + 10px);
+  top: 50%;
+  transform: translateY(-50%);
+  max-width: 320px;
+  overflow: hidden;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--ink);
+  color: var(--bg);
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  box-shadow: var(--shadow-2);
+  opacity: 0;
+  pointer-events: none; /* 提示不吃鼠标：横杠与提示之间不留悬停断层 */
+  transition: opacity var(--d-1);
+}
+
+.doc-rail-tick:hover::after {
+  opacity: 1;
+}
+
+/* 触屏没有悬停：横杠点了也认不出是哪条，这一列整体不渲染（预览也没有入口） */
+@media (hover: none) {
+  .doc-rail {
+    display: none;
+  }
+}
+
+/* 页面标题：非协作时是 <input class="page-title">，协作时是 PM 根 div（page-title title-editor），两种载体共享同一套排版 */
+.page-title,
+.title-editor {
+  display: block;
+  width: 100%;
+  font-size: 32px;
+  font-weight: 700;
+  line-height: 1.2;
+  border: none;
+  outline: none;
+  padding: 0 0 0 40px; /* 与 ProseMirror 左 gutter 对齐（那里留给拖拽手柄落脚） */
+  margin-bottom: 24px;
+  color: var(--ink);
+  background: transparent;
+}
+
+/* input 版占位 */
+.page-title::placeholder {
+  color: var(--ink-3);
+}
+
+/* 标题段落：压掉 UA 默认外边距（正文那套 margin 已圈进 .editor-root） */
+.title-editor p {
+  margin: 0;
+}
+
+/* contenteditable 根聚焦时浏览器会画默认外框（正文那套 outline:none 也圈进 .editor-root 了） */
+.title-editor .ProseMirror {
+  outline: none;
+}
+
+/* PM 空段占位（协作标题）：float:left + height:0 不撑行高、不挡光标。
+   覆盖空段两种形态：<p></p>（:empty）与 PM 给末尾空段补的 <p><br class="ProseMirror-trailingBreak"></p> */
+.title-editor p:only-child:is(:empty, :has(> br:only-child))::before {
+  content: '无标题';
+  color: var(--ink-3);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+
+.editor-root {
+  position: relative; /* slash 菜单的定位锚点 */
+}
+
+/* slash 菜单（SlashProvider 会写 left/top，这里只管定位与显隐；卡片 / 行的外观在 styles/menus.css） */
+.slash-menu {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 10;
+  display: none;
+  width: 300px;
+  max-width: calc(100vw - 16px);
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.slash-menu[data-show='true'] {
+  display: block;
+  animation: menu-in var(--d-2) var(--ease-out);
+}

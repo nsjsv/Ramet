@@ -1,0 +1,257 @@
+/* ---------- 回收站弹窗（RecycleBin.tsx）----------
+ * 头部、搜索、可滚动列表、底部说明和清空。弹窗本身不滚，列表滚。
+ * 恢复 / 永久删除悬停才出现，触屏常显（见文末）。 */
+
+.modal.trash-modal {
+  display: flex;
+  flex-direction: column;
+  width: 600px;
+  max-height: min(640px, 84vh);
+  padding: 0;
+  overflow: hidden;
+}
+
+.trash-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 18px 18px 12px;
+}
+
+.trash-head-ic {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--r-sm);
+  background: var(--hover);
+  color: var(--ink-2);
+}
+
+.trash-head-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.trash-sub {
+  margin: 2px 0 0;
+  font-size: var(--t-xs);
+  color: var(--ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.trash-head .modal-close {
+  align-self: flex-start;
+}
+
+.trash-search {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 18px 8px;
+  padding: 0 10px;
+  height: 32px;
+  border-radius: var(--r-sm);
+  background: var(--hover);
+  color: var(--ink-3);
+  border: 1px solid transparent;
+}
+
+.trash-search:focus-within {
+  background: var(--surface);
+  border-color: var(--accent);
+}
+
+.trash-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--t-sm);
+}
+
+.trash-error {
+  margin: 0 18px 8px;
+}
+
+.trash-list {
+  flex: 1 1 auto;
+  min-height: 120px;
+  overflow-y: auto;
+  padding: 0 10px 10px;
+}
+
+.trash-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 36px 16px 40px;
+  font-size: var(--t-sm);
+  color: var(--ink-3);
+  text-align: center;
+}
+
+.trash-empty b {
+  color: var(--ink-2);
+  font-weight: 600;
+}
+
+.trash-empty-ic {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  margin-bottom: 4px;
+  border-radius: 50%;
+  background: var(--hover);
+  color: var(--ink-3);
+}
+
+.trash-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 6px 8px;
+  border-radius: var(--r-sm);
+  transition: background var(--d-1);
+}
+
+.trash-row:hover,
+.trash-row:focus-within {
+  background: var(--hover);
+}
+
+.trash-ic {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  color: var(--ink-2);
+}
+
+.trash-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.trash-title {
+  font-size: var(--t-sm);
+  font-weight: 500;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.trash-meta {
+  font-size: var(--t-xs);
+  color: var(--ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.trash-when {
+  flex: none;
+  font-size: var(--t-xs);
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+
+/* 行内操作：悬停 / 键盘聚焦到行时出现，占位一直在（不跳版），只切透明度 */
+.trash-acts {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity var(--d-1);
+}
+
+.trash-row:hover .trash-acts,
+.trash-row:focus-within .trash-acts {
+  opacity: 1;
+}
+
+.trash-act {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--ink-2);
+  font-size: var(--t-xs);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.trash-act:hover:not(:disabled) {
+  color: var(--ink);
+  border-color: var(--line-strong);
+}
+
+.trash-act.danger {
+  color: var(--ink-3);
+}
+
+.trash-act.danger:hover:not(:disabled) {
+  color: var(--danger);
+  background: var(--danger-tint);
+  border-color: transparent;
+}
+
+.trash-act:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* 两步确认的第二步（form-kit.tsx ConfirmButton）：红底白字，提示再点就删了 */
+.trash-act.is-armed,
+.trash-act.is-armed:hover:not(:disabled),
+.admin-btn.danger.is-armed,
+.admin-btn.danger.is-armed:hover:not(:disabled) {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}
+
+.trash-foot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--line);
+  background: var(--bg-sunk);
+  font-size: var(--t-xs);
+  color: var(--ink-3);
+}
+
+.trash-foot > span {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 触屏没有悬停：操作常显 */
+@media (hover: none) {
+  .trash-acts {
+    opacity: 1;
+  }
+}

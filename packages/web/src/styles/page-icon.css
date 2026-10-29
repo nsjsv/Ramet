@@ -1,0 +1,243 @@
+/* ---------- 页面图标 ----------
+ * 唯一渲染组件 PageIcon 的样式 + 编辑器标题上方的设置入口（PageIconHeader / 弹层）。
+ * 尺寸两档：sm = 列表 / 面包屑（18px 槽位，未设图标画通用文档 glyph，列宽恒定不跳版）；lg = 标题上方（56px）。 */
+
+.page-icon {
+  flex: 0 0 auto;
+  display: inline-block;
+  line-height: 1;
+  text-align: center;
+}
+
+.page-icon-sm {
+  width: 18px;
+  height: 18px;
+  line-height: 18px;
+  font-size: 15px;
+  vertical-align: -0.25em;
+}
+
+.page-icon-lg {
+  width: 56px;
+  height: 56px;
+  line-height: 56px;
+  font-size: 46px;
+}
+
+.page-icon-img {
+  object-fit: cover; /* 图片图标是方形派生版，槽位也是方的：裁切不拉变形 */
+}
+
+.page-icon-sm.page-icon-img {
+  border-radius: 3px;
+}
+
+.page-icon-lg.page-icon-img {
+  border-radius: 6px;
+}
+
+/* emoji 的 Twemoji 图：整幅图都是内容，不裁切不圆角；留一点内边距，让视觉大小与 15px / 46px 的字形相当 */
+.page-icon-sm.page-icon-twemoji,
+.page-icon-lg.page-icon-twemoji {
+  box-sizing: border-box;
+  object-fit: contain;
+  border-radius: 0;
+}
+
+.page-icon-sm.page-icon-twemoji {
+  padding: 1px;
+}
+
+.page-icon-lg.page-icon-twemoji {
+  padding: 5px;
+}
+
+/* 未设图标：通用文档 glyph（与全站 --page-icon 图标语言一致），随 currentColor 上色 */
+.page-icon-glyph {
+  background: currentColor;
+  -webkit-mask: var(--page-icon) center / contain no-repeat;
+  mask: var(--page-icon) center / contain no-repeat;
+}
+
+/* 各入口的间距：图标与紧随其后的文字（树行的图标在 .tree-twisty 槽位里，间距由槽位承担；回收站行由 flex gap 承担） */
+.sidebar-search-hit-title > .page-icon {
+  margin-right: 6px;
+}
+
+/* ---------- 编辑器标题上方：触发器 + 弹层 ---------- */
+
+.icon-header {
+  position: relative;
+  /* 与 .page-title 的左 gutter 对齐（那里给正文手柄留了 40px）；
+     下间距 = 图标/按钮与标题之间的留白 */
+  padding: 0 0 18px 40px;
+}
+
+.icon-header-trigger {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  padding: 2px;
+  border-radius: 8px;
+}
+
+.icon-header-trigger:hover {
+  background: var(--hover);
+}
+
+/* 未设图标时的「＋ 图标」幽灵按钮：默认隐藏，鼠标靠近标题上方（图标区本身、或标题那一行，以及键盘焦点落进来时）才淡入，有入口但不占视觉。
+ * 已设图标时图标常驻（那是页面身份的一部分，不该隐身）。 */
+.icon-header-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  font-size: 13px;
+  color: var(--ink-3);
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  opacity: 0;
+  transition: opacity var(--d-1);
+}
+
+.icon-header:hover .icon-header-add,
+.icon-header:focus-within .icon-header-add,
+/* 悬停标题那一行也算「靠近标题上方」：两者在同一条内容列里，:has 让标题成为图标按钮的热区 */
+.editor-page:has(.page-title:hover) .icon-header-add {
+  opacity: 1;
+}
+
+/* 触屏（无 hover）藏起来等于没有入口：常显 */
+@media (hover: none) {
+  .icon-header-add {
+    opacity: 1;
+  }
+}
+
+.icon-header-static {
+  display: inline-block;
+  padding: 2px;
+}
+
+.icon-picker-pop {
+  position: absolute;
+  z-index: 40; /* 内容列之上、弹窗(50)/灯箱(60) 之下 */
+  top: 100%;
+  left: 40px;
+  width: 340px;
+  padding: 10px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow-2);
+}
+
+/* emoji-mart 选择器（EmojiPicker.tsx）是 shadow DOM 的 Web Component：
+ * - 宿主自带 :host{width:min-content}，不覆盖会缩成一小条（每行 5 个、分类图标挤成一团），
+ *   外部样式优先于 :host，这里拉满弹层宽度；dynamicWidth 会按宽度重算每行个数；
+ * - 高度压到 360px（默认 435px，手机上整个弹层太高）；去掉它自带的阴影 / 大圆角（弹层本身就是卡片）；
+ * - 底色 / 文字 / 强调色由 JS 写 --rgb-*（EmojiPicker.tsx applyTheme）。 */
+.icon-picker-host em-emoji-picker {
+  width: 100%;
+  height: 360px;
+  --border-radius: 6px;
+  --shadow: none;
+  --category-icon-size: 20px;
+}
+
+.icon-picker-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.icon-picker-input {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 6px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+
+.icon-picker-btn {
+  padding: 4px 8px;
+  font-size: 13px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+
+.icon-picker-btn:hover {
+  background: var(--hover);
+}
+
+.icon-picker-btn.danger {
+  color: var(--danger);
+}
+
+.icon-picker-error {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--danger);
+}
+
+/* 手机端：与正文/标题同一套 gutter（editor.css 的 768px 断点把两者都推到 30/32px） */
+@media (max-width: 768px) {
+  .icon-header {
+    padding-left: 32px;
+  }
+  .icon-picker-pop {
+    left: 32px;
+    width: min(340px, calc(100vw - 48px));
+  }
+}
+
+/* 窄屏下弹层可能被视口右缘裁掉：右对齐兜底（靠右滚动区窄时生效） */
+@media (max-width: 420px) {
+  .icon-picker-pop {
+    left: 0;
+  }
+}
+
+/* ---------- page_ref 块的图标位（DOM 由 editor/page-ref.ts 构造） ----------
+ * 基样式在 prose.css（通用 glyph 的 mask）；这里只加两种「有真图标」的形态，特异性更高，不受 styles.css 里 @import 顺序影响。 */
+
+/* emoji 的退路（Twemoji 没有这个 emoji 时 page-ref.ts 摘掉 <img> 并写 data-icon）：
+ * 用 CSS content 画字符，不落 DOM 文本，剪贴板反解 textContent 才拿不到图标字符 */
+.ProseMirror .page-ref-icon[data-icon]:not([data-icon='']) {
+  background: none;
+  -webkit-mask: none;
+  mask: none;
+}
+
+.ProseMirror .page-ref-icon[data-icon]:not([data-icon=''])::before {
+  content: attr(data-icon);
+  display: block;
+  font-size: 15px;
+  line-height: 16px;
+  text-align: center;
+}
+
+/* 图片 / Twemoji 图标：内嵌 <img>（同样无 textContent），去掉底下的 glyph mask */
+.ProseMirror .page-ref-icon:has(> img) {
+  background: none;
+  -webkit-mask: none;
+  mask: none;
+}
+
+.ProseMirror .page-ref-icon-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 3px;
+}
+
+/* emoji 的 Twemoji 图：整幅都是内容，不裁切不圆角 */
+.ProseMirror .page-ref-icon-img.is-twemoji {
+  object-fit: contain;
+  border-radius: 0;
+}

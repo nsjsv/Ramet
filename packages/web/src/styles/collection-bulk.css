@@ -1,0 +1,73 @@
+/* 集合的多选：批量操作栏、框选、表格的格子选区（collection/BulkBar.tsx、marquee.tsx、table/cell-range.ts） */
+
+/* 批量编辑属性的值编辑器：选择器 / 输入框 + 底部按钮 */
+.cl-bulk-editor {
+  min-width: 220px;
+}
+
+.cl-bulk-input {
+  padding: 6px;
+}
+
+.cl-bulk-input .cl-input {
+  width: 100%;
+}
+
+.cl-bulk-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+  padding: 4px 6px;
+  border-top: 1px solid var(--line);
+}
+
+/* 框选（portal 到 body，坐标是视口坐标） */
+.cl-marquee {
+  position: fixed;
+  z-index: 50;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  background: var(--accent-tint);
+  pointer-events: none;
+}
+
+/* 格子选区：光标格之外的格子画选中底色；拖选时不起文字选区（编辑中的输入框照常可选字） */
+.cl-cell.is-in-range {
+  background: var(--accent-tint);
+}
+
+.cl-table .cl-cell {
+  user-select: none;
+}
+
+.cl-table .cl-cell .cl-input {
+  user-select: text;
+}
+
+/* 行手柄：点开行菜单；有排序时不能拖，只是菜单按钮 */
+.cl-handle:not([draggable='true']) {
+  cursor: pointer;
+}
+
+/* 填充柄：选区右下角的小方块，往下 / 往上拖填充；拖过的格子画虚线框 */
+.cl-fill {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  z-index: 2;
+  width: 8px;
+  height: 8px;
+  border: 1px solid var(--bg);
+  border-radius: 2px;
+  background: var(--accent);
+  cursor: crosshair;
+}
+
+.cl-cell.is-in-fill {
+  outline: 1px dashed var(--accent);
+  outline-offset: -2px;
+}
+
+body.is-cl-filling,
+body.is-cl-filling * {
+  cursor: crosshair !important;
+}

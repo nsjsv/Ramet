@@ -1,0 +1,276 @@
+/* 代码块（editor/code-view.ts 的 nodeView）+ 语法高亮 token（code-highlight.ts）+ Mermaid 图。
+ * 高亮配色走 --hl-* 令牌，深色在 dark.css 翻转。静态宿主（对话气泡、历史预览、AI 实时回复）只有 pre > code
+ * 没有 nodeView 外壳，token 颜色同样生效（选择器不挂 .code-block 前缀）。 */
+
+:root {
+  --hl-keyword: #cf222e;
+  --hl-string: #0a3069;
+  --hl-number: #0550ae;
+  --hl-comment: #6e7781;
+  --hl-title: #8250df;
+  --hl-type: #953800;
+  --hl-attr: #0550ae;
+  --hl-tag: #116329;
+  --hl-meta: #8250df;
+  --hl-add-fg: #116329;
+  --hl-add-bg: #dafbe1;
+  --hl-del-fg: #82071e;
+  --hl-del-bg: #ffebe9;
+}
+
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-doctag,
+.hljs-template-tag {
+  color: var(--hl-keyword);
+}
+.hljs-string,
+.hljs-regexp,
+.hljs-meta .hljs-string,
+.hljs-char.escape_ {
+  color: var(--hl-string);
+}
+.hljs-number,
+.hljs-literal,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-variable.constant_,
+.hljs-operator {
+  color: var(--hl-number);
+}
+.hljs-comment,
+.hljs-quote {
+  color: var(--hl-comment);
+  font-style: italic;
+}
+.hljs-title,
+.hljs-title.function_,
+.hljs-title.class_,
+.hljs-section {
+  color: var(--hl-title);
+}
+.hljs-type,
+.hljs-built_in,
+.hljs-variable,
+.hljs-template-variable,
+.hljs-params {
+  color: var(--hl-type);
+}
+.hljs-attr,
+.hljs-attribute,
+.hljs-property,
+.hljs-selector-attr,
+.hljs-selector-class,
+.hljs-selector-id {
+  color: var(--hl-attr);
+}
+.hljs-name,
+.hljs-tag,
+.hljs-selector-pseudo {
+  color: var(--hl-tag);
+}
+.hljs-meta,
+.hljs-link {
+  color: var(--hl-meta);
+}
+.hljs-addition {
+  color: var(--hl-add-fg);
+  background: var(--hl-add-bg);
+}
+.hljs-deletion {
+  color: var(--hl-del-fg);
+  background: var(--hl-del-bg);
+}
+.hljs-emphasis {
+  font-style: italic;
+}
+.hljs-strong {
+  font-weight: 600;
+}
+
+/* nodeView 外壳 */
+
+.ProseMirror .code-block {
+  position: relative;
+  margin: 0.6em 0;
+}
+
+.ProseMirror .code-block > pre {
+  margin: 0;
+  padding-top: 34px;
+}
+
+.code-head {
+  position: absolute;
+  top: 6px;
+  left: 8px;
+  right: 8px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 24px;
+  user-select: none;
+}
+
+.code-head-gap {
+  flex: 1;
+}
+
+.code-head button {
+  height: 24px;
+  padding: 0 6px;
+  border-radius: var(--r-sm);
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+  line-height: 24px;
+}
+
+.code-head button:not(:disabled):hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.code-head .code-lang:disabled {
+  cursor: default;
+}
+
+.code-head .code-copy,
+.code-head .code-mode,
+.code-head .code-wrap {
+  opacity: 0;
+  transition: opacity var(--d-1) var(--ease-out);
+}
+
+.code-block:hover .code-head :is(.code-copy, .code-mode, .code-wrap),
+.code-block.is-active .code-head :is(.code-copy, .code-mode, .code-wrap) {
+  opacity: 1;
+}
+
+/* 图标按钮（换行 / 复制）：图标居中，不按文字基线落 */
+.code-head .code-wrap,
+.code-head .code-copy {
+  display: inline-flex;
+  align-items: center;
+}
+
+/* 「换行」是开关：开着时图标用强调色（悬停也不褪） */
+.code-head .code-wrap.is-on,
+.code-head .code-wrap.is-on:hover {
+  color: var(--accent);
+}
+
+.code-head button[hidden] {
+  display: none;
+}
+
+@media (hover: none) {
+  .code-head .code-copy,
+  .code-head .code-mode,
+  .code-head .code-wrap {
+    opacity: 1;
+  }
+}
+
+/* 自动换行（code_block.wrap，默认开）：落在 pre > code 上（white-space 会继承到文字），公式源码的 pre 不受影响；
+ * 超长的无空格串（URL、哈希）也在任意处折。关掉时 nodeView 给外壳挂 is-nowrap，静态宿主（同步块 / 对话气泡）
+ * 认 toDOM 写的 data-wrap="false"，回到横向滚动 */
+.ProseMirror pre > code,
+.chat-bubble pre > code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ProseMirror .code-block.is-nowrap > pre > code,
+pre[data-wrap='false'] > code {
+  white-space: pre;
+  overflow-wrap: normal;
+}
+
+/* 语言下拉（挂 body） */
+.code-lang-menu {
+  position: fixed;
+  z-index: 60;
+  width: 220px;
+  display: flex;
+  flex-direction: column;
+}
+
+.code-lang-search {
+  height: 30px;
+  margin: 2px 2px 4px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--t-sm);
+  outline: none;
+}
+
+.code-lang-list {
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.code-lang-list .pop-row {
+  width: 100%;
+}
+
+.code-lang-list .pop-row.is-active {
+  background: var(--hover);
+}
+
+.code-lang-list .pop-row.is-current {
+  color: var(--accent);
+}
+
+/* Mermaid */
+
+/* 默认只看图；光标在块里（is-active）或点了「代码」（show-code）时源码与图都在。只看图时「换行」无从谈起，藏掉 */
+.ProseMirror .code-block.is-mermaid:not(.is-active):not(.show-code) > pre,
+.ProseMirror .code-block.is-mermaid:not(.is-active):not(.show-code) .code-wrap {
+  display: none;
+}
+
+.mermaid-view {
+  display: flex;
+  justify-content: center;
+  overflow-x: auto;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--bg-sunk);
+}
+
+.ProseMirror .code-block.is-mermaid:not(.is-active):not(.show-code) > .mermaid-view {
+  padding-top: 34px;
+}
+
+.ProseMirror .code-block.is-mermaid.is-active > .mermaid-view,
+.ProseMirror .code-block.is-mermaid.show-code > .mermaid-view {
+  margin-top: 6px;
+}
+
+.mermaid-view svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.mermaid-error {
+  color: var(--danger);
+  font-size: var(--t-sm);
+}
+
+/* 静态宿主（对话气泡 / 历史预览）：图在上，源码收在「源码」折叠里（rich-render.ts） */
+.mermaid-static {
+  margin: 0.6em 0;
+}
+
+.mermaid-static > details > summary {
+  cursor: pointer;
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+  margin-top: 4px;
+}

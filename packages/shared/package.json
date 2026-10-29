@@ -1,0 +1,22 @@
+{
+  "name": "@ramet/shared",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./markdown-blocks": "./src/markdown-blocks.ts",
+    "./run-model": "./src/run-model.ts",
+    "./reply-stats": "./src/reply-stats.ts",
+    "./page-tree": "./src/page-tree.ts",
+    "./block-address": "./src/block-address.ts",
+    "./md-dialect": "./src/md-dialect/index.ts",
+    "./collection-model": "./src/collection-model.ts",
+    "./collection-query": "./src/collection-query.ts"
+  },
+  "dependencies": {
+    "mdast-util-from-markdown": "^2.0.3",
+    "mdast-util-gfm": "3.1.0",
+    "mdast-util-math": "3.0.0",
+    "micromark-extension-gfm": "3.0.0",
+    "micromark-extension-math": "3.1.0"
+  }
+}

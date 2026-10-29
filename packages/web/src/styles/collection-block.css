@@ -1,0 +1,115 @@
+/* 正文里的集合块 / 链接视图块（editor/collection-block.ts、collection/block-view.tsx）。
+ * 整行卡片，宽度跟正文列；块里是 CollectionSurface（表格自己横向滚动）。选择器不带 .ProseMirror 前缀：
+ * 公开页 / 快照面板 / 对话气泡里画的是 toDOM 的静态占位，同样要有形体。 */
+
+.cl-block {
+  margin: 8px 0;
+  font-size: var(--t-body);
+  white-space: normal; /* 正文根是 pre-wrap，块里是另一个应用 */
+  user-select: text;
+}
+
+.cl-block-head {
+  position: relative; /* 批量操作栏的插槽盖在上面（collection/bulk-slot.tsx） */
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  color: var(--ink-2);
+}
+
+.cl-block-name {
+  flex: 0 1 auto;
+  min-width: 80px;
+  padding: 2px 4px;
+  border: 1px solid transparent;
+  background: none;
+  color: var(--ink);
+  font-size: var(--t-h3);
+  font-weight: 600;
+}
+
+.cl-block-name.cl-name-input:hover {
+  border-color: var(--line);
+}
+
+.cl-block-name.is-static {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cl-block-tag {
+  padding: 0 6px;
+  border-radius: 4px;
+  background: var(--hover);
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+  white-space: nowrap;
+}
+
+.cl-block .collection-surface {
+  margin-top: 0;
+}
+
+/* 看板伸出正文列（仿 Notion，同正文表格，collection/block-view.tsx 经 editor/bleed.ts 量出 --bleed-l / --bleed-r）：
+ * 负外边距伸出去、同量内边距把首列推回正文左缘，列多了横向滚动时滑进两侧留白；横向滑到头不触发浏览器左右滑动翻页 */
+.cl-block .cl-board {
+  margin-left: calc(-1 * var(--bleed-l, 0px));
+  margin-right: calc(-1 * var(--bleed-r, 0px));
+  padding-left: var(--bleed-l, 0px);
+  padding-right: var(--bleed-r, 0px);
+  overscroll-behavior-x: contain;
+}
+
+.cl-block-note {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--r-md);
+  color: var(--ink-3);
+  font-size: var(--t-sm);
+}
+
+.editor-root .ProseMirror .selected-block.cl-block {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-radius: var(--r-md);
+}
+
+/* 静态占位（没有 nodeView 的地方） */
+.cl-block-static {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--bg-sunk);
+}
+
+.cl-block-static::before {
+  content: '';
+  width: 16px;
+  height: 16px;
+  flex: none;
+  background: var(--ink-3);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2'%3E%3Crect x='3' y='4' width='18' height='16' rx='2'/%3E%3Cpath d='M3 10h18M3 15h18M9 4v16M15 4v16'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2'%3E%3Crect x='3' y='4' width='18' height='16' rx='2'/%3E%3Cpath d='M3 10h18M3 15h18M9 4v16M15 4v16'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
+.cl-block-static-title {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.cl-block-static-hint {
+  color: var(--ink-3);
+  font-size: var(--t-sm);
+}
+
+/* 快照面板里只认得出是哪个集合就够了：「暂不支持公开查看」是公开页的说法 */
+.vh-view .cl-block-static-hint {
+  display: none;
+}

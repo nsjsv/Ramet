@@ -1,0 +1,774 @@
+/* ---------- 侧边栏 ---------- */
+
+/* 左右内缩统一到 18px 文字线（头部 16px，搜索框 / 分组标题 / 树行 / 底栏 18px） */
+.sidebar {
+  width: var(--sidebar-w, 248px); /* 拖拽手柄/App.tsx 写 :root --sidebar-w；手机端在下方 media 钉回 260px */
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-sunk);
+  border-right: 1px solid var(--line);
+}
+
+/* 头部：收起按钮在最左，名字跟在后面 */
+.sidebar-header {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 12px 12px 8px;
+}
+
+.sidebar-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--t-md);
+  font-weight: 700;
+}
+
+.tree {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 8px 16px;
+}
+
+.tree-empty {
+  padding: 6px 10px;
+  color: var(--ink-3);
+  font-size: var(--t-sm);
+}
+
+/* 空态直接挂在 .dirboards 下（不在 8px 内缩的 .tree 里）：补上同一条文字线 */
+.dirboards > .tree-empty {
+  margin: 0 8px;
+}
+
+.tree-empty-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.tree-empty-actions button {
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--ink);
+  font-size: var(--t-xs);
+  cursor: pointer;
+}
+
+.tree-empty-actions button:hover {
+  background: var(--hover);
+}
+
+/* 树行。缩进只在这里算：行把层级写进 --depth（PageTree / FolderTree），
+ * 顶层文字线 = .tree 8px + 这里 10px */
+.tree-item {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 28px;
+  padding-left: calc(10px + var(--depth, 0) * 16px);
+  padding-right: 4px;
+  border-radius: var(--r-sm);
+  color: var(--ink-2);
+  font-size: var(--t-sm);
+  transition: background var(--d-1);
+}
+
+.tree-item:hover {
+  background: var(--hover);
+}
+
+/* 当前页：整行按下底 + 正文色 */
+.tree-item:has(> .tree-label.active) {
+  background: var(--press);
+  color: var(--ink);
+}
+
+/* 拖块进页（editor/page-drop.ts）/ 拖页面成子页：悬停的树行 = 落点高亮。当前页那行也要压过它的按下底 */
+.tree-item.droptarget,
+.tree-item.droptarget:has(> .tree-label.active) {
+  background: var(--accent-tint);
+  outline: 1px dashed var(--accent);
+  outline-offset: -1px;
+}
+
+/* 树是插入线的定位基准（页面拖拽的插入线，见 Sidebar.tsx dropBoundaryAt） */
+.tree {
+  position: relative;
+}
+
+/* 树拖放插入线：悬停行的上 / 下半 → 线在该行的上 / 下边界，松手插成该边界处的兄弟 */
+.tree-drop-line {
+  position: absolute;
+  height: 2px;
+  background: var(--accent);
+  border-radius: 1px;
+  z-index: 5;
+  pointer-events: none;
+}
+
+/* ---------- 树行图标 / 折叠箭头融合 ----------
+ * 同一 18px 槽位：平时显示页面图标（未设图标画通用文档 glyph），行悬停 / 键盘聚焦箭头时图标淡出、折叠箭头淡入，点击箭头展开 / 折叠。
+ * 展开不是指针动作，不参与箭头接管：展开态鼠标移开就回到图标（页面树 / 目录树同款）。
+ * 叶子行没有箭头，图标常驻。hover:none（触屏）无悬停可言：图标常驻，点图标展开 / 折叠（见下方媒体块）。 */
+.tree-twisty {
+  position: relative;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin-right: 6px; /* 图标与文字之间的右间距由槽位承担 */
+}
+
+.tree-twisty > .page-icon {
+  position: absolute;
+  inset: 0;
+  pointer-events: none; /* 装饰层不接指针：点击/悬停穿透给下层箭头按钮 */
+  transition: opacity var(--d-1);
+}
+
+.tree-twisty .arrow {
+  position: absolute;
+  inset: 0;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-3);
+  border-radius: 3px;
+  opacity: 0;
+  transition: opacity var(--d-1);
+}
+
+.tree-item:hover .tree-twisty .arrow,
+.tree-twisty .arrow:focus-visible {
+  opacity: 1;
+}
+
+/* 箭头接管槽位的时机把图标藏掉：行悬停 / 键盘聚焦箭头。展开态不在此列（见块首注释）。
+ * 判据是箭头的 :focus-visible（键盘），不是 :focus-within —— 鼠标点完箭头焦点还留在按钮上，
+ * :focus-within 会让图标一直隐身（离开行也回不来），看着就是「收起来后图标消失、过会儿才回来」 */
+.tree-item:hover .tree-twisty.parent > .page-icon,
+.tree-twisty.parent:has(.arrow:focus-visible) > .page-icon {
+  opacity: 0;
+}
+
+/* 目录树行同款：目录/文件 glyph 在箭头接管槽位时让位（不与箭头叠显） */
+.dir-glyph {
+  position: absolute;
+  inset: 0;
+  pointer-events: none; /* 同 .page-icon：装饰层不吃点击/悬停 */
+  /* 颜色不自己定：与同槽位的 PageIcon 一样吃行文字色，否则同一棵树里
+     文件/目录行比页面行暗一档，「图标样式不一样」就是这两条规则打架 */
+  transition: opacity var(--d-1);
+}
+
+.tree-item:hover .tree-twisty.parent > .dir-glyph,
+.tree-twisty.parent:has(.arrow:focus-visible) > .dir-glyph {
+  opacity: 0;
+}
+
+.tree-twisty .arrow:hover {
+  background: var(--press);
+  color: var(--ink);
+}
+
+/* 触屏无悬停：箭头从不接管槽位，父行常显图标，箭头按钮留在图标下面当看不见的点击层
+ *（图标 pointer-events:none，点图标 = 点到箭头 = 展开/折叠）。
+ * 触屏有粘滞 :hover —— 点过一次的行会一直命中上面的悬停接管规则，所以这里必须用同特异性的
+ * .tree-item:hover 前缀写回去（写在后面），不能只写 .tree-twisty.parent > … */
+@media (hover: none) {
+  .tree-item:hover .tree-twisty.parent > .page-icon,
+  .tree-item:hover .tree-twisty.parent > .dir-glyph {
+    opacity: 1;
+  }
+
+  .tree-item:hover .tree-twisty .arrow {
+    opacity: 0;
+  }
+}
+
+/* 树展开箭头：细 chevron svg（同块菜单/空间切换器），展开转 90° 朝下，无过渡动画 */
+.arrow .chev.open {
+  transform: rotate(90deg);
+}
+
+.rename-input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  padding: 1px 4px;
+  border: 1px solid var(--accent);
+  border-radius: var(--r-sm);
+  outline: none;
+  background: var(--surface);
+  color: var(--ink);
+}
+
+/* 字号 / 颜色跟行走（.tree-item）；当前项的底色画在整行上，标签自己不再有底 */
+.tree-label {
+  flex: 1;
+  min-width: 0;
+  text-decoration: none;
+  color: inherit;
+  padding: 2px 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tree-actions {
+  display: none;
+  flex: none;
+  margin-left: auto; /* ＋/⋯ 贴行右缘（页面树/目录树行同款） */
+}
+
+.tree-item:hover .tree-actions {
+  display: inline-flex;
+}
+
+.icon-btn {
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  padding: 0;
+  border-radius: var(--r-sm);
+  color: var(--ink-3);
+}
+
+.icon-btn:hover {
+  background: var(--press);
+  color: var(--ink);
+}
+
+.icon-btn.danger:hover {
+  color: var(--danger);
+}
+
+/* ---------- 侧边栏折叠：头部面板按钮收起，指针入左缘浮出窄版预览，点预览里的按钮钉住还原 ---------- */
+
+.app {
+  position: relative; /* 左缘热区/浮层卡片的定位基准 */
+  overflow: clip; /* 侧栏滑出 / 钉住时的 FLIP 位移不撑出页面滚动条（不建滚动容器） */
+}
+
+/* 折叠态不可见即不该进 Tab 序列（否则 Tab 会落到看不见的树按钮上）；visibility 随过渡在终点才切 hidden */
+.app.sidebar-collapsed .sidebar {
+  overflow: hidden;
+  visibility: hidden;
+}
+
+/* 折叠态左缘热区（只在折叠态渲染，见 App.tsx）：指针进入即触发浮层预览；绝对定位不占布局 */
+.sidebar-zone {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 32px;
+  z-index: 20; /* 主画面之上、浮层面板(30)之下 */
+}
+
+@media (min-width: 769px) {
+  /* 桌面：.main 铺满整宽，停靠的侧栏占的宽由 .main 左内边距让出（不另用占位元素），
+     FLIP 让正文从旧位置滑回时，起点不会被 .main 的左缘裁掉。收起 / 展开时内边距一次切换，
+     正文与面包屑「跟着滑」由 App.tsx toggleSidebar 的 FLIP（motion.ts）做，只动 transform。 */
+  .main {
+    padding-left: var(--sidebar-w, 248px);
+  }
+
+  .app.sidebar-collapsed .main {
+    padding-left: 0;
+  }
+
+  /* 常驻侧栏：绝对定位浮块，压过 main 里的 sticky 顶栏。收起 = 自身平移出去并淡出；几何（停靠 ↔ 浮层卡片）
+     只在不可见时切换，不插值。阴影 / 圆角是浮层 → 停靠（钉住）时的重绘过渡 */
+  .sidebar {
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 20;
+    height: 100dvh;
+    transition:
+      transform var(--d-3) var(--ease-out),
+      opacity var(--d-3),
+      visibility var(--d-3),
+      box-shadow var(--d-2),
+      border-radius var(--d-2);
+  }
+
+  /* ---------- 宽度拖拽手柄（App.tsx 渲染，折叠态不渲染） ----------
+     贴侧栏右缘的 6px 热区；可见反馈只有悬停 / 拖拽时的 2px 竖线，不占布局。
+     悬停高亮防抖：指针停稳 --resizer-delay 才淡入，路过的指针不闪；移开立刻淡出。
+     只延迟「亮」：col-resize 光标与按下即拖都不等；按下（.sidebar-resizing）立刻亮。配色跟主题（--resizer-hl：浅蓝深灰） */
+  .sidebar-resizer {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: calc(var(--sidebar-w, 248px) - 3px);
+    width: 6px;
+    z-index: 25; /* 侧栏(20) 之上，members(50)/灯箱(60) 之下 */
+    cursor: col-resize;
+    touch-action: none;
+  }
+
+  .sidebar-resizer::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 2px;
+    width: 2px;
+    background: var(--resizer-hl);
+    border-radius: 1px;
+    opacity: 0;
+    transition: opacity var(--d-2); /* 移开：不等，直接淡出 */
+  }
+
+  .sidebar-resizer:hover::after {
+    opacity: 1;
+    /* 淡入前先等一拍：等待期内移开 = 过渡取消，什么都不亮（CSS 的 transition-delay 就是防抖） */
+    transition: opacity var(--d-2) var(--resizer-delay, 150ms);
+  }
+
+  .app.sidebar-resizing .sidebar-resizer::after {
+    opacity: 1;
+    transition-delay: 0s;
+  }
+
+  /* 拖拽中：宽度逐帧跟指针（宽度从不过渡）；全局锁 selection 光标，防拖过文字时闪烁选中 */
+  .app.sidebar-resizing {
+    cursor: col-resize;
+    user-select: none;
+  }
+
+  .app.sidebar-collapsed .sidebar {
+    transform: translateX(-100%);
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  /* 悬停预览（.sidebar-peek 由 App.tsx 加）：浮层卡片几何在这里一次写定（从不可见的折叠态直接切过来），
+     从左缘滑入淡入。命中区从一开始就是完整尺寸，不会「长到一半指针被判成离开」 */
+  .app.sidebar-collapsed.sidebar-peek .sidebar {
+    top: 150px;
+    left: 8px;
+    z-index: 30;
+    width: 248px;
+    height: calc(100dvh - 300px);
+    border: 1px solid var(--line);
+    border-radius: var(--r-sm);
+    box-shadow: var(--shadow-2);
+    visibility: visible;
+    opacity: 1;
+    transform: none;
+    pointer-events: auto;
+    transition:
+      transform var(--d-2) var(--ease-out),
+      opacity var(--d-2);
+  }
+
+  /* 指针离开（.sidebar-peek-out）：保持卡片几何滑出淡出，App.tsx 等 --d-2 后摘类（motionMs 读同一个令牌）。
+     若直接摘 .sidebar-peek，几何会在还看得见时跳回停靠形状。
+     淡出期间 pointer-events: none：残影既不该吃点击，也不该被 :hover 命中（否则指针掠过把面板又唤回来）。 */
+  .app.sidebar-collapsed.sidebar-peek.sidebar-peek-out .sidebar {
+    opacity: 0;
+    transform: translateX(-100%);
+    pointer-events: none;
+  }
+}
+
+.btn-collapse {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--r-sm);
+  color: var(--ink-3);
+}
+
+.btn-collapse:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+/* 展开按钮：手机端抽屉的唯一入口（桌面折叠后靠左缘悬停预览，用不到它，见下 media 覆盖） */
+.btn-expand {
+  display: none;
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 10;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  color: var(--ink-3);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+
+.btn-expand:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+/* 桌面无遮罩（侧栏占布局，无覆盖关系） */
+.sidebar-scrim {
+  display: none;
+}
+
+/* ---------- 手机端：侧栏覆盖式抽屉 ----------
+ * 桌面折叠是挤压布局（width 0），窄屏会把正文挤成竖条。
+ * 手机端侧栏 absolute 覆盖（260px 不变，不占布局），主画面始终全宽不 reflow，侧栏展开时被「推」向右平移 260px 出画面（无挤压变形）。 */
+@media (max-width: 768px) {
+  .main {
+    flex: none;
+    width: 100%;
+    min-width: 100%;
+    transition: transform var(--d-3) var(--ease-out);
+  }
+  .app:not(.sidebar-collapsed) .main {
+    transform: translateX(260px); /* 被侧栏推出画面右侧，内容布局不变 */
+  }
+  .sidebar {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 30; /* 盖过主画面，低于 members(50)/灯箱(60) */
+    width: 260px;
+    transition: transform var(--d-3) var(--ease-out), visibility var(--d-3); /* visibility 同款过渡：滑出动画照旧，落定才不可聚焦 */
+  }
+  .app.sidebar-collapsed .sidebar {
+    transform: translateX(-100%);
+  }
+  /* 触屏无悬停预览：左缘热区不参与（否则白吃屏幕最左 12px 的点击） */
+  .sidebar-zone {
+    display: none;
+  }
+  /* 手机端抽屉靠左上角浮动按钮开（桌面被上面的 display:none 关掉） */
+  .btn-expand {
+    display: flex;
+  }
+  /* 抽屉让出刘海安全区 */
+  .sidebar-header {
+    padding-top: calc(12px + env(safe-area-inset-top));
+  }
+  /* 浮动展开按钮落在顶栏那一行的竖向中线上 */
+  .btn-expand {
+    top: calc(11px + env(safe-area-inset-top));
+  }
+  /* 遮罩：盖住被推出去的主画面，点外侧任意位置收回 */
+  .sidebar-scrim {
+    display: block; /* 覆盖前面的桌面隐藏规则 */
+    position: absolute;
+    inset: 0;
+    z-index: 25; /* 侧栏(30) 之下、主画面之上 */
+    background: transparent; /* 不压暗，只接管点击收回 */
+  }
+}
+
+/* ---------- 空间功能入口（搜索框下面，如 Skill 库） ---------- */
+
+.side-nav {
+  flex: none;
+  padding: 6px 8px 0; /* 与 .tree 同一左右内边距：图标、文字与树行落在同一列 */
+}
+
+/* 与树行（.tree-item + .tree-twisty）同一几何：28px 行高、左内边距 10px、18px 图标槽位、槽位后 8px 到文字 */
+.side-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  padding: 0 4px 0 10px;
+  border-radius: var(--r-sm);
+  color: var(--ink-2);
+  font-size: var(--t-sm);
+  text-decoration: none;
+  transition: background var(--d-1), color var(--d-1);
+}
+
+.side-nav-item:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.side-nav-item.active {
+  background: var(--hover);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.side-nav-ic {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+}
+
+/* ---------- 侧栏顶部搜索框 ---------- */
+
+/* 无边框，状态层底色；悬停加深一档，聚焦换成面色 + 强调色描边 */
+.sidebar-search {
+  position: relative;
+  flex: none;
+  padding: 6px 12px 0; /* 头部底内边距 8px + 这里 6px = 与头部之间 14px */
+}
+
+.sidebar-search-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: var(--hover);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: var(--t-sm);
+  transition:
+    background var(--d-1),
+    box-shadow var(--d-1);
+}
+
+.sidebar-search-input::placeholder {
+  color: var(--ink-3);
+}
+
+.sidebar-search-input:hover {
+  background: var(--press);
+}
+
+.sidebar-search-input:focus {
+  outline: none;
+  background: var(--surface);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.sidebar-search-results {
+  position: absolute;
+  z-index: 30;
+  left: 12px;
+  right: 12px;
+  margin-top: 4px;
+  max-height: 320px;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-2);
+}
+
+.sidebar-search-empty {
+  padding: 8px 12px;
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+}
+
+.sidebar-search-hit {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 7px 12px;
+  border: none;
+  background: none;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+  font-size: var(--t-sm);
+}
+
+.sidebar-search-hit:hover {
+  background: var(--hover);
+}
+
+.sidebar-search-hit-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-search-hit-snippet {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+}
+
+/* 搜索范围开关：agent 过程页默认不参与搜索，勾上才进结果 */
+.sidebar-search-scope {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+  cursor: pointer;
+}
+
+/* ---------- 侧栏树列表（Boards）：section 头/折叠/行菜单/创建入口；树行视觉全部复用上面 tree-* ---------- */
+.dirboards {
+  flex: 1 1 auto; /* 树列表占满搜索框与 footer 之间,内容多了自己滚 */
+  min-height: 0;
+  overflow-y: auto;
+  margin-top: 12px;
+}
+
+.dirboards-add-wrap {
+  position: relative;
+}
+
+.dirboards-add {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  padding: 5px 12px;
+  font-size: var(--t-xs);
+  color: var(--ink-3);
+  text-align: left;
+}
+
+.dirboards-add:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+/* section 头与目录行/条目行：行内菜单的定位基准（菜单 top:100% 弹出） */
+.dir-board-header,
+.dir-row,
+.dir-item {
+  position: relative;
+}
+
+/* 分组标题：盒子与树行同宽（左右各缩 8px），文字落在同一条 18px 线上 */
+.dir-board-header {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 28px;
+  margin: 0 8px;
+  padding: 0 4px 0 10px;
+  border-radius: var(--r-sm);
+  transition: background var(--d-1);
+}
+
+.dir-board-header:hover {
+  background: var(--hover);
+}
+
+/* section 名（页面树 / 目录树）不可点，只作标签 */
+.dir-board-name {
+  flex: 0 1 auto; /* 名字在前：自然宽、过长省略；箭头紧跟其后 */
+  min-width: 0;
+  font-size: var(--t-xs);
+  color: var(--ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* section 折叠箭头：任何状态都 hover 才出现（占位不缩防布局抖动）；开合带旋转过渡 */
+.dir-board-chev {
+  opacity: 0;
+  transition: opacity var(--d-1);
+}
+
+.dir-board-header:hover .dir-board-chev {
+  opacity: 1;
+}
+
+.dir-board-chev .chev {
+  transition: transform var(--d-2) var(--ease-out);
+}
+
+.dir-board-chev .chev.open {
+  transform: rotate(90deg);
+}
+
+/* section 体折叠：直接切换显隐（不插值高度）；本次挂载里用户亲手开合过的那块，展开时内容淡入上浮
+ * （.is-toggled 由 Boards.tsx 挂；首屏、切空间不播） */
+.dir-board-body.closed {
+  display: none;
+}
+
+.dir-board-body.is-toggled {
+  animation: rise var(--d-2) var(--ease-out);
+}
+
+/* section 头按钮 hover 才显（＋/⋯）；键盘聚焦行内也显（可达性）；＋/⋯ 收右缘，箭头贴标题 */
+.dir-board-actions {
+  display: none;
+  margin-left: auto;
+}
+
+.dir-board-header:hover .dir-board-actions,
+.dir-board-header:focus-within .dir-board-actions {
+  display: inline-flex;
+}
+
+/* 内联创建命名行（目录/目录树）：复用 rename-input 视觉 */
+.dir-create-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.dirboards .tree-label {
+  cursor: pointer;
+  background: none;
+  border: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+}
+
+/* 悬浮菜单：fixed 定位（不随行/section 裁剪），锚点坐标由触发按钮 inline style 传入 */
+.dir-menu {
+  position: fixed;
+  z-index: 45;
+  min-width: 128px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-2);
+}
+
+.dir-menu button {
+  font-size: var(--t-sm);
+  color: var(--ink);
+  text-align: left;
+  padding: 5px 8px;
+  border-radius: var(--r-sm);
+  white-space: nowrap;
+}
+
+.dir-menu button:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.dir-menu button.danger:hover {
+  color: var(--danger);
+}
+
+.dir-menu button:disabled {
+  color: var(--ink-3);
+  opacity: 0.5;
+}

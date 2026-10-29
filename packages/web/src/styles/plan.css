@@ -1,0 +1,208 @@
+/* ---------- agent 的计划清单：计划卡（editor/plan-card.ts）与权限模式提示行（editor/mode-hint.tsx） ----------
+   计划卡在回复的抬头之下、正文之上：运行中嵌在运行条里（胶囊与审批卡之间），收尾后由回复块的 plan 属性接手。
+   条目文字、状态、优先级都是 agent 上报的，这里只负责画；动画只动 transform / opacity。 */
+
+.plan-card {
+  width: min(100%, 480px);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+  color: var(--ink-2);
+  font-size: var(--t-sm);
+}
+
+.plan-card[hidden] {
+  display: none;
+}
+
+/* 运行中第一次出现时淡入上浮（同审批卡）；收尾后的静态条（刷新 / 重建）不再播 */
+.plan-card {
+  animation: rise var(--d-3) var(--ease-out);
+}
+
+.run-strip.is-plan .plan-card {
+  animation: none;
+}
+
+.plan-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 30px;
+  padding: 0 10px 0 12px;
+  border-radius: var(--r-md);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--d-1);
+}
+
+.plan-head:hover {
+  background: var(--hover);
+}
+
+.plan-head:focus-visible {
+  outline: 2px solid var(--accent-tint);
+  outline-offset: -2px;
+}
+
+.plan-title {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.plan-count {
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.plan-chev {
+  display: grid;
+  place-items: center;
+  flex: none;
+  margin-left: auto;
+  color: var(--ink-3);
+  transition: transform var(--d-2) var(--ease-out);
+}
+
+.plan-card[data-open='true'] .plan-chev {
+  transform: rotate(180deg);
+}
+
+/* 高度封顶：运行条的结构保证（正文位置与步数 / 计划条数无关）不能被一份很长的计划破掉，条目多了在卡片里滚；
+ * 不设 overscroll-behavior: contain —— 它在文档流里，滚到头要把滚轮交还给页面 */
+.plan-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 216px;
+  margin: 0;
+  padding: 0 6px 8px;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.plan-card[data-open='false'] .plan-list {
+  display: none;
+}
+
+.plan-item {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-items: start;
+  column-gap: 10px;
+  padding: 3px 6px;
+  line-height: 1.45;
+  user-select: text;
+}
+
+.plan-text {
+  overflow-wrap: anywhere;
+}
+
+/* 状态标记：待办 = 空心圈；进行中 = 缺口圈（运行中转动）；完成 = 实心圈 + 勾 */
+.plan-mark {
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  width: 14px;
+  height: 14px;
+  margin-top: 2px;
+  border: 1.5px solid var(--ink-3);
+  border-radius: 50%;
+  color: transparent;
+}
+
+.plan-mark svg {
+  stroke-width: 3;
+}
+
+.plan-item.is-in_progress .plan-mark {
+  border-color: var(--live);
+  border-right-color: transparent;
+}
+
+.plan-item.is-in_progress .plan-text {
+  color: var(--ink);
+}
+
+/* 只有这一轮还在跑时才转；停了 / 收尾后留一个静止的缺口圈，不假装还在做 */
+.run-strip:not(.is-done):not(.is-plan) .plan-item.is-in_progress .plan-mark {
+  animation: strip-spin 0.9s linear infinite;
+}
+
+.plan-item.is-completed .plan-mark {
+  border-color: var(--live);
+  background: var(--live);
+  color: var(--bg);
+}
+
+.plan-item.is-completed .plan-text {
+  color: var(--ink-3);
+}
+
+/* 优先级淡显：低优先级的条目压一档；高 / 中保持原样（agent 排的顺序已经表达了先后） */
+.plan-item[data-priority='low'] .plan-text {
+  opacity: 0.72;
+}
+
+/* 收尾：运行条只收掉胶囊 / 审批 / 托盘，计划卡留在原位等回复块的 plan 属性接手（plan-card.ts 的 retireStrip） */
+.run-strip.is-retired > :not(.plan-card):not(.team-host) {
+  display: none;
+}
+
+/* 计划审批（ExitPlanMode）：预览就是计划正文，比命令 / diff 预览给高一点 */
+.ask-preview.is-plan {
+  max-height: 280px;
+}
+
+/* ---------- 权限模式提示行：离开默认档时，输入卡上方（对话）/ 草稿消息署名行下方（文档）一行 ---------- */
+
+.mode-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 0 6px 6px;
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+}
+
+.mode-hint-name {
+  flex: none;
+  color: var(--ink-2);
+  font-weight: 600;
+}
+
+.mode-hint.is-risky .mode-hint-name {
+  color: var(--danger);
+}
+
+.mode-hint-desc {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mode-hint-keys {
+  flex: none;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+/* 文档模式：提示行是署名行旁边的另一个块首 widget，只在草稿（还没发出去的那条）上显示 */
+.editor-root .ProseMirror > .user-message > .msg-mode-hint {
+  display: none;
+  padding-left: 0;
+}
+
+.editor-root .ProseMirror > .user-message.is-draft > .msg-mode-hint:not(:empty) {
+  display: block;
+}
+
+.editor-root .ProseMirror > .user-message > .msg-head + .msg-mode-hint + * {
+  margin-top: 0;
+}

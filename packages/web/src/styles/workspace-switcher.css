@@ -1,0 +1,138 @@
+/* ---------- 底部工作区切换器（footer 即触发按钮，菜单向上弹） ---------- */
+
+/* 次要文字色，文字落在侧栏 18px 线上（底栏 8px + 这里 10px） */
+.ws-trigger {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--t-sm);
+  color: var(--ink-2);
+  padding: 6px 10px;
+  border-radius: var(--r-sm);
+  transition:
+    background var(--d-1),
+    color var(--d-1);
+}
+
+.ws-trigger:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.ws-trigger-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.ws-trigger-caret {
+  flex: none;
+  display: flex;
+  align-items: center;
+  color: var(--ink-3);
+}
+
+.space-menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+}
+
+.space-menu {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 8px;
+  right: 8px;
+  z-index: 41;
+  display: flex;
+  flex-direction: column;
+  max-height: 300px;
+  padding: 4px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-2);
+}
+
+/* 空间行区域内部滚动，用户区固定在菜单底部 */
+.space-menu-list {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.space-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--t-sm);
+  text-align: left;
+  padding: 5px 6px;
+  border-radius: var(--r-sm);
+}
+
+.space-item:hover {
+  background: var(--hover);
+}
+
+.space-item.loading {
+  color: var(--ink-3);
+  cursor: default;
+}
+
+.space-item.active {
+  color: var(--accent);
+}
+
+.space-item-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.space-item-add {
+  color: var(--ink-3);
+}
+
+/* 空间选择框右边的图标按钮（设置 / 回收站）：只对当前选中的空间生效 */
+.ws-cog,
+.ws-trash {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-3);
+  padding: 6px 7px;
+  border-radius: var(--r-sm);
+  transition:
+    background var(--d-1),
+    color var(--d-1);
+}
+
+.ws-cog:hover,
+.ws-trash:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+/* 菜单底部用户区：分隔线之上固定不滚动 */
+.ws-menu-user {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  padding: 6px 4px 2px;
+  border-top: 1px solid var(--line);
+}
+
+.ws-menu-user .sidebar-user {
+  flex: 1;
+}

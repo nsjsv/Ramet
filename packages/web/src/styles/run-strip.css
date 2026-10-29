@@ -1,0 +1,604 @@
+/* ---------- 运行中：运行条（胶囊 + 审批卡 + 步骤托盘）在回复抬头之下、正文之上 ----------
+   editor/run-strip.ts / run-tray.ts / live-reply.ts。托盘高度封顶，新步骤在下，正文位置与步骤数无关。
+   动画只动 transform / opacity；转圈 / 呼吸的循环周期不走时长令牌。 */
+
+/* 运行中占位段落隐藏，正文由 .live-body 画；块不可编辑由装饰写 contenteditable=false */
+.editor-root .ProseMirror > .agent-reply.is-live > :not(.live-body):not(.run-strip):not(.reply-head) {
+  display: none;
+}
+
+/* 运行中抬头只留图标 + 名字：用量标签与操作行收尾后才出现（运行条飞进标签，run-land.ts） */
+.editor-root .ProseMirror > .agent-reply.is-live > .reply-head .reply-end,
+.chat-msg.is-live > .reply-head .reply-end {
+  visibility: hidden;
+}
+
+.run-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 100%;
+  margin-bottom: 6px;
+  font-size: var(--t-sm);
+  color: var(--ink-2);
+  user-select: none;
+}
+
+.chat-bubble > .run-strip {
+  margin-top: 2px;
+}
+
+/* ---------- 胶囊 ---------- */
+
+/* 定宽：文字在里面截断，计时与停止钉在右端，运行中不跟着文字长度跳 */
+.pill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: min(100%, 480px);
+  min-height: 36px;
+  padding: 4px 6px 4px 0;
+  border-radius: var(--r-pill);
+  background: var(--live-tint);
+  transition: background var(--d-2);
+}
+
+.pill-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 28px;
+  padding-left: 12px;
+  border-radius: var(--r-pill);
+  cursor: pointer;
+}
+
+.pill-main:focus-visible {
+  outline: 2px solid var(--accent-tint);
+  outline-offset: 1px;
+}
+
+.now {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  height: 20px;
+  overflow: hidden;
+  color: var(--ink);
+}
+
+.now-text {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 20px;
+}
+
+/* 换步骤时离场的那条脱离文档流叠在上面滑走 */
+.now-text.is-leaving {
+  position: absolute;
+  inset: 0;
+}
+
+.meta {
+  flex: none;
+  min-width: 64px;
+  text-align: right;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.chev {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  color: var(--ink-3);
+  transition: transform var(--d-2) var(--ease-out);
+}
+
+.run-strip[data-open='true'] .chev {
+  transform: rotate(180deg);
+}
+
+.stop {
+  flex: none;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: var(--r-pill);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+  color: var(--ink-2);
+  font-size: var(--t-xs);
+  cursor: pointer;
+  transition: color var(--d-1);
+}
+
+.stop:hover,
+.stop:focus-visible {
+  color: var(--danger);
+}
+
+.run-strip.is-done .stop {
+  display: none;
+}
+
+.pill.is-ask {
+  background: var(--warn-tint);
+}
+
+/* 唯一会动的东西：转动的弧（transform），不是闪烁 */
+.spin {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--live);
+  border-right-color: transparent;
+  animation: strip-spin 0.9s linear infinite;
+}
+
+.pill.is-ask .spin {
+  border-color: var(--warn);
+  border-right-color: transparent;
+  animation-duration: 2.4s;
+}
+
+.run-strip.is-done .pill .spin {
+  animation: none;
+  border-right-color: var(--live);
+  opacity: 0.6;
+}
+
+@keyframes strip-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ---------- 失败：运行中失败（run-strip）与已收尾的失败块（reply-fail）同一个外观 ---------- */
+
+.pill.is-failed {
+  background: var(--danger-tint);
+}
+
+.pill.is-failed .now {
+  color: var(--danger);
+}
+
+/* 转圈换成红点：同一个元素，尺寸与位置不变 */
+.pill.is-failed .spin {
+  width: 8px;
+  height: 8px;
+  margin: 3px;
+  border: 0;
+  background: var(--danger);
+  animation: none;
+  opacity: 1;
+}
+
+.run-strip.is-failed .tray,
+.run-strip.is-failed .meta,
+.run-strip.is-failed .chev,
+.run-strip.is-failed .stop {
+  display: none;
+}
+
+.run-strip.is-failed .pill-main {
+  cursor: default;
+}
+
+.retry {
+  display: none;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: var(--r-pill);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+  color: var(--ink);
+  font-size: var(--t-xs);
+  cursor: pointer;
+  transition: opacity var(--d-1);
+}
+
+.retry:hover {
+  opacity: 0.8;
+}
+
+.retry:focus-visible {
+  outline: 2px solid var(--accent-tint);
+  outline-offset: 1px;
+}
+
+.pill.is-failed .retry {
+  display: inline-flex;
+}
+
+/* 「继续剩下的」没有后面的人时藏起来（hidden 属性压不过上面的 display，这里显式压） */
+.pill .retry[hidden] {
+  display: none;
+}
+
+/* ---------- 审批：钉在胶囊下，不进滚动托盘；没有倒计时 ---------- */
+
+.ask {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(100%, 480px);
+  padding: 12px 14px;
+  border-radius: var(--r-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
+  color: var(--ink);
+  animation: rise var(--d-3) var(--ease-out);
+}
+
+.ask-title {
+  font-size: var(--t-md);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.ask-acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.ask-btn {
+  height: 30px;
+  padding: 0 12px;
+  border-radius: var(--r-sm);
+  background: var(--hover);
+  color: var(--ink);
+  font-size: var(--t-sm);
+  cursor: pointer;
+  transition: background var(--d-1), opacity var(--d-1);
+}
+
+.ask-btn:hover {
+  background: var(--press);
+}
+
+.ask-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.ask-btn.is-primary {
+  background: var(--ink);
+  color: var(--bg);
+}
+
+.ask-btn.is-primary:hover {
+  opacity: 0.88;
+}
+
+/* 命令 / diff 预览：只读、可选中复制，内部滚动，不撑高审批卡（滚到头交还给页面，不 contain） */
+.ask-preview {
+  max-height: 160px;
+  overflow: auto;
+  user-select: text;
+}
+
+.ask-preview .run-detail {
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  overflow: visible;
+  border: 0;
+  background: none;
+}
+
+.ask-preview .rd-item:first-child {
+  margin-top: 0;
+}
+
+/* ---------- 提问表单（ask-form.ts）：运行条的提问卡与底部兜底弹条共用 ---------- */
+
+.ask-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* message 第一行之外的说明（第一行是卡片标题） */
+.ask-msg {
+  max-height: 160px;
+  overflow: auto;
+  color: var(--ink-2);
+  font-size: var(--t-sm);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ask-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ask-label {
+  color: var(--ink);
+  font-size: var(--t-sm);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.ask-hint {
+  margin-top: -4px;
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+  overflow-wrap: anywhere;
+}
+
+.ask-opts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ask-opt {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  max-width: 100%;
+  padding: 6px 10px;
+  border-radius: var(--r-sm);
+  background: var(--hover);
+  box-shadow: inset 0 0 0 1px transparent;
+  color: var(--ink);
+  font-size: var(--t-sm);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--d-1), box-shadow var(--d-1);
+}
+
+.ask-opt:hover {
+  background: var(--press);
+}
+
+.ask-opt[aria-checked='true'] {
+  background: var(--accent-tint);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.ask-opt:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.ask-opt-desc {
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+}
+
+/* 文本框会随内容长高（ask-form.ts 的 grow），到上限后内部滚动 */
+.ask-input {
+  width: 100%;
+  min-height: 30px;
+  max-height: 240px;
+  padding: 5px 8px;
+  overflow: auto;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--t-sm);
+  line-height: 1.5;
+  resize: none;
+}
+
+.ask-input:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.ask-input.is-num {
+  width: 160px;
+}
+
+.ask-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--t-sm);
+  cursor: pointer;
+}
+
+.ask-err {
+  color: var(--danger);
+  font-size: var(--t-xs);
+}
+
+.rd-cmd {
+  background: var(--bg-sunk);
+  max-height: none;
+}
+
+.rd-cmd-prompt {
+  color: var(--ink-3);
+  user-select: none;
+}
+
+.rd-cmd-note {
+  margin-top: 4px;
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+}
+
+/* ---------- 托盘：高度封顶，新步骤在下（滚到头交还给页面，不 contain） ---------- */
+
+.tray {
+  max-height: 168px;
+  overflow-y: auto;
+  padding: 2px 0;
+  animation: rise var(--d-2) var(--ease-out);
+}
+
+.run-strip[data-open='false'] .tray {
+  display: none;
+}
+
+/* 滚过顶之后，最上一行渐隐；没滚时不遮第一行 */
+.tray.is-scrolled {
+  -webkit-mask-image: linear-gradient(transparent, #000 18px);
+  mask-image: linear-gradient(transparent, #000 18px);
+}
+
+.trow {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 10px;
+  min-height: 30px;
+  padding: 0 10px;
+  border-radius: var(--r-sm);
+  color: var(--ink-2);
+  cursor: pointer;
+  animation: rise var(--d-2) var(--ease-out) both;
+  transition: background var(--d-1);
+}
+
+.trow:hover {
+  background: var(--hover);
+}
+
+.trow:focus-visible {
+  outline: 2px solid var(--accent-tint);
+  outline-offset: -2px;
+}
+
+.trow .k {
+  display: grid;
+  place-items: center;
+  color: var(--ink-3);
+}
+
+.trow .t {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trow .st {
+  display: flex;
+  justify-content: flex-end;
+  min-width: 40px;
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.trow .st .spin {
+  width: 12px;
+  height: 12px;
+  border-width: 1.5px;
+}
+
+.trow.is-now .t {
+  color: var(--ink);
+}
+
+.trow.is-child {
+  padding-left: 26px;
+}
+
+.trow.is-failed .t,
+.trow.is-failed .k {
+  color: var(--danger);
+}
+
+.trow-note {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: var(--t-xs);
+  color: var(--danger);
+}
+
+/* 点开：标题换行、下面接详情（run-detail.ts 的渲染，内部滚动，不撑高托盘的封顶） */
+.trow.is-full {
+  align-items: start;
+  padding-block: 6px;
+}
+
+.trow.is-full .t {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.trow > .run-detail,
+.trow > .run-card {
+  grid-column: 1 / -1;
+  cursor: auto;
+}
+
+/* ---------- 流式正文 ---------- */
+
+.live-body > :first-child {
+  margin-top: 0;
+}
+
+.live-body > :last-child {
+  margin-bottom: 0;
+}
+
+.live-body:empty {
+  display: none;
+}
+
+/* 末尾的光标（opacity 呼吸）：挂在最后一个文本块的末尾 */
+.live-body.is-streaming > :is(p, h1, h2, h3):last-child::after,
+.live-body.is-streaming > :is(ul, ol):last-child > li:last-child > p:last-child::after,
+.live-body.is-streaming > blockquote:last-child > p:last-child::after {
+  content: '';
+  display: inline-block;
+  width: 7px;
+  height: 1.05em;
+  margin-left: 2px;
+  vertical-align: -0.15em;
+  border-radius: 2px;
+  background: var(--live);
+  animation: strip-breathe 1.1s ease-in-out infinite;
+}
+
+@keyframes strip-breathe {
+  50% { opacity: 0.2; }
+}
+
+@media (max-width: 760px) {
+  .pill,
+  .ask {
+    width: 100%;
+  }
+
+  .meta {
+    display: none;
+  }
+}
+
+/* 循环动画（转圈 / 呼吸）不走时长令牌，减弱动效时显式关掉 */
+@media (prefers-reduced-motion: reduce) {
+  .spin {
+    animation: none;
+    border-right-color: var(--live);
+    opacity: 0.6;
+  }
+
+  .live-body.is-streaming > :is(p, h1, h2, h3):last-child::after,
+  .live-body.is-streaming > :is(ul, ol):last-child > li:last-child > p:last-child::after,
+  .live-body.is-streaming > blockquote:last-child > p:last-child::after {
+    animation: none;
+  }
+}

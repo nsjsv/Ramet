@@ -1,0 +1,282 @@
+/* 富块：提示框 / 折叠块 / 目录 / 分栏 / 嵌入（editor/callout.ts、toggle.ts、toc.ts、columns.ts、embed.ts）。
+ * 选择器不带 .ProseMirror 前缀的部分：静态宿主（对话气泡、历史预览）也要同样的样子。 */
+
+/* 提示框：左色条 + 淡底，五种外观各一个主色 */
+.callout {
+  --co: var(--accent);
+  margin: 0.6em 0;
+  padding: 8px 14px 10px;
+  border-left: 3px solid var(--co);
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--co) 8%, transparent);
+}
+
+.callout-note { --co: #2f6fe4; }
+.callout-tip { --co: #1f8a5b; }
+.callout-important { --co: #8250df; }
+.callout-warning { --co: #b7791f; }
+.callout-caution { --co: #d14343; }
+
+.callout-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 26px;
+  color: var(--co);
+  font-weight: 600;
+  font-size: var(--t-sm);
+  user-select: none;
+}
+
+.callout-ic {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--r-sm);
+  color: var(--co);
+}
+
+.ProseMirror[contenteditable='true'] .callout-ic:hover {
+  background: color-mix(in srgb, var(--co) 14%, transparent);
+}
+
+.callout-title {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--co);
+  font: inherit;
+  font-weight: 600;
+}
+
+.callout-title::placeholder {
+  color: var(--co);
+  opacity: 1;
+}
+
+.callout-fold {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  color: var(--ink-3);
+  transform: rotate(90deg);
+  transition: transform var(--d-1) var(--ease-out);
+}
+
+.callout-fold[hidden] {
+  display: none;
+}
+
+.callout.is-folded .callout-fold {
+  transform: none;
+}
+
+.callout.is-folded > .callout-body {
+  display: none;
+}
+
+.callout-body > :first-child {
+  margin-top: 2px;
+}
+
+.callout-body > :last-child {
+  margin-bottom: 0;
+}
+
+.callout-kind-menu {
+  position: fixed;
+  z-index: 60;
+  min-width: 140px;
+}
+
+.callout-kind-menu .pop-row {
+  --co: var(--accent);
+}
+
+.callout-kind-menu .callout-ic {
+  width: 20px;
+  height: 20px;
+}
+
+.callout-kind-menu .pop-row.is-current {
+  background: var(--hover);
+}
+
+/* 折叠块：左侧箭头，收起时只留摘要行 */
+.toggle {
+  position: relative;
+  margin: 0.35em 0;
+  padding-left: 26px;
+}
+
+.toggle-caret {
+  position: absolute;
+  left: 0;
+  top: 2px;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--r-sm);
+  color: var(--ink-2);
+  transition: transform var(--d-1) var(--ease-out);
+}
+
+.toggle-caret:hover {
+  background: var(--hover);
+}
+
+.toggle.is-open > .toggle-caret {
+  transform: rotate(90deg);
+}
+
+.toggle:not(.is-open) > .toggle-content > :not(:first-child) {
+  display: none;
+}
+
+.toggle-content > :first-child {
+  margin-top: 0;
+}
+
+/* 静态宿主（没有 nodeView）：摘要前画个箭头，内容全展开 */
+.toggle:not(:has(> .toggle-caret)) > .toggle-content > :first-child::before {
+  content: '▸ ';
+  color: var(--ink-3);
+}
+
+/* 目录 */
+.toc {
+  margin: 0.6em 0;
+  padding: 8px 12px;
+  border-radius: var(--r-md);
+  background: var(--bg-sunk);
+  font-size: var(--t-sm);
+  color: var(--ink-3);
+}
+
+.toc-row {
+  display: block;
+  padding: 3px 0;
+  color: var(--ink-2);
+  cursor: pointer;
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.toc-row:hover {
+  color: var(--accent);
+}
+
+.toc-empty {
+  color: var(--ink-3);
+}
+
+/* 分栏：等宽横排，窄屏竖排 */
+.columns {
+  display: grid;
+  grid-template-columns: repeat(var(--cols, 2), minmax(0, 1fr));
+  gap: 24px;
+  margin: 0.6em 0;
+}
+
+.column {
+  min-width: 0;
+}
+
+.column > :first-child {
+  margin-top: 0;
+}
+
+.ProseMirror[contenteditable='true'] .column {
+  border-radius: var(--r-sm);
+  outline: 1px dashed transparent;
+  transition: outline-color var(--d-1) var(--ease-out);
+}
+
+.ProseMirror[contenteditable='true'] .columns:hover > .column {
+  outline-color: var(--line);
+}
+
+@media (max-width: 640px) {
+  .columns {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+}
+
+/* 嵌入 */
+.embed {
+  margin: 0.6em 0;
+}
+
+.embed iframe {
+  display: block;
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--bg-sunk);
+}
+
+.embed video {
+  display: block;
+  max-width: 100%;
+  max-height: 70vh;
+  border-radius: var(--r-md);
+  background: #000;
+}
+
+.embed audio {
+  display: block;
+  width: 100%;
+}
+
+.embed-bad {
+  color: var(--ink-3);
+  font-size: var(--t-sm);
+}
+
+.ProseMirror .embed.ProseMirror-selectednode iframe,
+.ProseMirror .embed.ProseMirror-selectednode video {
+  outline: 2px solid var(--accent);
+}
+
+.embed-prompt {
+  position: fixed;
+  z-index: 60;
+  width: min(420px, calc(100vw - 16px));
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.embed-prompt input {
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--t-sm);
+  outline: none;
+}
+
+.embed-prompt input:focus {
+  border-color: var(--accent);
+}
+
+.embed-prompt-hint {
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+}
+
+.embed-prompt-hint.is-error {
+  color: var(--danger);
+}

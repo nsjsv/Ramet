@@ -1,0 +1,193 @@
+:root {
+  color-scheme: light; /* 原生控件（input/select/滚动条/自动填充）跟主题走，深色下 UA 不再给白底 */
+  /* 深色令牌在 dark.css */
+  /* 面 */
+  --bg: #ffffff;
+  --bg-sunk: #f7f7f5;
+  --surface: #ffffff;
+  /* 文字：ink 正文 / ink-2 次要但要读 / ink-3 提示、占位、装饰 */
+  --ink: #1f1e1c;
+  --ink-2: #5f5e5a;
+  --ink-3: #9b9a96;
+  /* 线与状态层：半透明叠加，任何底色上都成立 */
+  --line: rgba(31, 30, 28, 0.09);
+  --line-strong: rgba(31, 30, 28, 0.16);
+  --hover: rgba(31, 30, 28, 0.045);
+  --press: rgba(31, 30, 28, 0.08);
+  /* 交互强调（链接、焦点、选中、主按钮） */
+  --accent: #2f6fe4;
+  --accent-tint: rgba(47, 111, 228, 0.1);
+  /* 侧栏宽度拖拽手柄的高亮：浅色跟 accent 走蓝，深色换灰（dark.css） */
+  --resizer-hl: var(--accent);
+  --on-accent: #ffffff;
+  /* AI 在干活：唯一会动的颜色 */
+  --live: #6a5cf5;
+  --live-tint: rgba(106, 92, 245, 0.1);
+  /* 语义 */
+  --ok: #1f8a5b;
+  --warn: #b7791f;
+  --warn-tint: rgba(183, 121, 31, 0.12);
+  --danger: #d14343;
+  --danger-tint: rgba(209, 67, 67, 0.1);
+  --you: #1f8a5b;
+  --you-tint: rgba(31, 138, 91, 0.08);
+  --find-hit: rgba(255, 196, 0, 0.45);
+  --scrim: rgba(15, 15, 15, 0.4);
+  --backdrop: rgba(0, 0, 0, 0.85);
+  /* 字体：系统字体（不下载字体，省流量） */
+  --font: ui-sans-serif, -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace;
+  --t-xs: 12px;
+  --t-sm: 13px;
+  --t-md: 15px;
+  --t-body: 16px;
+  --t-h3: 18px;
+  --t-h2: 22px;
+  --t-h1: 32px;
+  --lh: 1.7;
+  /* 形。--shadow-2 只有投影：产品里的浮层自带 1px 边框，不再叠一圈环 */
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 16px;
+  --r-pill: 999px;
+  --shadow-1: 0 1px 2px rgba(15, 15, 15, 0.06), 0 0 0 1px var(--line);
+  --shadow-2: 0 8px 28px rgba(15, 15, 15, 0.12);
+  /* 动效：只动 transform / opacity；减弱动效时时长归零（见下） */
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --d-1: 120ms;
+  --d-2: 200ms;
+  --d-3: 320ms;
+  /* 通用线性文档图标：无图标页面的占位 glyph + 子页面块/行内页面链接共用（mask 引用，
+     靠 background: currentColor 上色）；形状与 icons.tsx 路径表的 file 相同（伪元素里画不了内联 SVG） */
+  --page-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z' fill='none' stroke='%23000' stroke-width='2' stroke-linejoin='round'/%3E%3Cpath d='M14 2v4a2 2 0 0 0 2 2h4' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --d-1: 0ms;
+    --d-2: 0ms;
+    --d-3: 0ms;
+  }
+}
+
+/* 共用入场：淡入上浮（消息入场、目录板展开）。时长由调用处的令牌给 */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font);
+  color: var(--ink);
+  background: var(--bg);
+}
+
+/* 复选框：全站一个样子。
+ * 原生 <input type=checkbox>（表格行勾选、侧栏、对话框等）走下面的全局规则；画出来的框（集合单元格 .check-box、
+ * 正文待办 prose.css 的 ::before）用同一组令牌，改外观只改这里。
+ * 动画：勾是背景图，没勾时也在、尺寸为 0；勾上时底色淡入、勾带回弹长出来，取消时收回，按下框略缩。
+ * 只用过渡（状态变了才动），首次渲染已勾的框不动。正文待办切换时整条 li 重建，过渡播不了，见 prose.css 的 .task-flipped。 */
+:root {
+  --check-size: 16px;
+  --check-border: 1.5px solid var(--ink-3); /* 可点击的控件：描边不用更淡的 --line-strong，对比度要够 */
+  --check-radius: 4px;
+  --check-mark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='none' stroke='white' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round' d='M3 8.5 6.5 12 13 4.5'/%3E%3C/svg%3E");
+  --check-dash: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='none' stroke='white' stroke-width='2.5' stroke-linecap='round' d='M4 8h8'/%3E%3C/svg%3E");
+  --check-mark-size: 11px;
+  /* 过渡清单（勾的尺寸另算）：会隐藏 / 显示的框（如集合表格行勾选）在后面追加 opacity 时复用 */
+  --check-transition:
+    background-color var(--d-1) var(--ease-out),
+    border-color var(--d-1) var(--ease-out),
+    transform var(--d-1) var(--ease-out);
+}
+
+input[type='checkbox'],
+.check-box {
+  appearance: none;
+  display: inline-block;
+  flex: none;
+  width: var(--check-size);
+  height: var(--check-size);
+  margin: 0;
+  border: var(--check-border);
+  border-radius: var(--check-radius);
+  background: transparent var(--check-mark) center / 0 no-repeat;
+  vertical-align: middle;
+  cursor: pointer;
+  transition: var(--check-transition), background-size var(--d-1) var(--ease-out);
+}
+
+input[type='checkbox']:checked,
+input[type='checkbox']:indeterminate,
+.check-box.is-on {
+  border-color: var(--accent);
+  background-color: var(--accent);
+  background-size: var(--check-mark-size);
+  /* 勾上时勾带回弹长出来（取消时走上面的 ease-out：回弹曲线收到 0 会冲成负尺寸） */
+  transition: var(--check-transition), background-size var(--d-2) var(--ease-spring);
+}
+
+input[type='checkbox']:indeterminate {
+  background-image: var(--check-dash);
+}
+
+input[type='checkbox']:active:not(:disabled),
+.check-box:active {
+  transform: scale(0.86);
+}
+
+input[type='checkbox']:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+input[type='checkbox']:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.app {
+  display: flex;
+  height: 100vh;
+  height: 100dvh; /* 手机浏览器工具栏可见时 100vh 含被遮区（底部元素被工具栏盖住），dvh 随工具栏动态收缩；旧浏览器回退上一行 vh */
+}
+
+.main {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+}
+
+/* FLIP 演出期间（motion.ts flip()）：列宽变了，平移起点会超出 .main 右缘；只在这段时间不出横向滚动条 */
+[data-flipping] .main {
+  overflow-x: hidden;
+}
+
+.loading {
+  padding: 48px;
+  color: var(--ink-3);
+}
+

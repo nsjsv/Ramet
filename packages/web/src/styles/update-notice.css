@@ -1,0 +1,61 @@
+/* ---------- 发版提示（UpdateNotice.tsx）----------
+ * 右下角小卡片，外观复用 menus.css 的 .pop-card。z-index 压过侧栏(30)和手机端面板(40~50)，低于弹窗遮罩。 */
+
+.update-notice {
+  position: fixed;
+  right: 16px;
+  bottom: calc(16px + env(safe-area-inset-bottom));
+  z-index: 52;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  max-width: calc(100vw - 32px);
+  animation: rise var(--d-2) var(--ease-out);
+}
+
+.update-notice-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 6px 10px 6px 8px;
+  border-radius: var(--r-sm);
+  color: var(--accent);
+  text-align: left;
+}
+
+.update-notice-main:hover {
+  background: var(--hover);
+}
+
+.update-notice-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.update-notice-title {
+  font-size: var(--t-sm);
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.update-notice-hint {
+  font-size: var(--t-xs);
+  color: var(--ink-2);
+}
+
+.update-notice-close {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-sm);
+  color: var(--ink-3);
+}
+
+.update-notice-close:hover {
+  background: var(--hover);
+  color: var(--ink);
+}

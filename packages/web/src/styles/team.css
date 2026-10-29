@@ -1,0 +1,713 @@
+/* ---------- 带队（/带队）：计划卡 / 进度卡 / 甘特（team/*.tsx）----------
+   计划轮是可编辑的计划卡，执行轮是任务列表加实时甘特，跑完收成一行胶囊。
+   运行中挂在运行条里，收尾后由回复块的 team 属性接手；过程页头里还有一份只读的。
+   动画只动 transform / opacity，条的位置和宽度由数据算出，不做 width 过渡。 */
+
+:root {
+  /* 甘特里同一个 agent 恒用同一种颜色，按负责人首次出现的顺序分槽（team-model.ts 的 SLOT_COUNT = 5） */
+  --team-c0: var(--live);
+  --team-c1: var(--accent);
+  --team-c2: var(--ok);
+  --team-c3: var(--warn);
+  --team-c4: color-mix(in srgb, var(--danger) 60%, var(--live));
+}
+
+.team-host {
+  width: min(100%, 560px);
+}
+
+.team-card {
+  width: min(100%, 560px);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+  color: var(--ink-2);
+  font-size: var(--t-sm);
+  user-select: text;
+}
+
+.run-strip.is-team .team-card {
+  animation: none;
+}
+
+.team-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 34px;
+  padding: 0 10px 0 12px;
+  border-radius: var(--r-md);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--d-1);
+}
+
+.team-head:hover {
+  background: var(--hover);
+}
+
+.team-head:focus-visible {
+  outline: 2px solid var(--accent-tint);
+  outline-offset: -2px;
+}
+
+.team-head-title {
+  flex: none;
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.team-head-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.team-head-sum {
+  flex: none;
+  margin-left: auto;
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.team-chev {
+  flex: none;
+  color: var(--ink-3);
+  transition: transform var(--d-2) var(--ease-out);
+}
+
+.team-card[data-open='true'] .team-chev {
+  transform: rotate(180deg);
+}
+
+/* 状态小标：待确认琥珀，进行中紫，完成绿，其余灰 / 红 */
+.team-state {
+  flex: none;
+  padding: 1px 8px;
+  border-radius: var(--r-pill);
+  background: var(--hover);
+  color: var(--ink-2);
+  font-size: var(--t-xs);
+  white-space: nowrap;
+}
+
+.team-state.is-draft {
+  background: var(--warn-tint);
+  color: var(--warn);
+}
+
+.team-state.is-running {
+  background: var(--live-tint);
+  color: var(--live);
+}
+
+.team-state.is-done {
+  background: color-mix(in srgb, var(--ok) 14%, transparent);
+  color: var(--ok);
+}
+
+.team-state.is-error {
+  background: var(--danger-tint);
+  color: var(--danger);
+}
+
+.team-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 2px 12px 12px;
+}
+
+/* ---------- 计划卡 ---------- */
+
+.team-plan-title {
+  width: 100%;
+  min-width: 0;
+  padding: 3px 6px;
+  margin-left: -6px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--t-md);
+  font-weight: 600;
+}
+
+.team-plan-title.is-static {
+  overflow-wrap: anywhere;
+}
+
+/* 可编辑的单行：平时一条细线提示能改，悬停浅底，聚焦出焦点环 */
+input.team-plan-title,
+input.team-task-edit {
+  box-shadow: 0 1px 0 var(--line);
+  transition: background var(--d-1), box-shadow var(--d-1);
+}
+
+input.team-plan-title:hover,
+input.team-task-edit:hover {
+  background: var(--hover);
+}
+
+input.team-plan-title:focus,
+input.team-task-edit:focus {
+  outline: none;
+  background: var(--bg-sunk);
+  box-shadow: 0 0 0 2px var(--accent-tint);
+}
+
+.team-tasks {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.team-task {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  column-gap: 10px;
+  align-items: start;
+}
+
+.team-task.is-plan {
+  padding: 8px 10px;
+  border-radius: var(--r-md);
+  background: var(--bg-sunk);
+  box-shadow: inset 3px 0 0 var(--line-strong);
+}
+
+.team-task.is-plan.is-bad {
+  background: var(--danger-tint);
+  box-shadow: inset 3px 0 0 var(--danger);
+}
+
+.team-task.is-plan > .team-no {
+  margin-top: 2px;
+  font-size: var(--t-xs);
+}
+
+.team-no {
+  flex: none;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.team-task-main {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.team-task-title {
+  min-width: 0;
+  color: var(--ink);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.team-task-edit {
+  width: 100%;
+  min-width: 0;
+  padding: 2px 6px;
+  margin-left: -6px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-weight: 600;
+}
+
+/* 较长的说明：压成三行，点一下展开 */
+.team-detail {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.team-detail.is-open {
+  display: block;
+  -webkit-line-clamp: unset;
+  line-clamp: unset;
+}
+
+.team-task-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  min-width: 0;
+}
+
+.team-who {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 220px;
+  height: 20px;
+  padding: 0 8px;
+  overflow: hidden;
+  border-radius: var(--r-pill);
+  background: var(--hover);
+  color: var(--ink-2);
+  font-size: var(--t-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.team-dep {
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+}
+
+.team-warn {
+  color: var(--danger);
+  font-size: var(--t-xs);
+  font-weight: 600;
+}
+
+/* 负责人 / 工作目录下拉，比输入卡里的 chip 小一号 */
+.team-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: var(--r-pill);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  color: var(--ink-2);
+  font-size: var(--t-xs);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--d-1);
+}
+
+.team-chip:hover:not(:disabled),
+.team-chip[aria-expanded='true'] {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.team-chip:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.team-chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.team-chip.is-bad {
+  background: var(--danger-tint);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 45%, transparent);
+  color: var(--danger);
+}
+
+.team-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.team-foot-hint {
+  flex: 1 1 200px;
+  min-width: 0;
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+}
+
+.team-foot-hint.is-warn {
+  color: var(--warn);
+}
+
+.team-acts {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.team-btn {
+  height: 30px;
+  padding: 0 14px;
+  border-radius: var(--r-sm);
+  background: var(--hover);
+  color: var(--ink);
+  font-size: var(--t-sm);
+  cursor: pointer;
+  transition: background var(--d-1), opacity var(--d-1);
+}
+
+.team-btn:hover:not(:disabled) {
+  background: var(--press);
+}
+
+.team-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.team-btn.is-primary {
+  background: var(--ink);
+  color: var(--bg);
+}
+
+.team-btn.is-primary:hover:not(:disabled) {
+  opacity: 0.88;
+}
+
+.team-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.team-error {
+  flex: 1 1 100%;
+  color: var(--danger);
+  font-size: var(--t-xs);
+  overflow-wrap: anywhere;
+}
+
+/* ---------- 进度卡：任务行 ---------- */
+
+.team-card:not(.is-plan) .team-tasks {
+  gap: 10px;
+}
+
+.team-mark {
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  width: 14px;
+  height: 14px;
+  margin-top: 3px;
+  border: 1.5px solid var(--ink-3);
+  border-radius: 50%;
+  color: transparent;
+}
+
+.team-mark svg {
+  stroke-width: 3;
+}
+
+.team-task.is-running .team-mark {
+  border-color: var(--live);
+  border-right-color: transparent;
+}
+
+/* 只有这一轮还在跑才转，停了或收尾后留一个静止的缺口圈 */
+.team-card.is-running .team-task.is-running .team-mark {
+  animation: strip-spin 0.9s linear infinite;
+}
+
+.team-task.is-ask .team-mark {
+  border-color: var(--warn);
+  background: var(--warn-tint);
+  color: var(--warn);
+}
+
+.team-task.is-done .team-mark {
+  border-color: var(--ok);
+  background: var(--ok);
+  color: var(--bg);
+}
+
+.team-task.is-failed .team-mark {
+  border-color: var(--danger);
+  background: var(--danger);
+  color: var(--bg);
+}
+
+.team-task.is-skipped .team-mark {
+  border-style: dashed;
+}
+
+.team-task.is-cancelled .team-mark {
+  color: var(--ink-3);
+}
+
+.team-task.is-pending .team-task-title,
+.team-task.is-skipped .team-task-title,
+.team-task.is-cancelled .team-task-title {
+  color: var(--ink-2);
+  font-weight: 500;
+}
+
+.team-task-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.team-task-top .team-task-title {
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.team-task-top .team-who {
+  flex: none;
+}
+
+.team-task-line {
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.team-task.is-ask .team-task-line {
+  color: var(--warn);
+  font-weight: 600;
+}
+
+.team-task-reason {
+  color: var(--danger);
+  font-size: var(--t-xs);
+  overflow-wrap: anywhere;
+}
+
+.team-task.is-skipped .team-task-reason,
+.team-task.is-cancelled .team-task-reason {
+  color: var(--ink-3);
+}
+
+.team-more {
+  align-self: flex-start;
+  color: var(--accent);
+  font-size: var(--t-xs);
+}
+
+.team-more:hover {
+  text-decoration: underline;
+}
+
+.team-more:focus-visible {
+  outline: 2px solid var(--accent-tint);
+  outline-offset: 2px;
+}
+
+/* 任务的结果摘要：只读、可选中，内部滚动，不撑高整张卡 */
+.team-result {
+  max-height: 200px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 6px 8px;
+  border-radius: var(--r-sm);
+  background: var(--bg-sunk);
+  color: var(--ink-2);
+  font-size: var(--t-xs);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* ---------- 甘特 ---------- */
+
+.team-gantt {
+  margin-top: 4px;
+}
+
+.team-gantt-title {
+  margin-bottom: 6px;
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+}
+
+.team-gt-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.team-gt-row {
+  display: grid;
+  grid-template-columns: minmax(0, 140px) 1fr;
+  align-items: center;
+  gap: 10px;
+  min-height: 20px;
+}
+
+.team-gt-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--ink-2);
+  font-size: 11.5px;
+}
+
+.team-gt-label b {
+  flex: none;
+  color: var(--ink-3);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.team-gt-label span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.team-gt-track {
+  position: relative;
+  height: 10px;
+  border-radius: 4px;
+  background: var(--hover);
+}
+
+.team-gt-seg {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  min-width: 3px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: var(--c, var(--team-c0));
+}
+
+/* 被组长打回重做的那一段，和第一段之间留一道缝 */
+.team-gt-seg.is-again {
+  box-shadow: inset 2px 0 0 var(--surface);
+}
+
+/* 进行中的条：末端呼吸（opacity 动画，时长不走令牌，减弱动效时关掉） */
+.team-gt-seg.is-live::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 8px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.6));
+  animation: strip-breathe 1.2s ease-in-out infinite;
+}
+
+/* 等你批准的时段：斜线 */
+.team-gt-wait {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.78) 0 2px, transparent 2px 5px);
+}
+
+.team-gt-axis {
+  display: flex;
+  justify-content: space-between;
+  margin-left: 150px;
+  padding-top: 2px;
+  color: var(--ink-3);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.team-gt-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--ink-2);
+  font-size: var(--t-xs);
+}
+
+.team-gt-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.team-gt-legend i {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--c, var(--team-c0));
+}
+
+.team-gt-legend .is-wait i {
+  background: repeating-linear-gradient(135deg, var(--ink-3) 0 1.5px, transparent 1.5px 3.5px);
+}
+
+.team-gt-track[data-slot='0'],
+.team-gt-legend li[data-slot='0'] {
+  --c: var(--team-c0);
+}
+
+.team-gt-track[data-slot='1'],
+.team-gt-legend li[data-slot='1'] {
+  --c: var(--team-c1);
+}
+
+.team-gt-track[data-slot='2'],
+.team-gt-legend li[data-slot='2'] {
+  --c: var(--team-c2);
+}
+
+.team-gt-track[data-slot='3'],
+.team-gt-legend li[data-slot='3'] {
+  --c: var(--team-c3);
+}
+
+.team-gt-track[data-slot='4'],
+.team-gt-legend li[data-slot='4'] {
+  --c: var(--team-c4);
+}
+
+/* 审批卡里说明是哪个组员在问 */
+
+.ask-who {
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+  overflow-wrap: anywhere;
+}
+
+.run-page-team {
+  display: flex;
+}
+
+@media (max-width: 760px) {
+  .team-host,
+  .team-card {
+    width: 100%;
+  }
+
+  .team-gt-row {
+    grid-template-columns: minmax(0, 84px) 1fr;
+  }
+
+  .team-gt-axis {
+    margin-left: 94px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .team-card.is-running .team-task.is-running .team-mark,
+  .team-gt-seg.is-live::after {
+    animation: none;
+  }
+}

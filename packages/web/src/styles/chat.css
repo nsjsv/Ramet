@@ -1,0 +1,977 @@
+/* 传统（聊天）模式 */
+
+/* 文档模式编辑器在聊天模式下隐藏（保持挂载：协同不断、schema 继续可用） */
+.chat-hidden {
+  display: none;
+}
+
+/* 聊天模式与文档模式共用同一个滚动口 .main（滚动条贴画面最右缘，不在 900px 内容列里）。
+ * .main 做 flex 列：.editor-page 吃掉面包屑之外的剩余高度（内容短时输入卡也落在视口底，
+ * 不用猜上方 chrome 的高度），内容长了就把它撑高、整页滚。输入卡在 .chat-dock 里 sticky 钉底 */
+.main:has(> .editor-page.chat-mode) {
+  display: flex;
+  flex-direction: column;
+}
+
+.editor-page.chat-mode {
+  display: flex;
+  flex-direction: column;
+  flex: 1 0 auto;
+  width: 100%; /* flex 列里 margin: 0 auto 会把宽度缩成内容宽；撑满后由 max-width 收回 900px 列 */
+  padding-bottom: 0; /* 尾部留白由 .chat-dock 自带（它是不透明的，滚动的气泡从它下面经过） */
+}
+
+.chat-page {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.chat-thread {
+  flex: 1;
+  padding: 8px 0 12px;
+}
+
+/* 输入卡 + 「回到最新」：sticky 钉在 .main 视口底；底色挡住从下面滚过的气泡 */
+.chat-dock {
+  position: sticky;
+  bottom: 0;
+  z-index: 4; /* 压住气泡里的定位元素，仍在顶栏(6) 之下 */
+  padding: 8px 0 max(24px, env(safe-area-inset-bottom));
+  background: var(--bg);
+}
+
+/* 非消息块按普通 Markdown 渲染的容器：排版对齐 editor-root 的最小集合 */
+.chat-root {
+  max-width: none;
+}
+
+.chat-root .ProseMirror {
+  outline: none;
+  font-size: var(--t-body);
+  line-height: var(--lh);
+  color: var(--ink);
+  word-break: break-word;
+}
+
+.chat-root .ProseMirror p {
+  margin: 0.35em 0;
+}
+
+/* 标题 / 代码块 / 行内代码 / 链接 / 图片：用 prose.css 的全局 .ProseMirror 规则，与文档模式一模一样 */
+
+/* 气泡：AI 是开卷排版（没有底色盒子），用户是右侧一张淡色卡片。头像是独立底托，
+ * 品牌 mark 的掩膜不能和底色画在同一个元素上。入场类 is-new 只由 chat-view 在
+ * 「视图打开之后新出现的消息」上挂一次。 */
+
+.chat-msg {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin: 22px 0;
+}
+
+.chat-msg.is-new {
+  animation: rise var(--d-3) var(--ease-out) both;
+}
+
+.chat-msg.chat-user {
+  flex-direction: row-reverse;
+}
+
+.chat-avatar {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin-top: 1px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--ink) 12%, var(--surface));
+  user-select: none;
+}
+
+.chat-bubble {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 15px;
+  line-height: 1.65;
+}
+
+/* AI 回复抬头行（ai-block.ts 的 buildReplyHead，文档 / 对话两种模式同一套）。
+ * 图标 + 名字靠左，右端 .reply-end = 悬停才出现的操作行 + 用量标签。文档模式里它绝对定位在块顶部留白里（run.css），
+ * 对话模式里是 AI 消息的第一行，正文缩进到名字下面。图标底托与公开页的伪元素顶栏同口径：
+ * 文本 logo 圆角方块，品牌 mark 圆斑 */
+.reply-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 22px;
+  min-width: 0;
+  user-select: none;
+}
+
+.reply-logo {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  overflow: hidden;
+  border-radius: 7px;
+  background: var(--hover);
+  font-size: 13px;
+  line-height: 1;
+}
+
+.reply-logo.is-mark {
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--ink) 14%, var(--surface));
+}
+
+.reply-logo .agent-mark {
+  width: 16px;
+  height: 16px;
+  vertical-align: 0;
+}
+
+.reply-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--t-sm);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--ink);
+}
+
+.reply-name:empty {
+  display: none;
+}
+
+.reply-head > .reply-end {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.chat-user .chat-bubble {
+  max-width: min(78%, 540px);
+  padding: 10px 14px;
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--accent) 8%, var(--hover));
+  color: var(--ink);
+}
+
+/* AI 消息：抬头行一行，正文缩进到名字下面（图标 22 + 间距 8），排版与文档模式一致（字号随 .chat-root） */
+.chat-msg.chat-ai {
+  display: block;
+}
+
+.chat-ai > .reply-head {
+  margin-bottom: 6px;
+}
+
+.chat-ai .chat-bubble {
+  max-width: none;
+  padding: 0 0 0 30px;
+  background: transparent;
+  color: var(--ink);
+  font-size: inherit;
+  line-height: inherit;
+}
+
+/* 底部输入卡：输入 = 发送消息，控制行 = ChipBar + 发送 / 停止 */
+
+.chat-composer {
+  position: relative; /* @ 页面提示列表挂在它上方 */
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px 8px 14px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-1);
+  transition: border-color var(--d-2), box-shadow var(--d-2);
+}
+
+.chat-composer:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--line));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.chat-composer-line {
+  display: flex;
+  align-items: flex-end;
+}
+
+/* 控制行：chip 一排不折行，窄屏横滑；发送钮钉在右端 */
+.chat-composer-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: var(--t-xs);
+  color: var(--ink-3);
+}
+
+.chat-composer-bar .chip-bar {
+  flex: 1 1 auto;
+}
+
+/* 多行输入（迷你 ProseMirror，editor/composer-input.tsx）：内容撑高，6 行封顶后内部滚动；
+ * 提及是行内 chip（样式与文档 / 气泡同一份，见 editor-widgets.css） */
+.chat-input-host {
+  flex: 1;
+  min-width: 0;
+}
+
+.chat-input {
+  position: relative;
+  max-height: calc(6 * 1.5em + 8px);
+  padding: 4px 0;
+  outline: none;
+  overflow-y: auto;
+  color: var(--ink);
+  font-size: 15px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.chat-composer .chat-input p {
+  margin: 0;
+}
+
+/* 空框占位：挂在根上（不进文档），不挡点击 */
+.chat-input[data-empty]::before {
+  content: attr(data-placeholder);
+  position: absolute;
+  inset: 4px 0 auto;
+  color: var(--ink-3);
+  pointer-events: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 往上翻离开底部后出现：点了平滑回到最新并恢复跟随（editor/chat-follow.ts）；挂在 .chat-dock 上沿 */
+.chat-jump {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  z-index: 5;
+  padding: 5px 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
+  color: var(--ink);
+  font-size: 12.5px;
+  cursor: pointer;
+  transform: translateX(-50%);
+}
+
+/* --hover 是半透明色，直接当底色会让下面滚过的气泡文字透出来：叠在不透明的 --surface 上 */
+.chat-jump:hover {
+  background: color-mix(in srgb, var(--ink) 6%, var(--surface));
+}
+
+/* 输入卡的图片附件（editor/composer-attach.tsx）：输入框上方一排缩略图，上传中半透明 */
+.chat-attach {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 2px 2px 6px;
+}
+
+.chat-attach-item {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--bg-sunk);
+}
+
+.chat-attach-item img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.chat-attach-item.is-uploading img {
+  opacity: 0.45;
+}
+
+.chat-attach-item.is-failed {
+  border-color: var(--danger);
+}
+
+.chat-attach-x {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  cursor: pointer;
+}
+
+/* 上下文圆环（editor/context-ring.tsx）：发送钮左边；≥80% 琥珀、≥95% 红 */
+.ctx-box {
+  position: relative;
+  flex: none;
+}
+
+.ctx-ring {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--r-pill);
+  background: none;
+  color: var(--ink-3);
+  font: inherit;
+  font-size: var(--t-xs);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  --c: var(--ink-3);
+}
+
+.ctx-ring:hover,
+.ctx-ring[aria-expanded='true'] {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.ctx-ring.is-warn {
+  --c: var(--warn);
+  color: var(--warn);
+}
+
+.ctx-ring.is-danger {
+  --c: var(--danger);
+  color: var(--danger);
+}
+
+.ctx-ring .ring {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: conic-gradient(var(--c) calc(var(--p, 0) * 360deg), var(--line-strong) 0);
+  -webkit-mask: radial-gradient(circle, transparent 4px, #000 4.5px);
+  mask: radial-gradient(circle, transparent 4px, #000 4.5px);
+}
+
+.ctx-pop {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 260px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
+  color: var(--ink);
+  font-size: var(--t-sm);
+  animation: rise var(--d-2) var(--ease-out) both;
+}
+
+.ctx-sub {
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+}
+
+.ctx-compact {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  margin-top: 6px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: var(--hover);
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ctx-compact:hover:not(:disabled) {
+  background: var(--press);
+}
+
+.ctx-compact:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.ctx-compact span {
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+}
+
+.chat-send {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 50%;
+  background: var(--ink);
+  color: var(--bg);
+  cursor: pointer;
+  transition: transform var(--d-1) var(--ease-out), opacity var(--d-1);
+}
+
+.chat-send:active:not(:disabled) {
+  transform: scale(0.92);
+}
+
+.chat-send:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.chat-send.is-stop {
+  background: var(--danger);
+  color: var(--on-accent);
+}
+
+/* 在跑时的发送钮 = 排队（服务端保存，这一轮正常结束后自动发；⌘Enter 插队） */
+.chat-send.is-queue {
+  background: var(--live);
+  color: var(--on-accent);
+}
+
+/* 排队区（editor/queue-list.tsx）：输入卡上方，排着的消息一条一行 */
+.chat-queue {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px 2px 6px;
+}
+
+.chat-queue-paused {
+  padding: 2px 6px;
+  color: var(--warn);
+  font-size: var(--t-xs);
+}
+
+.chat-queue-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 4px 6px;
+  border-radius: var(--r-sm);
+  background: var(--live-tint);
+  color: var(--ink-2);
+  font-size: var(--t-sm);
+}
+
+.chat-queue-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-queue-meta {
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+}
+
+.chat-queue-acts {
+  display: inline-flex;
+  flex: none;
+  gap: 4px;
+}
+
+.chat-queue-acts button {
+  height: 24px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--r-pill);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--t-xs);
+  cursor: pointer;
+}
+
+.chat-queue-acts button.is-primary {
+  background: var(--ink);
+  color: var(--bg);
+}
+
+/* agent 面板：审批弹条（双模式，Editor.tsx 底部）。
+   控制行（ChipBar）渲染在聊天模式输入卡里（chat-view.tsx），状态文字用 .agent-status-msg */
+
+.agent-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+/* 引用提示列表（`@` 大菜单，`[[` 页面）：锚在 .chat-composer（relative）上方，z-index 压过输入卡，不被挡住。
+ * 卡片 / 分组 / 行的外观在 styles/menus.css。卡片本身不滚：里面 .mention-list 滚，底部键位提示 .mention-foot 常驻 */
+.chat-mention {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 8px);
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  width: 340px;
+  max-width: calc(100vw - 16px);
+  max-height: 360px;
+  overflow: hidden;
+}
+
+.mention-list {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* 进入分类后的顶行：‹ 分类名（点了回顶层）。朝左的箭头 = chevron 转 180° */
+.mention-back {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 28px;
+  padding: 4px 8px;
+  border-radius: var(--r-sm);
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+}
+
+.mention-back svg {
+  transform: rotate(180deg);
+}
+
+.mention-back:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.mention-foot {
+  flex: none;
+  margin: 4px -4px -4px;
+  padding: 6px 12px;
+  border-top: 1px solid var(--line);
+  color: var(--ink-3);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  user-select: none;
+}
+
+/* 触屏没有键盘：键位提示没意义 */
+@media (hover: none) and (pointer: coarse) {
+  .mention-foot {
+    display: none;
+  }
+}
+
+/* 正文 @ 提及（editor/doc-mention.ts）：复用同一个列表语言，但定位是视口级 fixed
+ * （光标处弹出，不被 .main 的滚动容器裁剪）。z-index 压过侧栏(30)，仍在 members(50)/灯箱(60) 之下 */
+.doc-mention {
+  z-index: 40;
+  bottom: auto;
+}
+
+/* 列表是滚动容器：子项不参与收缩。否则条目一多（39 个目录塞进 220px）每行被压成 8px，
+   文字被行上的 overflow:hidden 整条裁掉 —— 看起来就是「这个目录不显示内容」 */
+.agent-status-msg {
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-3);
+  font-size: 12px;
+}
+
+/* 审批弹条：多条排队只展示队首 */
+.agent-permission {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  background: var(--hover);
+  font-size: 13px;
+}
+
+.agent-permission-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink);
+}
+
+.agent-permission-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
+/* 提问：标题在上、表单（运行条那一份，ask-form.ts）在下，表单长了内部滚动 */
+.agent-permission.is-form {
+  flex-direction: column;
+  align-items: stretch;
+  max-height: min(60vh, 520px);
+  overflow: auto;
+}
+
+.agent-permission.is-form .agent-permission-title {
+  font-weight: 600;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.btn-agent-option {
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.btn-agent-option:hover {
+  background: var(--hover);
+}
+
+/* 空对话提示（点击进入聊天模式的空页面：中间只读气泡区看起来是一片空） */
+.chat-empty {
+  max-width: 420px;
+  margin: 18vh auto 0;
+  padding: 0 16px;
+  border: none;
+  font-size: 14px;
+  line-height: 1.7;
+  text-align: center;
+  color: var(--ink-3);
+}
+
+/* 运行错误条：continue 被服务端拒（未配置 agent / 页面无权限 / 忙）时的显式反馈 */
+.chat-run-error {
+  margin: 8px 0 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--danger-tint);
+  color: var(--danger);
+  font-size: 13px;
+}
+
+.agent-status-msg.is-error {
+  color: var(--danger);
+}
+
+/* 气泡正文是文档节点序列化出来的 DOM：标题 / 列表 / 代码块 / 引用 / 行内 marks 按真实结构渲染
+   （agent 回复的 markdown 在服务端被落成这些节点，见 server agents/markdown.ts）。首尾外边距都抹掉，块级 margin 顶着边看起来内容偏心。
+   AI 回复的正文与文档模式同一套排版（字号、标题、段距）；下面的紧凑排版只给用户气泡。 */
+.chat-root .chat-bubble > :first-child {
+  margin-top: 0;
+}
+
+.chat-root .chat-bubble > :last-child {
+  margin-bottom: 0;
+}
+
+.chat-root .chat-user .chat-bubble p {
+  margin: 0 0 0.55em;
+}
+
+.chat-root .chat-user .chat-bubble :is(h1, h2, h3, h4, h5, h6) {
+  margin: 0.6em 0 0.35em;
+  line-height: 1.35;
+  font-weight: 600;
+}
+
+.chat-root .chat-user .chat-bubble h1 { font-size: 1.2em; }
+.chat-root .chat-user .chat-bubble h2 { font-size: 1.1em; }
+.chat-root .chat-user .chat-bubble :is(h3, h4, h5, h6) { font-size: 1em; }
+
+.chat-root .chat-user .chat-bubble ul,
+.chat-root .chat-user .chat-bubble ol {
+  margin: 0 0 0.6em;
+  padding-left: 1.4em;
+}
+
+.chat-root .chat-user .chat-bubble li > p {
+  margin: 0;
+}
+
+.chat-root .chat-user .chat-bubble blockquote {
+  margin: 0 0 0.6em;
+  padding-left: 0.8em;
+  border-left: 3px solid var(--line-strong);
+  color: var(--ink-3);
+}
+
+.chat-root .chat-user .chat-bubble pre {
+  margin: 0 0 0.6em;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--hover);
+  overflow-x: auto;
+  font-size: 0.9em;
+}
+
+.chat-root .chat-user .chat-bubble code {
+  font-family: var(--mono);
+}
+
+.chat-root .chat-user .chat-bubble :not(pre) > code {
+  padding: 0.15em 0.35em;
+  border-radius: 4px;
+  background: var(--press);
+}
+
+.chat-root .chat-user .chat-bubble a {
+  color: var(--accent);
+}
+
+.chat-root .chat-user .chat-bubble img {
+  max-width: 100%;
+  border-radius: 8px;
+}
+
+.chat-root .chat-user .chat-bubble hr {
+  margin: 0.8em 0;
+  border: none;
+  border-top: 1px solid var(--line);
+}
+
+/* 用户卡片是淡色底，链接与代码跟正文同一套即可 */
+
+/* 气泡轻操作（editor/chat-acts.ts）：复制 / 引用 / 重新生成 / 删除。
+   悬停 / 聚焦时出现在气泡下方；触屏没有悬停，常显（淡一点）。反馈由操作本身给出（复制图标变对勾），不弹提示条。 */
+
+.chat-msg {
+  position: relative;
+}
+
+.chat-acts {
+  position: absolute;
+  bottom: -26px;
+  display: inline-flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity var(--d-1);
+}
+
+.chat-user .chat-acts {
+  right: 40px;
+}
+
+.chat-msg:hover .chat-acts,
+.chat-msg:focus-within .chat-acts {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .chat-acts {
+    opacity: 0.7;
+  }
+}
+
+.chat-act {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--ink-3);
+  cursor: pointer;
+  transition: background var(--d-1), color var(--d-1);
+}
+
+.chat-act:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.chat-act.is-danger:hover {
+  background: var(--danger-tint);
+  color: var(--danger);
+}
+
+/* View Transitions 的时长与曲线走令牌（文档 ⇄ 对话切换 view-morph.ts、进出过程页 run-door.ts）；
+ * 不支持 / 减弱动效时 JS 不发起 */
+::view-transition-group(*) {
+  animation-duration: var(--d-3);
+  animation-timing-function: var(--ease-out);
+}
+
+/* 文档 ⇄ 对话切换（view-morph.ts 切换期间在 <html> 上挂 data-view-morph）：文字直接平移到新位置。
+ * 配上对的组：只画新画面、按原尺寸（不随组缩放），跟着组从旧位置平移过去；旧画面不画。
+ * 气泡底色、头像、抬头、署名行、色条这些壳不命名，在根画面里淡出 / 淡入。只有一边的组照常淡出 / 淡入。
+ * 名字通配 (*) 也命中 root，所以 root 单独写回淡入淡出（具体名字优先于通配） */
+:root[data-view-morph]::view-transition-old(*) {
+  animation: none;
+  opacity: 0;
+}
+
+:root[data-view-morph]::view-transition-new(*) {
+  animation: none;
+  inline-size: auto;
+  block-size: auto;
+}
+
+:root[data-view-morph]::view-transition-old(*):only-child,
+:root[data-view-morph]::view-transition-old(root) {
+  animation: view-morph-out var(--d-3) var(--ease-out) both;
+}
+
+:root[data-view-morph]::view-transition-new(*):only-child,
+:root[data-view-morph]::view-transition-new(root) {
+  animation: view-morph-in var(--d-3) var(--ease-out) both;
+}
+
+/* 顶栏与底部输入区（含「回到最新」）切换期间单独成组：平移的文字组画在根画面之上，不单独成组的话文字会盖住它们
+ * （看着像变透明，动画结束才突然挡回来）。组按旧画面的绘制顺序排、新出现的排最后，sticky 的这两个都在文字之后 = 在上面。
+ * 顶栏两边都有：只画新画面，原地不动；输入区只有对话视图有：上浮淡入 / 下沉淡出 */
+:root[data-view-morph] .topbar {
+  view-transition-name: topbar;
+}
+
+:root[data-view-morph] .chat-dock {
+  view-transition-name: chat-dock;
+}
+
+:root[data-view-morph]::view-transition-new(chat-dock):only-child {
+  animation: view-morph-dock-in var(--d-3) var(--ease-out) both;
+}
+
+:root[data-view-morph]::view-transition-old(chat-dock):only-child {
+  animation: view-morph-dock-out var(--d-3) var(--ease-out) both;
+}
+
+@keyframes view-morph-dock-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+}
+
+@keyframes view-morph-dock-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+}
+
+@keyframes view-morph-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes view-morph-in {
+  from {
+    opacity: 0;
+  }
+}
+
+
+/* 引用飞行的小胶囊（motion.ts 的 flyGhost）：fixed 在落点，WAAPI 从按钮处飞过来；压在顶栏之上，不接事件 */
+.fly-ghost {
+  position: fixed;
+  z-index: 60;
+  display: inline-block;
+  max-width: 300px;
+  padding: 3px 10px;
+  border-radius: var(--r-pill);
+  background: var(--accent-tint);
+  color: var(--accent);
+  font-size: var(--t-xs);
+  line-height: 1.5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  transform-origin: left center;
+}
+
+/* 抬头行操作（doc-acts.ts / chat-acts.ts）：同一套按钮，放在块自己的抬头行里，悬停 / 聚焦出现。
+ * AI 回复（两种模式）：在用量标签左边（.reply-head > .reply-end）；用户消息（文档模式）：署名行末尾，
+ * 草稿不出（草稿那一行是芯片 + 发送钮）。对话模式 AI 的悬停显示走 .chat-msg:hover .chat-acts */
+.chat-acts.is-head {
+  position: static;
+}
+
+.chat-acts.is-head .chat-act {
+  width: 24px;
+  height: 24px;
+}
+
+.editor-root .ProseMirror > .agent-reply:hover > .reply-head .chat-acts,
+.editor-root .ProseMirror > .agent-reply > .reply-head .chat-acts:focus-within,
+.editor-root .ProseMirror > .user-message:hover > .msg-head .chat-acts,
+.editor-root .ProseMirror > .user-message > .msg-head .chat-acts:focus-within {
+  opacity: 1;
+}
+
+.msg-head-main {
+  display: contents;
+}
+
+.msg-head > .chat-acts.is-head {
+  margin-left: auto;
+}
+
+.editor-root .ProseMirror > .user-message.is-draft > .msg-head .chat-acts {
+  display: none;
+}
+
+@media (hover: none) {
+  .chat-acts.is-head {
+    opacity: 0.7;
+  }
+}

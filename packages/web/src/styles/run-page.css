@@ -1,0 +1,82 @@
+/* ---------- 过程页的头与尾（挂在标题下 / 正文编辑器下；步骤是正文里的块，见 run-step.css） ---------- */
+
+.run-page {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin: 2px 0 28px;
+  color: var(--ink);
+}
+
+.run-page-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  font-size: 14px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.run-page-agent {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.run-page-logo {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  font-size: 15px;
+}
+
+.run-page-logo.agent-mark {
+  background-color: var(--ink);
+  -webkit-mask: var(--agent-mark) center / 18px no-repeat;
+  mask: var(--agent-mark) center / 18px no-repeat;
+}
+
+.run-page-outcome {
+  padding: 1px 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  background: color-mix(in srgb, var(--ok) 12%, transparent);
+  color: var(--ok);
+}
+
+.run-page-outcome.is-cancelled {
+  background: var(--hover);
+  color: var(--ink-3);
+}
+
+.run-page-outcome.is-error {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--danger);
+}
+
+.run-page-back {
+  align-self: flex-start;
+  font-size: 13px;
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.run-page-back:hover {
+  text-decoration: underline;
+}
+
+.run-page-output-label {
+  margin-bottom: 4px;
+  color: var(--ink-3);
+  font-size: 12px;
+}
+
+.run-page-output .rd-pre {
+  max-height: none;
+  border: 1px solid var(--line);
+}

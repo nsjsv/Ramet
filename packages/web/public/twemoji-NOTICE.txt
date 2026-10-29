@@ -1,0 +1,14 @@
+Emoji graphics (/twemoji/*.svg and /twemoji-sprite-64.png)
+
+Twemoji
+Copyright 2019 Twitter, Inc and other contributors
+Graphics licensed under CC-BY 4.0: https://creativecommons.org/licenses/by/4.0/
+Source: https://github.com/jdecked/twemoji (SVG files from the npm package @twemoji/svg;
+sprite sheet from the npm package emoji-datasource-twitter, which packages the same artwork).
+No changes were made to the artwork.
+
+Emoji picker data and UI: emoji-mart (MIT) and @emoji-mart/data (MIT), https://github.com/missive/emoji-mart
+
+Chinese emoji search terms (packages/web/src/emoji-zh.json): derived from emojibase-data (MIT,
+https://github.com/milesj/emojibase), which is based on Unicode CLDR annotations
+(https://www.unicode.org/copyright.html, Unicode License v3).

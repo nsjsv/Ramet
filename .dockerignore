@@ -1,0 +1,10 @@
+# 构建上下文瘦身:两份 Dockerfile 的 context 都是仓库根
+node_modules
+**/node_modules
+.git
+**/dist
+**/data
+postgres-data
+.trellis
+.env
+.env.*

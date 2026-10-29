@@ -1,0 +1,687 @@
+/* ---------- 弹窗外壳（Modal.tsx：设置 / 回收站共用，portal 到 body）---------- */
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--scrim);
+  padding: 24px;
+}
+
+.modal {
+  width: 460px;
+  max-width: 100%;
+  max-height: 82vh;
+  overflow-y: auto;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: var(--t-sm);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-2);
+  padding: 20px;
+  animation: rise var(--d-2) var(--ease-out);
+}
+
+.modal-title {
+  min-width: 0;
+  margin: 0;
+  font-size: 16px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.modal-close {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-sm);
+  color: var(--ink-3);
+}
+
+.modal-close:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.modal-error {
+  font-size: 13px;
+  color: var(--danger);
+  margin-bottom: 8px;
+}
+
+/* ---------- 主设置弹窗：左分组导航 + 右侧标题 / 卡片 ----------
+ * 弹窗本身不滚：导航与右侧正文各自滚。尺寸固定高度，切分页时外框不跳。 */
+
+.modal.settings-modal {
+  display: flex;
+  width: 800px;
+  height: min(620px, 86vh);
+  max-height: none;
+  padding: 0;
+  overflow: hidden;
+}
+
+.set-nav {
+  flex: 0 0 196px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 16px 8px;
+  overflow-y: auto;
+  background: var(--bg-sunk);
+  border-right: 1px solid var(--line);
+}
+
+.set-nav-title {
+  padding: 2px 10px 10px;
+  font-size: var(--t-md);
+  font-weight: 600;
+}
+
+.set-nav-group {
+  padding: 12px 10px 4px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.set-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: var(--r-sm);
+  color: var(--ink-2);
+  font-size: var(--t-sm);
+  text-align: left;
+  white-space: nowrap;
+  transition: background var(--d-1), color var(--d-1);
+}
+
+.set-nav-item svg {
+  flex: none;
+  color: var(--ink-3);
+}
+
+.set-nav-item:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.set-nav-item.is-on {
+  background: var(--press);
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.set-nav-item.is-on svg {
+  color: var(--ink);
+}
+
+.set-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.set-main-head {
+  flex: none;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 20px 24px 14px;
+}
+
+.set-main-titles {
+  flex: 1;
+  min-width: 0;
+}
+
+.set-main-title {
+  margin: 0;
+  font-size: var(--t-h3);
+  font-weight: 600;
+}
+
+.set-main-desc {
+  margin: 4px 0 0;
+  font-size: var(--t-xs);
+  color: var(--ink-3);
+}
+
+.set-main-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 2px 24px 24px;
+}
+
+/* ---------- 卡片 / 行（form-kit.tsx）---------- */
+
+.set-card-title {
+  margin: 0 0 6px 2px;
+  font-size: var(--t-xs);
+  font-weight: 600;
+  color: var(--ink-3);
+}
+
+.set-card-body {
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.set-card.is-danger .set-card-body {
+  border-color: color-mix(in srgb, var(--danger) 30%, transparent);
+}
+
+.set-card.is-danger .set-card-title {
+  color: var(--danger);
+}
+
+/* 卡片里的直接子项之间一条细线（行 / 列表行 / 表单 / 代码块 / 空态说明都算） */
+.set-card-body > * + * {
+  border-top: 1px solid var(--line);
+}
+
+.set-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-height: 52px;
+  padding: 10px 14px;
+}
+
+.set-row-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+label.set-row-text {
+  cursor: pointer;
+}
+
+.set-label {
+  font-size: var(--t-sm);
+  color: var(--ink);
+}
+
+.set-desc {
+  font-size: var(--t-xs);
+  color: var(--ink-3);
+  overflow-wrap: anywhere;
+}
+
+.set-row-ctl {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.set-row-ctl .admin-btn,
+.set-line .admin-btn,
+.set-profile .admin-btn,
+.set-code .admin-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.set-empty {
+  margin: 0;
+  padding: 12px 14px;
+  font-size: var(--t-xs);
+  color: var(--ink-3);
+}
+
+.set-empty.is-ok {
+  color: var(--ok);
+}
+
+.set-pad {
+  margin: 0;
+  padding: 8px 14px;
+}
+
+/* 开关：34×20 胶囊，开 = 强调色 */
+.set-switch {
+  position: relative;
+  flex: none;
+  width: 34px;
+  height: 20px;
+  padding: 0;
+  border-radius: var(--r-pill);
+  background: var(--line-strong);
+  transition: background var(--d-2);
+}
+
+.set-switch-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  transition: transform var(--d-2) var(--ease-out);
+}
+
+.set-switch.is-on {
+  background: var(--accent);
+}
+
+.set-switch.is-on .set-switch-knob {
+  transform: translateX(14px);
+}
+
+.set-switch:focus-visible,
+.set-seg-btn:focus-visible,
+.set-pick:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* 分段控件：灰底槽 + 选中项浮起 */
+.set-seg {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 7px;
+  background: var(--hover);
+}
+
+.set-seg-btn {
+  padding: 4px 14px;
+  border-radius: 5px;
+  color: var(--ink-2);
+  font-size: var(--t-xs);
+  white-space: nowrap;
+}
+
+.set-seg-btn:hover {
+  color: var(--ink);
+}
+
+.set-seg-btn:disabled {
+  color: var(--ink-3);
+  cursor: default;
+}
+
+.set-seg-btn.is-on {
+  background: var(--surface);
+  color: var(--ink);
+  font-weight: 500;
+  box-shadow: var(--shadow-1);
+}
+
+/* 单选列表（默认 Agent）：整行可点，选中行带对勾 */
+.set-pick {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 14px;
+  color: var(--ink);
+  font-size: var(--t-sm);
+  text-align: left;
+}
+
+.set-pick:hover {
+  background: var(--hover);
+}
+
+.set-pick.is-on {
+  background: var(--accent-tint);
+}
+
+.set-pick-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.set-pick-tag {
+  flex: none;
+  padding: 0 6px;
+  border-radius: var(--r-pill);
+  background: var(--hover);
+  color: var(--ink-3);
+  font-size: 11px;
+}
+
+.set-pick-check {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  color: var(--accent);
+}
+
+/* agent 品牌 mark / 文本 logo：与名字之间的距离由 .set-pick 的 gap 给 */
+.agent-mark-row {
+  margin-right: 0;
+}
+
+/* 列表行（成员 / 连接器 / 邀请）：头像或状态点 + 名字（+ 次行）+ 右侧操作 */
+.set-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 8px 14px;
+}
+
+.set-line-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.set-line-name {
+  font-size: var(--t-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.set-line-sub {
+  font-size: var(--t-xs);
+  color: var(--ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.member-me {
+  color: var(--ink-3);
+}
+
+.member-role-select {
+  padding: 3px 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--t-xs);
+}
+
+.member-add input {
+  min-width: 0;
+}
+
+.role-badge {
+  flex: none;
+  display: inline-block;
+  font-size: 12px;
+  padding: 1px 8px;
+  border-radius: var(--r-pill);
+  background: var(--hover);
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+
+.role-badge.is-owner {
+  background: var(--accent-tint);
+  color: var(--accent);
+}
+
+.invite-token {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 行内改名：输入框撑满 */
+.set-rename .admin-field {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 可复制的长串（邀请链接等） */
+.set-code {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: var(--bg-sunk);
+}
+
+.set-code code {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-2);
+  white-space: pre-wrap;
+  word-break: break-all;
+  user-select: all;
+}
+
+/* 账户：头像 + 名字 + 操作 */
+.set-profile {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px;
+}
+
+.set-profile-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.set-profile-text b {
+  font-size: var(--t-md);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.set-profile-text span {
+  font-size: var(--t-xs);
+  color: var(--ink-3);
+}
+
+.set-profile-acts {
+  flex: none;
+  display: flex;
+  gap: 8px;
+}
+
+.set-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+}
+
+.set-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--t-xs);
+  color: var(--ink-3);
+}
+
+.set-form-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.set-form-msg {
+  margin-right: auto;
+  font-size: var(--t-xs);
+}
+
+.set-form-msg.is-error {
+  color: var(--danger);
+}
+
+.set-form-msg.is-ok {
+  color: var(--ok);
+}
+
+/* 连接器在线点 */
+.connector-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  margin: 0 4px;
+  border-radius: 50%;
+  background: var(--line-strong);
+}
+
+.connector-dot.on {
+  background: var(--ok);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 18%, transparent);
+}
+
+/* 接入新机器的三步（ConnectorsPane.tsx）：序号用 CSS 计数器（dev 少了安装一步也连号），圆圈 + 竖线串起来 */
+.connector-steps {
+  margin: 0;
+  padding: 14px 14px 4px;
+  list-style: none;
+  counter-reset: connector-step;
+}
+
+.connector-step {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 0 0 14px 32px;
+  counter-increment: connector-step;
+}
+
+.connector-step::before {
+  content: counter(connector-step);
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* 步与步之间的连线：从圆圈底到下一步圆圈顶 */
+.connector-step:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  left: 9.5px;
+  top: 24px;
+  bottom: 4px;
+  width: 1px;
+  background: var(--line);
+}
+
+.connector-step-title {
+  font-size: var(--t-sm);
+  font-weight: 600;
+  line-height: 20px;
+  color: var(--ink);
+}
+
+.connector-cmd {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 8px 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--bg-sunk);
+}
+
+.connector-cmd code {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-2);
+  word-break: break-all;
+  user-select: all;
+}
+
+.connector-cmd .admin-btn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* 快捷键页（settings-panes.tsx 的 ShortcutsPane）：键帽 + 组合之间的间距 */
+.kbd-list {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.kbd-combo {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.kbd-combo kbd,
+.kbd-md {
+  font-family: var(--mono);
+  font-size: var(--t-xs);
+  line-height: 1;
+  padding: 4px 6px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line-strong);
+  background: var(--bg-sunk);
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.kbd-combo kbd {
+  min-width: 22px;
+  text-align: center;
+  box-shadow: 0 1px 0 var(--line-strong);
+}

@@ -1,0 +1,59 @@
+/* ---------- 邀请落地页（复用登录卡片外观） ---------- */
+
+.join-card .join-line {
+  margin: 4px 0 12px;
+  font-size: 15px;
+  line-height: 1.7;
+  text-align: center;
+}
+
+.join-card .login-secondary {
+  margin-top: 2px;
+}
+
+
+/* ---------- 机器接入确认页（/connect/:code，ConnectMachine.tsx；同一张登录卡片） ---------- */
+
+.connect-card {
+  width: 380px;
+}
+
+.connect-facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 14px;
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg-sunk);
+  font-size: 13px;
+}
+
+.connect-facts dt {
+  color: var(--ink-3);
+}
+
+.connect-facts dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.connect-code {
+  font-family: var(--mono);
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+
+.connect-mono {
+  font-family: var(--mono);
+}
+
+.connect-warn {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink-3);
+}

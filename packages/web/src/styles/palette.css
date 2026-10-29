@@ -1,0 +1,173 @@
+/* ---------- 命令面板（palette/CommandPalette.tsx，⌘K）：居中偏上的浮层 ---------- */
+
+.palette-veil {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 14vh;
+  background: var(--scrim);
+  animation: palette-fade var(--d-2) var(--ease-out) both;
+}
+
+.palette {
+  display: flex;
+  flex-direction: column;
+  width: min(600px, calc(100vw - 32px));
+  max-height: min(520px, 72vh);
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
+  color: var(--ink);
+  animation: rise var(--d-2) var(--ease-out) both;
+}
+
+.pal-in {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink-3);
+}
+
+.pal-in input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--t-md);
+}
+
+.palette kbd {
+  flex: none;
+  padding: 1px 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 5px;
+  color: var(--ink-3);
+  font: inherit;
+  font-size: var(--t-xs);
+}
+
+.pal-list {
+  flex: 1;
+  padding: 6px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.pal-group {
+  padding: 8px 8px 4px;
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+}
+
+.pal-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 36px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--t-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.pal-item.is-active {
+  background: var(--hover);
+}
+
+.pal-ic {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 20px;
+  color: var(--ink-2);
+}
+
+.pal-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.pal-main b {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.pal-desc {
+  overflow: hidden;
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+  text-overflow: ellipsis;
+}
+
+.pal-desc.is-live {
+  color: var(--live);
+}
+
+.pal-desc.is-warn {
+  color: var(--warn);
+}
+
+.pal-empty {
+  padding: 24px 8px;
+  color: var(--ink-3);
+  font-size: var(--t-sm);
+  text-align: center;
+}
+
+.pal-foot {
+  display: flex;
+  gap: 14px;
+  padding: 8px 14px;
+  border-top: 1px solid var(--line);
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+}
+
+@keyframes palette-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (max-width: 760px) {
+  .palette-veil {
+    padding-top: calc(12px + env(safe-area-inset-top));
+  }
+
+  .pal-foot {
+    display: none;
+  }
+}
+
+/* 浮层本体还在下载时接住焦点的输入框（CommandPalette.tsx 的 Pending）：看不见、不挡点击 */
+.pal-pending {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  font-size: 16px; /* iOS 聚焦字号小于 16px 的输入框会放大页面 */
+  pointer-events: none;
+}

@@ -1,0 +1,195 @@
+/* ---------- 过程页的步骤块（editor/run-step-view.ts 的 nodeView） ----------
+   一行 = 图标 · 动词 · 文字（只读镜像，一行省略）· 用时 · 操作；展开 = 下面一张卡片（常规展示 + 「高级」），
+   「高级」里才是可编辑的那行文字。动效只动 transform / opacity / 颜色。 */
+
+.run-step {
+  margin: 2px 0;
+  border-radius: var(--r-md);
+  transition: background var(--d-1);
+}
+
+.run-step:hover {
+  background: var(--hover);
+}
+
+.run-step-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-height: 36px;
+  padding: 6px 8px 6px 10px;
+  font-size: var(--t-sm);
+  line-height: 1.55;
+  cursor: pointer; /* 整行都是展开 / 收起的点击区（run-step-view.ts） */
+}
+
+.run-step-ic {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  background: var(--bg-sunk);
+  color: var(--ink-2);
+}
+
+.run-step-verb {
+  flex: none;
+  width: 52px;
+  padding-top: 2px;
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+  white-space: nowrap;
+}
+
+.run-step-label {
+  flex: 1;
+  min-width: 0;
+  padding-top: 1px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-step[data-k='thought'] .run-step-label,
+.run-step[data-k='say'] .run-step-label {
+  color: var(--ink-2);
+}
+
+.run-step-meta {
+  flex: none;
+  padding-top: 2px;
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.run-step-acts {
+  flex: none;
+  display: inline-flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity var(--d-1);
+}
+
+.run-step:hover .run-step-acts,
+.run-step:focus-within .run-step-acts,
+.run-step.is-open .run-step-acts {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .run-step-acts {
+    opacity: 1;
+  }
+}
+
+.run-step-act {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ink-3);
+  cursor: pointer;
+  transition: color var(--d-1), background var(--d-1);
+}
+
+.run-step-act:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.run-step-act svg {
+  transition: transform var(--d-1);
+}
+
+.run-step.is-open .run-step-act[data-act='toggle'] svg {
+  transform: rotate(90deg);
+}
+
+.run-step[data-status='failed'] .run-step-verb,
+.run-step[data-status='failed'] .run-step-ic {
+  color: var(--danger);
+}
+
+.run-step[data-parent] {
+  margin-left: 18px;
+}
+
+/* 展开卡片：常规展示（run-view.ts）+ 底部「高级」开关；高级 = 原始调用信息 + 可编辑的那行文字 */
+.run-step-card {
+  margin: 2px 12px 10px 44px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  font-size: var(--t-sm);
+  color: var(--ink-2);
+}
+
+.run-step:not(.is-open) .run-step-card {
+  display: none;
+}
+
+.run-step.is-open .run-step-card {
+  animation: rise var(--d-2) var(--ease-out);
+}
+
+/* 高级关着：原始信息与可编辑文字整块不渲染（光标进不去，见 runStepGuard） */
+.run-step:not(.is-adv) .run-step-adv {
+  display: none;
+}
+
+.run-step-adv {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--line);
+}
+
+.run-step-text-label {
+  margin: 8px 0 4px;
+  font-size: var(--t-xs);
+  color: var(--ink-3);
+}
+
+.run-step-raw:empty + .run-step-text-label {
+  margin-top: 0;
+}
+
+/* 可编辑的那行文字（contentDOM） */
+.run-step-text {
+  min-height: 1.6em;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--bg);
+  color: var(--ink);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.run-step-text:focus-within {
+  border-color: var(--ink-3);
+}
+
+@media (max-width: 640px) {
+  .run-step-row {
+    gap: 8px;
+    padding-right: 4px;
+  }
+
+  .run-step-verb {
+    display: none;
+  }
+
+  .run-step-card {
+    margin-left: 8px;
+    margin-right: 4px;
+  }
+}

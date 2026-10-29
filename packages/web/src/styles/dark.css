@@ -1,0 +1,73 @@
+/* 深色模式：跟随系统 prefers-color-scheme。ink-3 取得偏亮一档，更暗的值在深底上对小字太暗 */
+@media (prefers-color-scheme: dark) {
+  :root {
+    /* 文字颜色 / 背景高亮（colors.css） */
+    --mk-text-gray: #9b9b9b;
+    --mk-text-brown: #ba856f;
+    --mk-text-orange: #c77d48;
+    --mk-text-yellow: #ca9849;
+    --mk-text-green: #529e72;
+    --mk-text-blue: #5e87c9;
+    --mk-text-purple: #9d68d3;
+    --mk-text-pink: #d15796;
+    --mk-text-red: #df5452;
+    --mk-bg-gray: #2f2f2f;
+    --mk-bg-brown: #4a3228;
+    --mk-bg-orange: #5c3b23;
+    --mk-bg-yellow: #564328;
+    --mk-bg-green: #243d30;
+    --mk-bg-blue: #143a4e;
+    --mk-bg-purple: #3c2d49;
+    --mk-bg-pink: #4e2c3c;
+    --mk-bg-red: #522e2a;
+    /* 代码高亮（code.css） */
+    --hl-keyword: #ff7b72;
+    --hl-string: #a5d6ff;
+    --hl-number: #79c0ff;
+    --hl-comment: #8b949e;
+    --hl-title: #d2a8ff;
+    --hl-type: #ffa657;
+    --hl-attr: #79c0ff;
+    --hl-tag: #7ee787;
+    --hl-meta: #d2a8ff;
+    --hl-add-fg: #aff5b4;
+    --hl-add-bg: #033a16;
+    --hl-del-fg: #ffdcd7;
+    --hl-del-bg: #67060c;
+    color-scheme: dark;
+    --bg: #161615;
+    --bg-sunk: #1d1d1c;
+    --surface: #202020;
+    --ink: #ecebe8;
+    --ink-2: #a8a7a2;
+    --ink-3: #8c8b86;
+    --line: rgba(236, 235, 232, 0.09);
+    --line-strong: rgba(236, 235, 232, 0.16);
+    --hover: rgba(236, 235, 232, 0.05);
+    --press: rgba(236, 235, 232, 0.09);
+    --accent: #6d9cff;
+    --accent-tint: rgba(109, 156, 255, 0.14);
+    --resizer-hl: rgba(236, 235, 232, 0.32);
+    --live: #9d92ff;
+    --live-tint: rgba(157, 146, 255, 0.14);
+    --ok: #45c08a;
+    --warn: #e0a54a;
+    --warn-tint: rgba(224, 165, 74, 0.14);
+    --danger: #f07070;
+    --danger-tint: rgba(240, 112, 112, 0.13);
+    --you: #45c08a;
+    --you-tint: rgba(69, 192, 138, 0.1);
+    --find-hit: rgba(255, 170, 0, 0.35);
+    --shadow-1: 0 0 0 1px var(--line);
+    --shadow-2: 0 12px 36px rgba(0, 0, 0, 0.5);
+  }
+}
+
+/* 提示框五种外观在深底上提亮一档（blocks.css） */
+@media (prefers-color-scheme: dark) {
+  .callout-note { --co: #6d9cff; }
+  .callout-tip { --co: #4cc38a; }
+  .callout-important { --co: #b392f0; }
+  .callout-warning { --co: #e3b341; }
+  .callout-caution { --co: #f47067; }
+}
