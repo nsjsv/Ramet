@@ -41,6 +41,12 @@ Page tree · Block editor · Real-time collaboration · Permanent version histor
 </tr>
 </table>
 
+### 🌲 Page tree or folder tree — or both
+
+- **Page tree**, Notion-style: pages nest inside pages, and every page can have both content and children
+- **Folder tree**, Obsidian-style: plain folders that hold documents and uploaded files
+- Each space has both side by side; use whichever fits, drag to reorganize
+
 ### 🗂 Collections: tables and boards
 
 - Turn a page into a collection and view it as a table or a board
