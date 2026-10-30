@@ -10,6 +10,8 @@
  * 否则同一个不变量会散成多份副本。
  */
 
+import { COVER_COLUMNS, pageCoverOf, type CoverColumns, type PageCover } from './page-cover.js'
+
 export type PageIcon = { kind: 'emoji'; value: string } | { kind: 'image'; value: string }
 
 /** 图标两列的形状（任何带图标列的行都能过 toApiPage / pageIconOf） */
@@ -48,19 +50,23 @@ export const API_PAGE_FIELDS = [
 
 export type ApiPageField = (typeof API_PAGE_FIELDS)[number]
 
-/** 返回页面形状的查询用的列清单（对外字段 + 图标两列）；alias = 表别名 */
+/** 返回页面形状的查询用的列清单（对外字段 + 图标两列 + 封面三列）；alias = 表别名 */
 export function apiPageColumns(alias: string): string {
-  return [...API_PAGE_FIELDS, 'icon_emoji', 'icon_file_id'].map((col) => `${alias}.${col}`).join(', ')
+  return [...API_PAGE_FIELDS, 'icon_emoji', 'icon_file_id', ...COVER_COLUMNS].map((col) => `${alias}.${col}`).join(', ')
 }
 
-export type ApiPage = Record<ApiPageField, unknown> & { icon: PageIcon | null }
+export type ApiPage = Record<ApiPageField, unknown> & { icon: PageIcon | null; cover: PageCover | null }
 
-/** 行 → 对外形状：只挑白名单字段，图标两列折成 icon 单字段（缺省列的行得到 icon: null） */
+/** 行 → 对外形状：只挑白名单字段，图标两列折成 icon、封面三列折成 cover（缺省列的行得到 null） */
 export function toApiPage(row: object): ApiPage {
-  const src = row as Record<string, unknown> & Partial<IconColumns>
+  const src = row as Record<string, unknown> & Partial<IconColumns> & Partial<CoverColumns>
   const out = {} as Record<ApiPageField, unknown>
   for (const key of API_PAGE_FIELDS) if (key in src) out[key] = src[key]
-  return { ...out, icon: pageIconOf({ icon_emoji: src.icon_emoji ?? null, icon_file_id: src.icon_file_id ?? null }) }
+  return {
+    ...out,
+    icon: pageIconOf({ icon_emoji: src.icon_emoji ?? null, icon_file_id: src.icon_file_id ?? null }),
+    cover: pageCoverOf(src),
+  }
 }
 
 /** 任一页面的图标（回收站条目、搜索命中的行可能只查了部分列） */

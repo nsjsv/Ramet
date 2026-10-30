@@ -33,6 +33,8 @@ import { toggleKeys, toggleSchema, toggleView } from './toggle'
 import { tocRefresh, tocSchema, tocView } from './toc'
 import { columnSchema, columnsSchema } from './columns'
 import { embedSchema } from './embed'
+import { bookmarkSchema, bookmarkView } from './bookmark'
+import { linkMentionSchema, linkMentionView } from './link-mention'
 import { mathBlockInputRule, mathBlockSchema, mathInlineInputRule, mathInlineSchema } from './math'
 import { mathBlockView, mathInlineView } from './math-view'
 import { blockSelectKeys, editingKeys } from './editing-keys'
@@ -327,6 +329,10 @@ export function startEditorSession(deps: EditorSessionDeps): () => void {
       .use(columnsSchema) // 分栏（栏里的块各自可寻址，手柄按横坐标下钻）
       .use(columnSchema)
       .use(embedSchema) // 嵌入：网页 / 视频 / 音频（toDOM 直接画播放器）
+      .use(bookmarkSchema) // 网页书签卡（与 PublicPage 同表）；元信息走登录端点
+      .use(bookmarkView('auth', (url) => api.linkPreview(url)))
+      .use(linkMentionSchema) // 网页提及（行内，与 PublicPage 同表）；元信息与书签卡同一通道
+      .use(linkMentionView('auth', (url) => api.linkPreview(url)))
       .use(tableView) // 表格外壳：「⋯」操作菜单 + 拖列宽（公开页不挂：toDOM 已按列宽画 colgroup）
       .use(imageDisplaySchema) // image schema 覆盖（同名单节点原位替换）：视图层把本站上传图片渲染成 webp display 版
       .use(attachmentSchema) // 附件块节点：公开页/协同对端 schema 必须同名同 attrs

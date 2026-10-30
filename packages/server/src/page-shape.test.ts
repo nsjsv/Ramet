@@ -5,7 +5,7 @@ import { hashPassword, SESSION_COOKIE } from './auth.js'
 import { API_PAGE_FIELDS } from './page-icon.js'
 import { truncateAll } from './test-helpers.js'
 
-// 对外的页面形状只有白名单字段（page-icon.ts 的 API_PAGE_FIELDS + icon），content_text（全文）和 agent_session 不能下发给客户端
+// 对外的页面形状只有白名单字段（page-icon.ts 的 API_PAGE_FIELDS + icon + cover），content_text（全文）和 agent_session 不能下发给客户端
 
 if (!process.env.DATABASE_URL) {
   throw new Error('需要 DATABASE_URL 指向测试库,例如 postgres://postgres:postgres@localhost:5432/ramet_test')
@@ -25,7 +25,7 @@ afterAll(async () => {
   await closePool()
 })
 
-const SHAPE = [...API_PAGE_FIELDS, 'icon'].sort()
+const SHAPE = [...API_PAGE_FIELDS, 'icon', 'cover'].sort()
 const BODY = '这是一段只该待在服务端的正文。'.repeat(40)
 
 async function login(role: 'user' | 'admin', username: string): Promise<string> {

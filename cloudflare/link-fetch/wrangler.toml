@@ -1,0 +1,5 @@
+# 网页元信息抓取中继（见 worker.js 文件头）。name 决定 workers.dev 上的子域名
+name = "ramet-link-fetch"
+main = "worker.js"
+compatibility_date = "2025-01-01"
+workers_dev = true

@@ -1,0 +1,41 @@
+Ramet 页面封面预设图
+
+以下照片均以 CC0 1.0（公有领域贡献）发布，原图来自 Wikimedia Commons（最初发布于 Unsplash）。
+已缩放并转为 WebP；<name>.thumb.webp 是选择器用的缩略图。
+
+mountain-reflection.webp
+  Beautiful mountain reflection (Unsplash).jpg — Johannes Plenio jplenio — CC0
+  https://commons.wikimedia.org/wiki/File:Beautiful_mountain_reflection_(Unsplash).jpg
+diablo-lake.webp
+  Diablo Lake, United States (Unsplash ZNkvxIPPVeE).jpg — Sergei Akulich sakulich — CC0
+  https://commons.wikimedia.org/wiki/File:Diablo_Lake,_United_States_(Unsplash_ZNkvxIPPVeE).jpg
+dolomites.webp
+  Dolomites, Monte Piana, Italy (Unsplash).jpg — Michal Kmeť mitko — CC0
+  https://commons.wikimedia.org/wiki/File:Dolomites,_Monte_Piana,_Italy_(Unsplash).jpg
+misty-countryside.webp
+  Fog over the countryside (Unsplash).jpg — Ricardo Gomez Angel ripato — CC0
+  https://commons.wikimedia.org/wiki/File:Fog_over_the_countryside_(Unsplash).jpg
+sea-sunset.webp
+  Giverola Resort sunset. (Unsplash).jpg — Dino Reichmuth dinoreichmuth — CC0
+  https://commons.wikimedia.org/wiki/File:Giverola_Resort_sunset._(Unsplash).jpg
+jokulsarlon.webp
+  Iceberg reflection in Jökulsárlón (Unsplash).jpg — Jeremy Bishop tidesinourveins — CC0
+  https://commons.wikimedia.org/wiki/File:Iceberg_reflection_in_J%C3%B6kuls%C3%A1rl%C3%B3n_(Unsplash).jpg
+waterfall-valley.webp
+  Idyllic landscape with a waterfall (Unsplash).jpg — Robert Lukeman robertlukeman — CC0
+  https://commons.wikimedia.org/wiki/File:Idyllic_landscape_with_a_waterfall_(Unsplash).jpg
+lake-dusk.webp
+  Lake Unsplash.jpg — Tae In Kim — CC0
+  https://commons.wikimedia.org/wiki/File:Lake_Unsplash.jpg
+coastline.webp
+  Landscape and seascape (Unsplash).jpg — Greg Jurgajtis gregjjurgajtis — CC0
+  https://commons.wikimedia.org/wiki/File:Landscape_and_seascape_(Unsplash).jpg
+autumn-lake.webp
+  Mountain lake (Unsplash).jpg — Aleksandra Boguslawska aleksandraboguslawska — CC0
+  https://commons.wikimedia.org/wiki/File:Mountain_lake_(Unsplash).jpg
+lake-silvaplana.webp
+  Piz Surlej and landscape reflecting on Lake Silvaplana.jpg — riciardus riciardus — CC0
+  https://commons.wikimedia.org/wiki/File:Piz_Surlej_and_landscape_reflecting_on_Lake_Silvaplana.jpg
+seiser-alm.webp
+  Seiser Alm meadow (Unsplash).jpg — Karsten Würth (@inf1783) inf1783 — CC0
+  https://commons.wikimedia.org/wiki/File:Seiser_Alm_meadow_(Unsplash).jpg

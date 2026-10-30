@@ -246,6 +246,30 @@ describe('SSRF：防护版 fetch（createSafeFetch）', () => {
     expect(Number(got.headers['content-length'])).toBe(Buffer.byteLength('{"a":"你好"}'))
   })
 
+  it('allowHttp：http 地址走 http 传输、照样过地址校验；缺省仍只认 https', async () => {
+    const up = await startUpstream((_req, res) => res.end('plain'))
+    const loose = createSafeFetch({ resolve: resolveTo('127.0.0.1'), allowHttp: true, forbidden: () => false })
+    expect(await (await loose(`http://up.example.com:${up.port}/`)).text()).toBe('plain')
+    const guarded = createSafeFetch({ resolve: resolveTo('127.0.0.1'), allowHttp: true })
+    await expect(guarded(`http://up.example.com:${up.port}/`)).rejects.toBeInstanceOf(UnsafeEndpointError)
+    await expect(createSafeFetch({ resolve: resolveTo('127.0.0.1'), forbidden: () => false })(`http://up.example.com:${up.port}/`)).rejects.toThrow(/https/)
+    expect(up.hits).toBe(1)
+  })
+
+  it("redirect: 'manual'：3xx 交回调用方（只带 Location），不跟随", async () => {
+    const target = await startUpstream((_req, res) => res.end('secret'))
+    const r = await startUpstream((_req, res) => {
+      res.writeHead(302, { location: `http://127.0.0.1:${target.port}/secret`, 'set-cookie': 'a=b' })
+      res.end('moved')
+    })
+    const safeFetch = createSafeFetch({ resolve: resolveTo('127.0.0.1'), allowHttp: true, forbidden: () => false })
+    const res = await safeFetch(`http://up.example.com:${r.port}/`, { redirect: 'manual' })
+    expect(res.status).toBe(302)
+    expect(res.headers.get('location')).toBe(`http://127.0.0.1:${target.port}/secret`)
+    expect(res.headers.get('set-cookie')).toBeNull()
+    expect(target.hits).toBe(0)
+  })
+
   it('非 2xx 照常返回（由调用方按状态码映射）', async () => {
     const up = await startUpstream((_req, res) => {
       res.writeHead(429, { 'content-type': 'application/json' })

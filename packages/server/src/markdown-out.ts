@@ -43,6 +43,11 @@ function inline(el: Y.XmlElement): string {
 
 function inlineNode(el: Y.XmlElement): string {
   if (el.nodeName === 'hardbreak') return '\\\n'
+  // 网页提及：与编辑器 toMarkdown 同写法（方言 LINK_MENTION），别处渲染成普通链接
+  if (el.nodeName === 'link_mention') {
+    const url = String(el.getAttribute('url') ?? '')
+    return `<a href="${url.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}" data-mention>${url.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</a>`
+  }
   if (el.nodeName === 'image') {
     const src: unknown = el.getAttribute('src')
     const alt: unknown = el.getAttribute('alt')
@@ -134,6 +139,13 @@ function block(el: Y.XmlElement): string {
       const src = String(el.getAttribute('src') ?? '').replace(/"/g, '&quot;')
       if (kind === 'video' || kind === 'audio') return `<${kind} src="${src}" controls preload="none"></${kind}>`
       return `<iframe src="${src}" loading="lazy" allowfullscreen></iframe>`
+    }
+    case 'bookmark': {
+      // 与编辑器 toMarkdown 同写法（方言 BOOKMARK）：别处渲染成普通链接
+      const url = String(el.getAttribute('url') ?? '')
+      const href = url.replace(/&/g, '&amp;').replace(/"/g, '&quot;')
+      const label = url.replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      return `<a href="${href}" data-bookmark>${label}</a>`
     }
     default:
       return textOf(el)

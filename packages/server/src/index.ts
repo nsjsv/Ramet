@@ -24,6 +24,8 @@ import { createProjector } from './collections/projector.js'
 import { publicRoutes } from './routes/public.js'
 import { filesRoutes } from './routes/files.js'
 import { searchRoutes } from './routes/search.js'
+import { linkPreviewRoutes } from './routes/link-preview.js'
+import { createLinkPreview, type LinkPreview } from './link-preview.js'
 import { adminRoutes, authRoutes, userFromRequest, type AuthEnv } from './auth.js'
 import { createDocWriter, createHocuspocus, drainDocWrites, loadDocFromDb, notifyAgentsChanged, notifyInboxChanged, notifyBoardsChanged, notifyMemoriesChanged, notifyPagesChanged, notifyPreviewsChanged } from './collab.js'
 import { loadAgents } from './agents/registry.js'
@@ -88,6 +90,8 @@ export type ServerOptions = {
   preview?: PreviewOptions | null
   /** 图床镜像：不传看环境变量 RAMET_IMGBED_*（没设即关闭）；测试注入自己建的实例 */
   imgbed?: ImgbedSync
+  /** 网页书签元信息抓取：测试注入（放行本机地址）；缺省生产实现 */
+  linkPreview?: LinkPreview
 }
 
 /** RAMET_PREVIEW_PORT / RAMET_PREVIEW_ORIGIN → 预览配置；没设或写坏了返回 undefined（预览关闭） */
@@ -124,14 +128,18 @@ export function startServer(
   const imgbed = options.imgbed ?? createImgbedSync(pool)
   // 公开端点必须挂在 pages/spaces 之前：两者在自己子应用里 app.use('*', requireAuth)，
   // 会拦住注册序靠后的 /api/public/* 请求（Hono 按注册序组链，匿名请求没到 handler 就 401）
+  // 网页书签元信息：登录端点与公开页端点共用一份内存缓存
+  const linkPreview = options.linkPreview ?? createLinkPreview()
   app.route(
     '/',
     publicRoutes(
       pool,
       () => notifyPagesChanged(hocuspocus),
       (name) => hocuspocus.documents.get(name),
+      linkPreview,
     ),
   )
+  app.route('/', linkPreviewRoutes(pool, linkPreview))
   app.route('/', authRoutes(pool))
   // 删号连带删掉他接入的机器：断开在线连接并让目录重拉（hub 在后面才建好，箭头函数请求到达时才求值）
   app.route(

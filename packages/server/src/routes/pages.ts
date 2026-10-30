@@ -13,6 +13,7 @@ import { summarizeChange, summaryState, SUMMARY_ITEM_LIMIT, type SummaryItem, ty
 import { readEditMarks } from '../edit-marks.js'
 import { restorePageSubtree, SELECT_SUBTREE_ALL, TRASH_ENTRY_PREDICATE, trashPageSubtree } from '../page-trash.js'
 import { SELECT_ALL_MINE, syncPages } from '../page-sync.js'
+import { coverParams, parseCoverInput, SET_PAGE_COVER } from '../page-cover.js'
 
 // 用 type 而非 interface:pg 的 query<T> 约束要求隐式索引签名,interface 给不了
 /** 页面闸门只看身份与角色（REST 的登录用户与 AI 凭证对应的用户都满足） */
@@ -361,6 +362,7 @@ export function pagesRoutes(
       index?: unknown
       is_template?: unknown
       full_width?: unknown
+      cover?: unknown
     }
     let written = false
     // 全宽：页面属性，写了就广播（协作者的列宽跟着变）
@@ -391,6 +393,18 @@ export function pagesRoutes(
         if (!isIconSourceMime(mime)) return c.json({ error: 'icon file not found' }, 400)
       }
       await pool.query(SET_PAGE_ICON, [...iconParams(parsed.icon), id])
+      written = true
+    }
+    // 封面:undefined = 不动;null = 清除;{kind,value,y?} = 设置(只调位置也带上原 kind/value)。
+    // 格式校验在 page-cover.ts;上传图必须是已存在的图片文件,与图标同一道闸
+    if (body.cover !== undefined) {
+      const parsed = parseCoverInput(body.cover)
+      if (!parsed.ok) return c.json({ error: parsed.error }, 400)
+      if (parsed.cover?.kind === 'file') {
+        const mime = (await pool.query<{ mime: string }>(SELECT_ICON_SOURCE_MIME, [parsed.cover.value])).rows[0]?.mime
+        if (!isIconSourceMime(mime)) return c.json({ error: 'cover file not found' }, 400)
+      }
+      await pool.query(SET_PAGE_COVER, [...coverParams(parsed.cover), id])
       written = true
     }
     if (body.parent_id !== undefined) {

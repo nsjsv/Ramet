@@ -50,6 +50,10 @@ services:
       RAMET_IMGBED_URL: ${RAMET_IMGBED_URL:-}
       RAMET_IMGBED_PUBLIC_URL: ${RAMET_IMGBED_PUBLIC_URL:-}
       RAMET_IMGBED_TOKEN: ${RAMET_IMGBED_TOKEN:-}
+      # 可选：网页书签 / 提及的元信息抓取中继。设了就一律请 Cloudflare Worker 代抓、服务器不直连（服务器连不上某些网站时用）
+      # （部署见 cloudflare/link-fetch/worker.js 文件头），URL 与 SECRET 都设了才开
+      RAMET_LINK_RELAY_URL: ${RAMET_LINK_RELAY_URL:-}
+      RAMET_LINK_RELAY_SECRET: ${RAMET_LINK_RELAY_SECRET:-}
     ports:
       # 只给端口预览用（没开预览时这里不监听任何东西），不暴露任何 Ramet 路由
       - '${PREVIEW_PORT:-8790}:3790'

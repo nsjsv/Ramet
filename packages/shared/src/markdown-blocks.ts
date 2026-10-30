@@ -21,7 +21,7 @@
 // 前端不会来改这些结构：list 拆分和有序续号只扫顶层 list（list-blocks.ts 的 appendTransaction
 // 与 renumberOrderedRuns 都是 doc.forEach），而这里写出的结构都在 agent_reply 内部。
 
-import { CALLOUT, COLUMN, COLUMNS, EMBED, isRametMark, parseMarkdown, TOC, TOGGLE, type Md } from './md-dialect/index.js'
+import { BOOKMARK, CALLOUT, COLUMN, COLUMNS, EMBED, LINK_MENTION, isRametMark, parseMarkdown, TOC, TOGGLE, type Md } from './md-dialect/index.js'
 
 export type Attrs = Record<string, unknown>
 export type MarkSpec = { name: string; attrs: Attrs }
@@ -86,6 +86,10 @@ function inlineNodes(nodes: Md[], marks: MarkSpec[], out: Inline[], rich: Rich):
       case 'delete': // GFM 删除线
         rich.value = true
         inlineNodes(node.children ?? [], [...marks, { name: 'strike_through', attrs: {} }], out, rich)
+        break
+      case LINK_MENTION: // 网页提及：原子节点，只存地址（标题 / 图标渲染时现取）
+        rich.value = true
+        out.push({ atom: 'link_mention', attrs: { url: text(node.url) } })
         break
       case 'inlineMath': // 行内公式：原子节点，LaTeX 原文在 attrs.latex
         rich.value = true
@@ -252,6 +256,10 @@ function blocksOf(nodes: Md[], rich: Rich): Block[] {
       case EMBED:
         rich.value = true
         out.push({ name: 'embed', attrs: { kind: text(node.kind), src: text(node.src), height: text(node.height) } })
+        break
+      case BOOKMARK:
+        rich.value = true
+        out.push({ name: 'bookmark', attrs: { url: text(node.url) } })
         break
       case 'footnoteDefinition': {
         // 文档没有脚注节点：定义退成以 `[^名]: ` 开头的正文

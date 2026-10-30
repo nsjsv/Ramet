@@ -4,6 +4,9 @@ import type { Pool } from 'pg'
 import { requireAuth, type AuthEnv } from '../auth.js'
 import { extractTitle, loadDocFromDb } from '../collab.js'
 import { clonePageIntoPersonalSpace } from '../clone.js'
+import { bookmarkUrl, type LinkPreview } from '../link-preview.js'
+import { pageCoverOf, type CoverColumns } from '../page-cover.js'
+import { linkPreviewCache } from './link-preview.js'
 import { rowIcon, type PageIcon } from '../page-icon.js'
 
 // 公开端点:匿名可读已发布子树的元数据与内容,登录用户可克隆进自己的个人空间。
@@ -35,7 +38,7 @@ const SELECT_CHILDREN_META =
 const SELECT_RUN = `SELECT p.title, p.parent_id, r.record FROM runs r JOIN live_pages p ON p.id = r.page_id
   WHERE r.page_id = $1`
 const SELECT_PARENT_TITLE = 'SELECT id, title FROM live_pages WHERE id = $1'
-const SELECT_FULL_WIDTH = 'SELECT full_width FROM live_pages WHERE id = $1'
+const SELECT_LAYOUT = 'SELECT full_width, cover_kind, cover_value, cover_y FROM live_pages WHERE id = $1'
 
 type PageMetaRow = { id: string; title: string; kind: string; icon_emoji: string | null; icon_file_id: string | null }
 
@@ -46,7 +49,27 @@ type PublicNode = { id: string; title: string; kind: string; icon: PageIcon | nu
 
 // notify:树变更广播回调(克隆成功后调,与 pages/spaces 族同语义);getLiveDoc:内存活文档查找
 // (公开 doc 与克隆取内容优先用活文档,测试可不传走 DB 重建分支)
-export function publicRoutes(pool: Pool, notify?: () => void, getLiveDoc?: (docName: string) => Y.Doc | undefined) {
+// 正文里有没有指向 url 的书签块 / 网页提及(任意深度:列表 / 分栏 / 折叠块里也算;
+// 提及是行内节点,也可能嵌在文本的 delta 里)
+const LINK_NODES = new Set(['bookmark', 'link_mention'])
+function hasLinkNode(node: Y.XmlFragment | Y.XmlElement, url: string): boolean {
+  const hit = (el: Y.XmlElement): boolean => (LINK_NODES.has(el.nodeName) && el.getAttribute('url') === url) || hasLinkNode(el, url)
+  for (const child of node.toArray()) {
+    if (child instanceof Y.XmlElement && hit(child)) return true
+    if (child instanceof Y.XmlText) {
+      for (const op of child.toDelta() as Array<{ insert?: unknown }>) if (op.insert instanceof Y.XmlElement && hit(op.insert)) return true
+    }
+  }
+  return false
+}
+
+// linkPreview:书签元信息抓取(缺省不开公开端点,测试按需注入)
+export function publicRoutes(
+  pool: Pool,
+  notify?: () => void,
+  getLiveDoc?: (docName: string) => Y.Doc | undefined,
+  linkPreview?: LinkPreview,
+) {
   const app = new Hono<AuthEnv>()
 
   // 公开闸门:打不上(不存在/未公开)一律同响应,不泄露存在性
@@ -100,14 +123,28 @@ export function publicRoutes(pool: Pool, notify?: () => void, getLiveDoc?: (docN
     const parent = run?.parent_id && (await isPublic(run.parent_id))
       ? ((await pool.query<{ id: string; title: string }>(SELECT_PARENT_TITLE, [run.parent_id])).rows[0] ?? null)
       : null
-    // 全宽是页面版式:公开页与编辑页同一列宽
-    const fullWidth = (await pool.query<{ full_width: boolean }>(SELECT_FULL_WIDTH, [id])).rows[0]?.full_width ?? false
+    // 全宽与封面是页面版式:公开页与编辑页同一列宽、同一张封面(封面只在这里带,子树节点不带,省字节)
+    const layout = (await pool.query<{ full_width: boolean } & CoverColumns>(SELECT_LAYOUT, [id])).rows[0]
     return c.json({
       title: extractTitle(doc),
       data: Buffer.from(Y.encodeStateAsUpdate(doc)).toString('base64'),
-      full_width: fullWidth,
+      full_width: layout?.full_width ?? false,
+      cover: layout ? pageCoverOf(layout) : null,
       ...(run ? { run: run.record, parent } : {}),
     })
+  })
+
+  // 公开页里书签卡 / 网页提及的元信息:匿名可调,所以只抓「这个公开页正文里真有的那个地址」,
+  // 否则就是一个任何人都能用的开放抓取代理。页面不公开 / 没有这张书签同响应 404
+  app.get('/api/public/pages/:id/link-preview', async (c) => {
+    const id = c.req.param('id')
+    const url = bookmarkUrl(c.req.query('url'))
+    if (!linkPreview || !url || !(await isPublic(id))) return c.json({ error: 'not found' }, 404)
+    const doc = await resolveDoc(`page:${id}`)
+    if (!hasLinkNode(doc.getXmlFragment('prosemirror'), url)) return c.json({ error: 'not found' }, 404)
+    const meta = await linkPreview.get(url)
+    c.header('cache-control', linkPreviewCache(meta))
+    return c.json(meta)
   })
 
   // 克隆公开子树进克隆者个人空间:唯一写面,落点只在自己空间,无越权路径。

@@ -4,6 +4,10 @@ import type { PlanEntry, RunEntry, RunInfo, TeamState, TurnUsage } from '@ramet/
  * emoji 优先、图片其次的派生在服务端 page-icon.ts，前端不重复判断 */
 export type PageIcon = { kind: 'emoji'; value: string } | { kind: 'image'; value: string }
 
+/** 页面封面：file = 上传图的文件 id，url = 外链图片地址，preset = 预设图名（清单在 covers.ts）；
+ * y = 垂直位置 0–100（object-position 百分比）。展示地址只由 PageCover.tsx 的 coverSrc 拼 */
+export type PageCover = { kind: 'file' | 'url' | 'preset'; value: string; y: number }
+
 export interface Page {
   id: string
   parent_id: string | null
@@ -23,6 +27,8 @@ export interface Page {
   publish_includes_runs: boolean
   /** 未设图标为 null */
   icon: PageIcon | null
+  /** 未设封面为 null；旧缓存缺字段 = 没有封面 */
+  cover?: PageCover | null
   /** false = 目录树自建文档：属于本空间，但不出现在页面树（子孙跟着排除）。旧缓存缺字段 = 在页面树里 */
   in_page_tree?: boolean
   /** true = 出现在「从模板新建」列表里；旧缓存缺字段 = 不是模板 */
@@ -220,11 +226,23 @@ export interface RunDetail {
 }
 
 /** 公开页文档：data = Yjs 全量状态的 base64。过程页另带 run，时间线按它画 */
+/** 网页书签卡的元信息（server link-preview.ts）；各字段抓不到就缺 */
+export interface LinkMeta {
+  url: string
+  title?: string
+  description?: string
+  image?: string
+  icon?: string
+  site?: string
+}
+
 export interface PublicPageDoc {
   title: string
   data: string
   /** 页面全宽（与编辑页同一列宽）；旧服务端缺字段 = 否 */
   full_width?: boolean
+  /** 页面封面；旧服务端缺字段 = 没有 */
+  cover?: PageCover | null
   run?: RunRecord
   parent?: { id: string; title: string } | null
 }
@@ -568,6 +586,9 @@ export const api = {
    *  失败抛错（400），调用方原样展示 err.message */
   setPageIcon: (id: string, icon: PageIcon | null) =>
     request<Page>(`/api/pages/${id}`, { method: 'PATCH', body: JSON.stringify({ icon }) }),
+  /** 设/换/清页面封面（只调位置也走这里，带上原 kind/value）。null 即移除；服务端校验失败抛错（400） */
+  setPageCover: (id: string, cover: PageCover | null) =>
+    request<Page>(`/api/pages/${id}`, { method: 'PATCH', body: JSON.stringify({ cover }) }),
   /** 彻底删除（物理清内容与版本历史）：回收站里的「永久删除」与 link-watcher 的自动清理走这里。
    *  用户删页走 trashPage（可恢复） */
   deletePage: (id: string) =>
@@ -731,6 +752,11 @@ export const api = {
 
   publicTree: (id: string) => request<PublicPageTree>(`/api/public/pages/${id}`),
   publicDoc: (id: string) => request<PublicPageDoc>(`/api/public/pages/${id}/doc`),
+  /** 网页书签元信息（服务端现抓、只放内存）；抓不到也是 200 { url } */
+  linkPreview: (url: string) => request<LinkMeta>(`/api/link-preview?url=${encodeURIComponent(url)}`),
+  /** 公开页里的书签：只认该页正文里真有的书签地址 */
+  publicLinkPreview: (pageId: string, url: string) =>
+    request<LinkMeta>(`/api/public/pages/${pageId}/link-preview?url=${encodeURIComponent(url)}`),
   /** 过程页的 record（时间线）。404 = 不可见 */
   getRun: (id: string) => request<RunDetail>(`/api/runs/${id}`),
   /** 克隆公开子树进自己个人空间；返回新根页面 id。需登录（匿名 401） */

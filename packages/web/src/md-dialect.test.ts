@@ -123,6 +123,31 @@ describe('方言：块级', () => {
     expect(embed).toMatchObject({ name: 'embed', attrs: { kind: 'iframe', height: '360' } })
     expect(parseBlocks('<iframe src="javascript:alert(1)"></iframe>').blocks[0]!.name).toBe('paragraph')
   })
+
+  test('书签：独占一段的 <a data-bookmark>，任意深度；地址取 href；不带标记 / 非 http(s) / 段里还有别的字都不算', () => {
+    const url = 'https://example.com/a?x=1&y=2'
+    expect(first(`<a href="https://example.com/a?x=1&amp;y=2" data-bookmark>${url}</a>`)).toMatchObject({ name: 'bookmark', attrs: { url } })
+    // 链接文字随便写（GFM 会把裸网址认成 link 节点，也不影响）
+    expect(first('<a data-bookmark href="https://e.com/">看这个</a>')).toMatchObject({ name: 'bookmark', attrs: { url: 'https://e.com/' } })
+    expect(parseBlocks('- <a href="https://e.com/" data-bookmark>https://e.com/</a>').blocks[0]!.blocks![0]!.blocks![0]).toMatchObject({
+      name: 'bookmark',
+      attrs: { url: 'https://e.com/' },
+    })
+    expect(first('<a href="https://e.com/">https://e.com/</a>').name).toBe('paragraph')
+    expect(first('<a href="javascript:alert(1)" data-bookmark>x</a>').name).toBe('paragraph')
+    expect(first('前面 <a href="https://e.com/" data-bookmark>x</a>').name).toBe('paragraph')
+    expect(first('<a href="https://e.com/" data-bookmarks>x</a>').name).toBe('paragraph')
+  })
+
+  test('网页提及：行内的 <a data-mention> 整段换成 link_mention 原子；前后文字照留；不带标记 / 非 http(s) / 没闭合的不算', () => {
+    expect(inl(first('看 <a href="https://e.com/a?x=1&amp;y=2" data-mention>https://e.com/a?x=1&y=2</a> 这个').inlines)).toBe('看 <link_mention> 这个')
+    expect(first('<a href="https://e.com/a?x=1&amp;y=2" data-mention>x</a>').inlines![0]).toEqual({ atom: 'link_mention', attrs: { url: 'https://e.com/a?x=1&y=2' } })
+    expect(inl(first('<a href="javascript:x" data-mention>x</a>').inlines)).not.toContain('<link_mention>')
+    expect(inl(first('<a href="https://e.com/">x</a>').inlines)).not.toContain('<link_mention>')
+    expect(inl(first('<a href="https://e.com/" data-mention>x').inlines)).not.toContain('<link_mention>')
+    // 独占一段也还是行内提及，不会被当成书签
+    expect(first('<a href="https://e.com/" data-mention>https://e.com/</a>').name).toBe('paragraph')
+  })
 })
 
 describe('方言：颜色与高亮', () => {

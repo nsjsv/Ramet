@@ -1,10 +1,11 @@
 import { Pool, type PoolClient } from 'pg'
+import { COVER_COLUMNS } from './page-cover.js'
 import { API_PAGE_FIELDS } from './page-icon.js'
 
-// 页面变更日志（page-sync.ts）的 UPDATE 触发列：对外字段（API_PAGE_FIELDS，含 position）+ 图标两列 + deleted_at。
+// 页面变更日志（page-sync.ts）的 UPDATE 触发列：对外字段（API_PAGE_FIELDS，含 position）+ 图标两列 + 封面三列 + deleted_at。
 // 由白名单拼出，不另抄一份列清单，对外字段加列时触发条件跟着变。content_text / agent_session /
 // content_updated_at 每次存储都在写又不下发，不在内，正文存盘不产生日志。
-const PAGE_CHANGE_COLUMNS = [...API_PAGE_FIELDS, 'icon_emoji', 'icon_file_id', 'deleted_at']
+const PAGE_CHANGE_COLUMNS = [...API_PAGE_FIELDS, 'icon_emoji', 'icon_file_id', ...COVER_COLUMNS, 'deleted_at']
 const PAGE_CHANGE_WHEN = PAGE_CHANGE_COLUMNS.map((col) => `OLD.${col} IS DISTINCT FROM NEW.${col}`).join(' OR ')
 
 // owner_id 保持可空:避免在有数据的老库上加 NOT NULL 的迁移复杂度,新建页面由应用层必写,
@@ -253,6 +254,19 @@ ALTER TABLE pages ADD COLUMN IF NOT EXISTS content_updated_at TEXT;
 ALTER TABLE pages ADD COLUMN IF NOT EXISTS is_template BOOLEAN NOT NULL DEFAULT false;
 -- 全宽:true = 正文不收 720 列、铺满画面。页面属性(协作者与公开页同看),同样排在视图重建之前
 ALTER TABLE pages ADD COLUMN IF NOT EXISTS full_width BOOLEAN NOT NULL DEFAULT false;
+-- 页面封面:来源类型 + 值(files.id / 外链地址 / 预设名)+ 垂直位置百分比,对外折成 cover 单字段(见 page-cover.ts)。
+-- 类型与值同空同非空、位置在 [0,100] 由约束表达,任何写入路径都造不出半截封面
+ALTER TABLE pages ADD COLUMN IF NOT EXISTS cover_kind TEXT;
+ALTER TABLE pages ADD COLUMN IF NOT EXISTS cover_value TEXT;
+ALTER TABLE pages ADD COLUMN IF NOT EXISTS cover_y REAL NOT NULL DEFAULT 50;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'pages_cover_valid') THEN
+    ALTER TABLE pages ADD CONSTRAINT pages_cover_valid CHECK (
+      (cover_kind IS NULL) = (cover_value IS NULL)
+      AND (cover_kind IS NULL OR cover_kind IN ('file', 'url', 'preset'))
+      AND cover_y BETWEEN 0 AND 100);
+  END IF;
+END $$;
 -- 视图重建必须排在加列之后:视图的列集合在创建时固定,SELECT * 不会自动带出新列
 CREATE OR REPLACE VIEW live_pages AS SELECT * FROM pages WHERE deleted_at IS NULL;
 -- 本地 connector(托管云拓扑):归属空间,出站 WSS 反连中心。明文 token 只在配对响应里

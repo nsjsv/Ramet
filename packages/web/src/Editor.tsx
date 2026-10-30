@@ -18,6 +18,7 @@ import { onViewToggleRequest, readViewMode, writeViewMode } from './view-mode'
 import { recordRecentPage } from './recent-pages'
 import TopBar from './TopBar'
 import { PageIconHeader } from './PageIcon'
+import { addRandomCover, PageCover } from './PageCover'
 import { resetFind } from './editor/find'
 import FindBar from './FindBar'
 import { RunFoot, RunHead, useRunDetail } from './editor/run-board'
@@ -433,8 +434,22 @@ export default function EditorPage({
       <DocRail store={railStore} onJump={railJump} />
       {/* 正文列是 [data-flip]（侧栏收起 / 展开时 FLIP 跟着滑）：里面不能有 fixed 后代，
           祖先带 transform 会让它们跟着位移，所以查找条与历史抽屉挂在列外 */}
-      <div className={'editor-page' + (chatMode ? ' chat-mode' : '') + (fullWidth ? ' full-width' : '')} ref={pageRef} data-flip>
-        {id && <PageIconHeader pageId={id} icon={page?.icon ?? null} readOnly={readOnly} onChanged={onChanged} />}
+      {/* 封面铺满内容区宽度，所以挂在正文列外（也不进 [data-flip] 的列，FLIP 位移不带着它） */}
+      {id && <PageCover pageId={id} cover={page?.cover ?? null} readOnly={readOnly} onChanged={onChanged} />}
+      <div
+        className={'editor-page' + (chatMode ? ' chat-mode' : '') + (fullWidth ? ' full-width' : '') + (page?.cover ? ' has-cover' : '')}
+        ref={pageRef}
+        data-flip
+      >
+        {id && (
+          <PageIconHeader
+            pageId={id}
+            icon={page?.icon ?? null}
+            readOnly={readOnly}
+            onChanged={onChanged}
+            onAddCover={page && !page.cover ? () => void addRandomCover(id).then(onChanged, (err: unknown) => console.error(err)) : undefined}
+          />
+        )}
         <div className="page-title title-editor" ref={titleRef} />
         {runDetail && (
           <RunHead

@@ -93,44 +93,53 @@ function place(el: HTMLElement, view: EditorView): void {
       : `${below}px`
 }
 
-function openChoices(view: EditorView, target: BlockLinkTarget): void {
+export type PasteChoice = { label: string; hint: string; run: () => void }
+
+/** 光标下方的单选浮层（块链接三选、空行粘贴网址三选共用）：点一项执行并收起，Esc / 点外面收起什么都不做 */
+export function openChoiceOverlay(view: EditorView, choices: PasteChoice[]): void {
   closeOverlay()
   const el = document.createElement('div')
   el.className = 'block-link-choices'
-
-  const button = (label: string, hint: string, run: () => void): HTMLButtonElement => {
+  for (const choice of choices) {
     const btn = document.createElement('button')
     btn.type = 'button'
-    btn.innerHTML = `<span class="label">${label}</span><span class="hint">${hint}</span>`
+    const label = document.createElement('span')
+    label.className = 'label'
+    label.textContent = choice.label
+    const hint = document.createElement('span')
+    hint.className = 'hint'
+    hint.textContent = choice.hint
+    btn.append(label, hint)
     btn.addEventListener('mousedown', (e) => e.preventDefault()) // 不抢编辑器焦点（同 slash 惯例）
     btn.addEventListener('click', () => {
       closeOverlay()
-      run()
+      choice.run()
     })
-    return btn
+    el.appendChild(btn)
   }
-
-  el.appendChild(
-    button('提及', '插入文本快照（不跟随）', () => {
-      void insertMention(view, target)
-    }),
-  )
-  const syncType = view.state.schema.nodes.block_sync
-  el.appendChild(
-    syncType
-      ? button('同步块', '实时跟随源块内容', () => {
-          if (!view.isDestroyed) replaceSelection(view, syncType.create({ pageId: target.pageId, blockId: target.blockId }))
-        })
-      : button('原样粘贴', '插入链接文本', () => insertPlain(view, target)),
-  )
-  el.appendChild(button('原样粘贴', '插入链接文本', () => insertPlain(view, target)))
-
   document.body.appendChild(el)
   place(el, view)
   openOverlay = el
   document.addEventListener('mousedown', onDocDown, true)
   document.addEventListener('touchstart', onDocDown, true)
   document.addEventListener('keydown', onKeyDown, true)
+}
+
+function openChoices(view: EditorView, target: BlockLinkTarget): void {
+  const syncType = view.state.schema.nodes.block_sync
+  openChoiceOverlay(view, [
+    { label: '提及', hint: '插入文本快照（不跟随）', run: () => void insertMention(view, target) },
+    syncType
+      ? {
+          label: '同步块',
+          hint: '实时跟随源块内容',
+          run: () => {
+            if (!view.isDestroyed) replaceSelection(view, syncType.create({ pageId: target.pageId, blockId: target.blockId }))
+          },
+        }
+      : { label: '原样粘贴', hint: '插入链接文本', run: () => insertPlain(view, target) },
+    { label: '原样粘贴', hint: '插入链接文本', run: () => insertPlain(view, target) },
+  ])
 }
 
 export const blockLinkPaste = $prose(

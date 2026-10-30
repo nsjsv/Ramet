@@ -1,9 +1,10 @@
-// 行内链接悬浮栏：指针在正文的行内链接（link mark）上停 HOVER_DELAY 后，链接下方浮出一栏：链接图标 + 缩略地址 | 复制 | 编辑
+// 行内链接悬浮栏：指针在正文的行内链接（link mark）上停 HOVER_DELAY 后，链接下方浮出一栏：链接图标 + 缩略地址 | 复制 | 编辑 | 转成书签
 // （下方放不下翻到上方）。指针从链接移到栏上栏不动，离开两者 LEAVE_DELAY 后收起。
 //   - 点缩略地址 = 打开（link-nav.ts 的 linkTarget：站内 /page/ 走路由，其余新标签）；复制 = 完整地址（站内相对地址补 origin）。
 //   - 编辑 = 栏原地切成「文本 + 链接」表单：Enter 应用（link-edit.ts 的 editLinkTr，一步撤销）、Esc / 点外面放弃；
 //     底行「删除链接」= 摘掉链接留文字（同样一步撤销）。
-//   - viewer 没有编辑。左键按着（拖选）、链接在选区里（框选工具栏在管）不弹；查看态下敲键 / 滚动 / 按下鼠标就收起。
+//   - 转成书签（只对 http(s) 链接）= bookmark.ts 的 linkToBookmark：独占一段就整段换成书签卡，句中的在该段下面插一张。
+//   - viewer 没有编辑和转成书签。左键按着（拖选）、链接在选区里（框选工具栏在管）不弹；查看态下敲键 / 滚动 / 按下鼠标就收起。
 // 栏挂 body、fixed 定位，纯 DOM；按钮 mousedown preventDefault（编辑器焦点 / 选区不被抢走，selection-menu 同款）。
 // 正文一变（本地或协同对端）就按内容找回这条链接（link-edit.ts 的 findLink），没了就收起。
 // 只挂编辑器（editor-session.ts）；不加 schema，公开页不用同步注册。样式在 styles/menus.css。
@@ -18,6 +19,8 @@ import { iconSvg } from '../icons'
 import { absoluteHref, editLinkTr, findLink, shortHref } from './link-edit'
 import { linkRangeAt, type LinkRange } from './link-input'
 import { linkTarget } from './link-nav'
+import { linkToBookmark } from './bookmark'
+import { safeBookmarkUrl } from '@ramet/shared/md-dialect'
 
 const L = COPY.linkHover
 
@@ -88,7 +91,8 @@ function createLinkHover(view: EditorView, opts: LinkHoverOptions) {
   sep.className = 'sel-sep'
   const copy = button('copy', L.copy)
   const edit = button('edit', L.edit)
-  show.append(addr, sep, copy, edit)
+  const toBookmark = button('bookmark', L.toBookmark)
+  show.append(addr, sep, copy, edit, toBookmark)
 
   // 编辑态：文本 / 链接两行 + 键位提示
   const form = document.createElement('div')
@@ -153,6 +157,7 @@ function createLinkHover(view: EditorView, opts: LinkHoverOptions) {
     addrText.textContent = shortHref(range.href) || range.href
     addr.title = L.open(range.href)
     edit.hidden = !view.editable
+    toBookmark.hidden = !view.editable || !safeBookmarkUrl(range.href)
     copy.innerHTML = iconSvg('copy', 16)
     if (!bar.isConnected) {
       document.body.append(bar)
@@ -252,7 +257,7 @@ function createLinkHover(view: EditorView, opts: LinkHoverOptions) {
     hovered = null
   }
 
-  for (const btn of [addr, copy, edit]) btn.addEventListener('mousedown', (e) => e.preventDefault())
+  for (const btn of [addr, copy, edit, toBookmark]) btn.addEventListener('mousedown', (e) => e.preventDefault())
   unlink.addEventListener('click', () => finish('unlink'))
   addr.addEventListener('click', () => {
     if (!shown) return
@@ -270,6 +275,14 @@ function createLinkHover(view: EditorView, opts: LinkHoverOptions) {
     })
   })
   edit.addEventListener('click', startEdit)
+  toBookmark.addEventListener('click', () => {
+    if (!shown || !view.editable) return
+    const { range } = shown
+    reset()
+    const tr = linkToBookmark(view.state, range.from, range.to, range.href)
+    if (tr) view.dispatch(tr)
+    view.focus()
+  })
   for (const input of [textInput, hrefInput]) {
     input.addEventListener('keydown', (e) => {
       if (e.isComposing) return

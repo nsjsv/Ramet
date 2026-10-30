@@ -13,6 +13,7 @@ import { api, type PageIcon as PageIconValue } from './api'
 import { uploadFile } from './editor/media'
 import { twemojiUrl } from './emoji'
 import { EmojiPicker } from './EmojiPicker'
+import { COVER_COPY } from './covers'
 import { Icon } from './icons'
 
 /** 服务端校验的同一上限（码点）——这里只做交互先行提示，真闸门在服务端 */
@@ -72,11 +73,14 @@ export function PageIconHeader({
   icon,
   readOnly,
   onChanged,
+  onAddCover,
 }: {
   pageId: string
   icon: PageIconValue | null
   readOnly: boolean
   onChanged: () => void
+  /** 页面还没有封面时给：同一行出「＋ 封面」幽灵按钮 */
+  onAddCover?: () => void
 }) {
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -152,7 +156,7 @@ export function PageIconHeader({
 
   if (readOnly) {
     return icon ? (
-      <div className="icon-header">
+      <div className="icon-header has-icon">
         <span className="icon-header-static">
           <PageIcon icon={icon} size="lg" />
         </span>
@@ -161,7 +165,7 @@ export function PageIconHeader({
   }
 
   return (
-    <div className="icon-header" ref={boxRef}>
+    <div className={'icon-header' + (icon ? ' has-icon' : '')} ref={boxRef}>
       <button
         type="button"
         className={'icon-header-trigger' + (icon ? ' has-icon' : '')}
@@ -171,6 +175,13 @@ export function PageIconHeader({
       >
         {icon ? <PageIcon icon={icon} size="lg" /> : <span className="icon-header-add"><Icon name="plus" size={14} /> 图标</span>}
       </button>
+      {onAddCover && (
+        <button type="button" className="icon-header-trigger icon-header-cover" title={COVER_COPY.addTitle} onClick={onAddCover}>
+          <span className="icon-header-add">
+            <Icon name="plus" size={14} /> {COVER_COPY.add}
+          </span>
+        </button>
+      )}
       {open && (
         <div className="icon-picker-pop" role="dialog" aria-label="页面图标">
           <EmojiPicker onPick={(emoji) => !busy && void apply({ kind: 'emoji', value: emoji })} />

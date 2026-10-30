@@ -280,3 +280,157 @@
 .embed-prompt-hint.is-error {
   color: var(--danger);
 }
+
+/* 网页书签卡（editor/bookmark.ts）：左文右图，整卡一个链接；元信息到之前只有域名与地址 */
+.bookmark {
+  margin: 0.6em 0;
+}
+
+/* 正文链接样式（蓝字、下划线）不进卡片：选择器带上 .bookmark 压过 .ProseMirror a */
+.bookmark .bookmark-card {
+  display: flex;
+  min-height: 72px;
+  overflow: hidden;
+  color: var(--ink);
+  text-decoration: none;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  user-select: none;
+  transition: background var(--d-1);
+}
+
+.bookmark .bookmark-card:hover {
+  color: var(--ink);
+  text-decoration: none;
+  background: var(--hover);
+}
+
+.bookmark-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px 14px;
+}
+
+.bookmark-title,
+.bookmark-url {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.bookmark-title {
+  font-size: var(--t-sm);
+  line-height: 1.4;
+}
+
+.bookmark-desc {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+  line-height: 1.5;
+}
+
+.bookmark-link {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--ink-2);
+  font-size: var(--t-xs);
+}
+
+.bookmark-favicon {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  object-fit: contain;
+}
+
+/* 抓取中：描述位一条骨架 */
+.bookmark.is-loading .bookmark-title::after {
+  content: '';
+  display: block;
+  width: 60%;
+  height: 10px;
+  margin-top: 8px;
+  border-radius: 4px;
+  background: var(--hover);
+}
+
+.bookmark-cover {
+  flex: 0 0 33%;
+  max-width: 240px;
+  max-height: 120px;
+  background: var(--bg-sunk);
+}
+
+.bookmark-cover img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.bookmark-bad {
+  color: var(--ink-3);
+  font-size: var(--t-sm);
+}
+
+.ProseMirror .bookmark.ProseMirror-selectednode .bookmark-card {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+@media (max-width: 640px) {
+  .bookmark-cover {
+    display: none;
+  }
+}
+
+/* 网页提及（editor/link-mention.ts）：行内胶囊「站点图标 + 标题」，标题过长省略 */
+.link-mention a {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  max-width: 100%;
+  padding: 0 2px;
+  color: var(--ink);
+  text-decoration: none;
+  vertical-align: bottom;
+  border-radius: 4px;
+}
+
+.link-mention a:hover {
+  background: var(--hover);
+}
+
+.link-mention-icon {
+  flex: none;
+  align-self: center;
+  width: 1em;
+  height: 1em;
+  border-radius: 2px;
+  object-fit: contain;
+}
+
+.link-mention-title {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  max-width: 32em;
+  border-bottom: 1px solid var(--line);
+  font-weight: 500;
+}
+
+.ProseMirror .link-mention.ProseMirror-selectednode a {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}

@@ -227,6 +227,16 @@ export const COPY = {
     hint: 'Enter 保存 · Esc 取消',
     unlink: '删除链接',
     unlinkTitle: '删除链接（文字保留）',
+    toBookmark: '转成书签',
+  },
+  /** 网页书签卡（editor/bookmark.ts）、网页提及（editor/link-mention.ts）与空行粘贴链接的三选（editor/link-paste.ts） */
+  bookmark: {
+    keepLink: '链接',
+    keepLinkHint: '保持为文字链接',
+    bookmark: '书签',
+    bookmarkHint: '显示成带标题和预览图的卡片',
+    mention: '提及',
+    mentionHint: '显示成带网站图标和标题的行内链接',
   },
   /** 斜杠菜单：分组标题与静态块的一句说明 */
   slash: {

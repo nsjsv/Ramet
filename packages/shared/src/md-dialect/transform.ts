@@ -3,12 +3,16 @@
 //   BLOCK_RULES：块级（blocks.ts），在一串块级兄弟里从下标 i 起认一段（提示框、折叠块、分栏、目录、嵌入），
 //                命中返回替换节点与吃掉的兄弟个数；
 //   INLINE_TAGS：行内成对 HTML 标签，同一 phrasing 父节点里开标签与之后配对的闭标签之间的节点包成 rametMark。
+//   链接提及：`<a href="…" data-mention>…</a>` 整段换成原子节点 rametLinkMention（里面的文字只是给别的渲染器看的）。
 // 识别只在解析方向跑（milkdown 的 remark 插件 transformer / 服务端 parseMarkdown），序列化方向不经过这里。
 
 import { BLOCK_RULES } from './blocks.js'
 import { colorSpanOpen, highlightOpen, pairEqualsHighlight } from './inline.js'
 import { revertFalseInlineMath } from './math.js'
 import { RAMET_MARK, type MarkName, type Md } from './types.js'
+import { attr, safeBookmarkUrl } from './blocks.js'
+
+export const LINK_MENTION = 'rametLinkMention'
 
 export { BLOCK_RULES, type BlockRule } from './blocks.js'
 
@@ -55,7 +59,29 @@ function closingIndex(children: Md[], from: number, tag: string): number {
 }
 
 export function transformInline(children: Md[]): Md[] {
-  return pairTags(pairEqualsHighlight(revertFalseInlineMath(children)))
+  return pairTags(linkMentions(pairEqualsHighlight(revertFalseInlineMath(children))))
+}
+
+const MENTION_OPEN_RE = /^<a\b([^>]*)>$/i
+
+/** `<a href data-mention>` … `</a>` → rametLinkMention（只认 http(s)；没配对 / 地址不对的原样留下） */
+function linkMentions(children: Md[]): Md[] {
+  const out: Md[] = []
+  for (let i = 0; i < children.length; i++) {
+    const child = children[i]!
+    const m = MENTION_OPEN_RE.exec(htmlValue(child) ?? '')
+    if (m && /\sdata-mention\b/i.test(` ${m[1] ?? ''}`)) {
+      const url = attr(m[1] ?? '', 'href')
+      const end = closingIndex(children, i + 1, 'a')
+      if (end > i && safeBookmarkUrl(url)) {
+        out.push({ type: LINK_MENTION, url })
+        i = end
+        continue
+      }
+    }
+    out.push(child)
+  }
+  return out
 }
 
 /** 行内成对 HTML 标签包成 rametMark（递归处理包进去的那段） */

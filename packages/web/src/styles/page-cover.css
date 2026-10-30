@@ -1,0 +1,190 @@
+/* ---------- 页面封面（PageCover.tsx）----------
+ * 编辑页挂在 .main 里正文列之前、公开页挂在顶栏与 .public-main 之间：铺满内容区宽度，不随正文列收窄。 */
+
+.page-cover-wrap {
+  position: relative;
+}
+
+.page-cover {
+  height: clamp(160px, 30vh, 280px);
+  overflow: hidden;
+  /* 外链挂了 / 图还没到时的底色 */
+  background: var(--hover);
+}
+
+.page-cover img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  user-select: none;
+}
+
+.page-cover-wrap.is-repositioning .page-cover {
+  cursor: grab;
+  touch-action: none;
+}
+
+.page-cover-wrap.is-repositioning .page-cover:active {
+  cursor: grabbing;
+}
+
+.page-cover-hint {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  padding: 4px 10px;
+  font-size: 13px;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.45);
+  border-radius: 6px;
+  pointer-events: none;
+}
+
+/* 操作按钮：悬停封面才出（拖动态常显），触屏常显 */
+.page-cover-actions {
+  position: absolute;
+  right: 16px;
+  bottom: 12px;
+  display: flex;
+  gap: 1px;
+  overflow: hidden;
+  border-radius: 6px;
+  box-shadow: var(--shadow-1);
+  opacity: 0;
+  transition: opacity var(--d-1);
+}
+
+.page-cover-wrap:hover .page-cover-actions,
+.page-cover-wrap:focus-within .page-cover-actions,
+.page-cover-wrap.is-repositioning .page-cover-actions {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .page-cover-actions {
+    opacity: 1;
+  }
+}
+
+.page-cover-btn {
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--ink-2);
+  background: var(--surface);
+}
+
+/* --hover 是半透明色：直接当背景会透出底下的图，叠在不透明底色上 */
+.page-cover-btn:hover {
+  color: var(--ink);
+  box-shadow: inset 0 0 0 100px var(--hover);
+}
+
+.page-cover-error {
+  position: absolute;
+  right: 16px;
+  bottom: 44px;
+  padding: 4px 8px;
+  font-size: 12px;
+  color: var(--danger);
+  background: var(--surface);
+  border-radius: 4px;
+}
+
+/* 更换封面弹层：贴封面右下角往下展开 */
+.cover-picker {
+  position: absolute;
+  z-index: 40; /* 与图标弹层同层：内容列之上、弹窗(50)/灯箱(60) 之下 */
+  top: calc(100% - 4px);
+  right: 16px;
+  width: min(420px, calc(100vw - 32px));
+  padding: 8px 10px 10px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow-2);
+}
+
+.cover-picker-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.cover-picker-tab {
+  padding: 4px 8px 6px;
+  margin-bottom: -1px;
+  font-size: 13px;
+  color: var(--ink-3);
+  border-bottom: 2px solid transparent;
+}
+
+.cover-picker-tab:hover {
+  color: var(--ink);
+}
+
+.cover-picker-tab.is-active {
+  color: var(--ink);
+  border-bottom-color: var(--ink);
+}
+
+.cover-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.cover-picker-item {
+  aspect-ratio: 5 / 2;
+  padding: 0;
+  overflow: hidden;
+  background: var(--hover);
+  border-radius: 4px;
+}
+
+.cover-picker-item img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: opacity var(--d-1);
+}
+
+.cover-picker-item:hover img {
+  opacity: 0.85;
+}
+
+.cover-picker-pane {
+  padding: 4px 0;
+}
+
+.cover-picker-hint {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+/* 有封面：列顶留白收掉一截，图标往上压住封面下缘一半（图标 56px + 触发器内边距） */
+.editor-page.has-cover .icon-header.has-icon {
+  z-index: 1;
+  margin-top: -62px;
+}
+
+.public-main.has-cover {
+  padding-top: 32px;
+}
+
+@media (max-width: 768px) {
+  .page-cover {
+    height: 160px;
+  }
+  .page-cover-actions,
+  .page-cover-error,
+  .cover-picker {
+    right: 8px;
+  }
+}

@@ -40,6 +40,8 @@ const ATTR_TEXT: Record<string, string[]> = {
   block_ref: ['text'], // 块提及 chip：显示插入时刻的文本快照
   callout: ['title'], // 提示框标题（空 = 外观默认名，不进文字）
   embed: ['src'], // 嵌入：地址就是它读得见的「文字」
+  bookmark: ['url'], // 网页书签卡：同嵌入，标题等元信息不在文档里
+  link_mention: ['url'], // 网页提及（行内）：同上
 }
 
 /** 行内换行节点：没有文字但读得见（DOM 是 <br>）。漏掉它会让多行文本在

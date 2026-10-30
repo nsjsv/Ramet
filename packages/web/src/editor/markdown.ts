@@ -12,6 +12,7 @@ import { normalizeTopLevelLists } from './list-blocks'
 import { pastedMarkdownLinks } from './collection-block'
 import { upgradeMentions } from './mention-upgrade'
 import { BLOCK_LINK_RE } from './block-link-paste'
+import { blankParagraphAt, offerLinkChoices } from './link-paste'
 import { selfId } from '../people'
 
 // 逐行匹配常见 markdown 块语法（多行粘贴且命中才拦截，单行/普通文本走默认行为）
@@ -41,6 +42,8 @@ function linkifyPaste(view: EditorView, url: string): boolean {
   const label = from === to ? url : view.state.doc.textBetween(from, to, ' ')
   if (!label) return false
   const tr = view.state.tr.replaceWith(from, to, view.state.schema.text(label, [link.create({ href: url })]))
+  // 标成粘贴（同 PM 自己的粘贴事务）：网址末尾的 `/` 不是刚打出的斜杠，不能开斜杠菜单（trigger-session.ts）
+  tr.setMeta('uiEvent', 'paste')
   view.dispatch(tr.setSelection(TextSelection.create(tr.doc, from + label.length)).scrollIntoView())
   return true
 }
@@ -52,7 +55,12 @@ export function configPaste(ctx: Ctx) {
         const text = event.clipboardData?.getData('text/plain')
         if (!text || !looksLikeMarkdown(text)) {
           const url = text?.trim()
-          return !!url && BARE_URL_RE.test(url) && view.editable && linkifyPaste(view, url)
+          if (!url || !BARE_URL_RE.test(url) || !view.editable) return false
+          // 空段落里粘网址：变成链接之后再问要不要换成书签 / 嵌入（link-paste.ts）
+          const blank = blankParagraphAt(view)
+          if (!linkifyPaste(view, url)) return false
+          if (blank !== null) offerLinkChoices(view, blank, url)
+          return true
         }
         // 代码块内粘贴保持原样
         if (view.state.selection.$from.parent.type.name === 'code_block') return false
@@ -65,7 +73,7 @@ export function configPaste(ctx: Ctx) {
         const content = pastedMarkdownLinks(normalizeTopLevelLists(node), view.state.schema)
         const tr = view.state.tr.replaceWith(from, to, content)
         upgradeMentions(tr) // @[…](page:…) / @[…](agent:…) 原文 / 降级链接升回 chip
-        view.dispatch(tr)
+        view.dispatch(tr.setMeta('uiEvent', 'paste'))
         return true
       },
     }))

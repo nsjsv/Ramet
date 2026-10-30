@@ -29,7 +29,7 @@ const ENSURE_PERSONAL_MEMBER = `INSERT INTO space_members (space_id, user_id, ro
 // skill 页是 skills 表 + 附件 + 页面三者合一;集合页(kind='collection')的属性定义与行数据不随页面行走,
 // 所以不复制集合。不是 doc 的页不复制,它下面的页(集合的行)也就不会被遍历到
 const COPYABLE = `kind = 'doc'`
-const SELECT_PAGE_TITLE_ONLY = `SELECT title, icon_emoji, icon_file_id, in_page_tree, full_width FROM live_pages
+const SELECT_PAGE_TITLE_ONLY = `SELECT title, icon_emoji, icon_file_id, in_page_tree, full_width, cover_kind, cover_value, cover_y FROM live_pages
   WHERE id = $1 AND ${COPYABLE}`
 const SELECT_CHILDREN_IDS = `SELECT id FROM live_pages WHERE parent_id = $1 AND ${COPYABLE}`
 // 一组根下面全部要复制的页(含根):与 copyPageTree 的逐层遍历同一条规则。一条递归 CTE,
@@ -40,9 +40,9 @@ const SELECT_COPYABLE_SUBTREE = `WITH RECURSIVE sub AS (
   SELECT p.id FROM live_pages p JOIN sub s ON p.parent_id = s.id WHERE ${COPYABLE}
 ) SELECT id FROM sub`
 // 图标两列原样跟着克隆:emoji 是字面量,图片是对永不删除的 files 行的引用,复制引用即共用同一份派生版,不额外占磁盘。
-// 全宽是版式,也跟着走(模板实例化同走这里)
-const INSERT_PAGE =
-  'INSERT INTO pages (id, parent_id, owner_id, space_id, title, icon_emoji, icon_file_id, in_page_tree, full_width) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)'
+// 封面同理(文件引用 / 外链 / 预设名都是值)。全宽是版式,也跟着走(模板实例化同走这里)
+const INSERT_PAGE = `INSERT INTO pages (id, parent_id, owner_id, space_id, title, icon_emoji, icon_file_id, in_page_tree, full_width,
+  cover_kind, cover_value, cover_y) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`
 const INSERT_DOC = 'INSERT INTO yjs_documents (doc_name, state) VALUES ($1, $2)'
 
 // docs 缺项(克隆 resolve 之后、事务之前页面才创建,尚无文档)时的合法空文档状态
@@ -143,6 +143,9 @@ export async function copyPageTree(
         icon_file_id: string | null
         in_page_tree: boolean
         full_width: boolean
+        cover_kind: string | null
+        cover_value: string | null
+        cover_y: number
       }>(SELECT_PAGE_TITLE_ONLY, [oldId])
     ).rows[0]
     // 不可复制的根(集合页等,见 COPYABLE)、resolve 与事务之间被并发删除的页面:跳过,不炸整个克隆
@@ -159,6 +162,9 @@ export async function copyPageTree(
       page.icon_file_id,
       page.in_page_tree,
       page.full_width,
+      page.cover_kind,
+      page.cover_value,
+      page.cover_y,
     ])
     await client.query(INSERT_DOC, [
       `page:${newId}`,

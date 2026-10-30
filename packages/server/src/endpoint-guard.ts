@@ -8,9 +8,12 @@
 //   4. 不跟随重定向（3xx 直接报错），否则一个公网地址一跳就能跳进内网；
 //   5. 每个请求新开连接（agent:false）：不复用旧 keep-alive 连接，每次都重新走第 2、3 步。
 // 官方 Anthropic 地址（没填 baseUrl）不经过这里。
+// 网页书签抓元信息（link-preview.ts）也走这里，多两个开关：允许 http:（allowHttp），以及 3xx 交回调用方逐跳跟随
+// （init.redirect = 'manual'）——调用方对每一跳重新调用本函数，形状、DNS、连接期三道校验一跳不落。
 // 不用 undici：它不是本仓库的直接依赖；node:https 的 lookup 钩子足够做连接阶段校验，并且能直接给 SDK 当 fetch 注入。
 
 import dns from 'node:dns'
+import http from 'node:http'
 import https from 'node:https'
 import { isIP } from 'node:net'
 import { Readable } from 'node:stream'
@@ -155,15 +158,17 @@ const FORBIDDEN_MESSAGE = '这个地址指向本机、内网或保留地址，�
 // 域名这一类故意只给一句话：解析不到 与 解析到内网 对用户说成同一件事，免得这里变成「探测服务器内网有哪些域名」的预言机
 const UNUSABLE_MESSAGE = '这个地址不可用：域名解析不到，或者指向了本机、内网、保留地址'
 
-/** 地址形状：https、不带用户名密码、有主机名；主机名是 IP 字面量时当场查范围。返回解析后的 URL */
-export function assertSafeUrlShape(raw: string | URL): URL {
+/** 地址形状：https（allowHttp 时也认 http）、不带用户名密码、有主机名；主机名是 IP 字面量时当场查范围。返回解析后的 URL */
+export function assertSafeUrlShape(raw: string | URL, opts: { allowHttp?: boolean } = {}): URL {
   let url: URL
   try {
     url = new URL(raw)
   } catch {
     throw new UnsafeEndpointError('地址格式不对')
   }
-  if (url.protocol !== 'https:') throw new UnsafeEndpointError('只允许 https 地址')
+  if (url.protocol !== 'https:' && !(opts.allowHttp && url.protocol === 'http:')) {
+    throw new UnsafeEndpointError(opts.allowHttp ? '只允许 http(s) 地址' : '只允许 https 地址')
+  }
   if (url.username || url.password) throw new UnsafeEndpointError('地址里不能带用户名和密码')
   const host = url.hostname.replace(/^\[|\]$/g, '')
   if (!host) throw new UnsafeEndpointError('地址缺少主机名')
@@ -236,6 +241,10 @@ export type SafeFetchDeps = {
   transport?: { request: typeof https.request }
   /** 测试注入：判定「禁止地址」。生产永远用默认实现 */
   forbidden?: (address: string) => boolean
+  /** 也允许 http: 地址（走 httpTransport）。缺省只认 https */
+  allowHttp?: boolean
+  /** http: 地址用的传输，缺省 node:http */
+  httpTransport?: { request: typeof http.request }
 }
 
 type FetchInput = string | URL | Request
@@ -249,13 +258,14 @@ export function createSafeFetch(deps: SafeFetchDeps = {}): SafeFetch {
   const resolve = deps.resolve ?? systemResolve
   const transport = deps.transport ?? https
   const forbidden = deps.forbidden ?? isForbiddenAddress
+  const httpTransport = deps.httpTransport ?? http
   const lookup = createGuardedLookup(resolve, forbidden)
 
   return (input, init) =>
     new Promise<Response>((resolveResponse, reject) => {
       let url: URL
       try {
-        url = assertSafeUrlShape(typeof input === 'string' || input instanceof URL ? input : input.url)
+        url = assertSafeUrlShape(typeof input === 'string' || input instanceof URL ? input : input.url, { allowHttp: deps.allowHttp })
       } catch (err) {
         reject(err)
         return
@@ -283,7 +293,7 @@ export function createSafeFetch(deps: SafeFetchDeps = {}): SafeFetch {
       headers.set('accept-encoding', 'identity')
       if (payload) headers.set('content-length', String(payload.length))
 
-      const req = transport.request(
+      const req = (url.protocol === 'http:' ? httpTransport : transport).request(
         {
           hostname: url.hostname.replace(/^\[|\]$/g, ''),
           port: url.port || undefined,
@@ -296,6 +306,13 @@ export function createSafeFetch(deps: SafeFetchDeps = {}): SafeFetch {
         },
         (res) => {
           const status = res.statusCode ?? 0
+          if (status >= 300 && status < 400 && init?.redirect === 'manual') {
+            // 交回调用方：只带状态与 Location，下一跳由调用方重新经本函数发起（重新校验）
+            res.resume()
+            const location = res.headers.location
+            resolveResponse(new Response(null, { status, headers: location ? { location } : {} }))
+            return
+          }
           if (status >= 300 && status < 400) {
             // 不跟随重定向：公网地址一跳就能跳进内网。Location 不回显（可能指向内网）
             res.destroy()

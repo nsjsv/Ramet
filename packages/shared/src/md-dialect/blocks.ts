@@ -6,6 +6,7 @@
 //   分栏    `<!-- columns -->` … `<!-- column -->` … `<!-- /columns -->`（html 注释，博客里退化成顺序排列）
 //   目录    段落正文恰为 `[TOC]`（大小写不敏感）或 `[[_TOC_]]`
 //   嵌入    独立一块的 `<iframe src>` / `<video src>` / `<audio src>`（只认 http(s) 与站内 /api/files/ 地址）
+//   书签    独占一段的 `<a href="…" data-bookmark>…</a>`（只认 http(s)；别的 markdown 渲染器里就是一个普通链接）
 
 import { parseMdast } from './extensions.js'
 import { textOf, type Md } from './types.js'
@@ -18,6 +19,7 @@ export const COLUMNS = 'rametColumns'
 export const COLUMN = 'rametColumn'
 export const TOC = 'rametToc'
 export const EMBED = 'rametEmbed'
+export const BOOKMARK = 'rametBookmark'
 
 const emptyParagraph = (): Md => ({ type: 'paragraph', children: [] })
 
@@ -167,7 +169,7 @@ const toc: BlockRule = (siblings, i) => {
 
 const EMBED_RE = /^<(iframe|video|audio)\b([^>]*)>(?:\s*<\/\1>)?$/i
 
-function attr(attrs: string, name: string): string {
+export function attr(attrs: string, name: string): string {
   const m = new RegExp(`\\b${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, 'i').exec(attrs)
   return decodeEntities(m?.[1] ?? m?.[2] ?? m?.[3] ?? '')
 }
@@ -187,4 +189,25 @@ const embed: BlockRule = (siblings, i) => {
   return { node: { type: EMBED, kind: m[1]!.toLowerCase(), src, height: /^\d+$/.test(height) ? height : '' }, consumed: 1 }
 }
 
-export const BLOCK_RULES: BlockRule[] = [callout, details, columns, toc, embed]
+const BOOKMARK_OPEN_RE = /^<a\b([^>]*)>$/i
+
+/** 书签地址只认 http(s) 绝对地址 */
+export function safeBookmarkUrl(url: string): boolean {
+  return /^https?:\/\/[^\s]+$/i.test(url)
+}
+
+// 段落 = [开标签 <a … data-bookmark …>, 链接文字（GFM 可能把裸网址认成 link 节点）, </a>]；文字不要求等于地址
+const bookmark: BlockRule = (siblings, i) => {
+  const node = siblings[i]!
+  const kids = node.type === 'paragraph' ? (node.children ?? []) : []
+  const open = htmlValue(kids[0])
+  const close = htmlValue(kids[kids.length - 1])
+  if (kids.length < 2 || open === null || close === null || !/^<\/a\s*>$/i.test(close)) return null
+  const m = BOOKMARK_OPEN_RE.exec(open)
+  if (!m || !/\sdata-bookmark\b/i.test(` ${m[1] ?? ''}`)) return null
+  const url = attr(m[1] ?? '', 'href')
+  if (!safeBookmarkUrl(url)) return null
+  return { node: { type: BOOKMARK, url }, consumed: 1 }
+}
+
+export const BLOCK_RULES: BlockRule[] = [callout, details, columns, toc, embed, bookmark]

@@ -143,6 +143,8 @@ export function blockMarkdown(el: Y.XmlElement, atoms?: AtomText): string {
       return ''
     case 'embed':
       return `[嵌入] ${String(el.getAttribute('src') ?? '')}`
+    case 'bookmark':
+      return `[书签] ${String(el.getAttribute('url') ?? '')}`
     default:
       return textOf(el, atoms)
   }

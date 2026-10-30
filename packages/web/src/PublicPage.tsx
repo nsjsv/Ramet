@@ -6,10 +6,11 @@ import { gfm } from '@milkdown/kit/preset/gfm'
 import { ySyncPlugin } from 'y-prosemirror'
 import { $prose } from '@milkdown/kit/utils'
 import type { EditorView } from '@milkdown/kit/prose/view'
-import { api, type PageIcon as PageIconValue, type PublicPageTree, type User } from './api'
+import { api, type PageCover as PageCoverValue, type PageIcon as PageIconValue, type PublicPageTree, type User } from './api'
 import { COPY } from './copy'
 import { RunFoot, RunHead, type RunDetail } from './editor/run-board'
 import { PageIcon } from './PageIcon'
+import { PageCover } from './PageCover'
 import { collectionInlineSchema, collectionLinkSchema } from './editor/collection-block'
 import { pageRefSchema } from './editor/page-ref'
 import { agentMentionSchema } from './editor/agent-mention'
@@ -36,6 +37,8 @@ import { toggleSchema, toggleView } from './editor/toggle'
 import { tocRefresh, tocSchema, tocView } from './editor/toc'
 import { columnSchema, columnsSchema } from './editor/columns'
 import { embedSchema } from './editor/embed'
+import { bookmarkSchema, bookmarkView } from './editor/bookmark'
+import { linkMentionSchema, linkMentionView } from './editor/link-mention'
 import { mathBlockView, mathInlineView } from './editor/math-view'
 import { underlineSchema } from './editor/underline'
 import { blockSyncSchema } from './editor/block-sync'
@@ -88,6 +91,7 @@ export default function PublicPage() {
   const [icon, setIcon] = useState<PageIconValue | null>(null)
   // 全宽（页面属性）：换页加载期间沿用上一页的列宽，取到新页再按它（不先缩回窄栏再弹开）
   const [fullWidth, setFullWidth] = useState(false)
+  const [cover, setCover] = useState<PageCoverValue | null>(null)
   const [run, setRun] = useState<RunDetail | null>(null)
   // 登录探测：undefined = 探测中，null = 匿名（401 即匿名，本组件外无 AuthProvider）
   const [me, setMe] = useState<User | null | undefined>(undefined)
@@ -124,6 +128,7 @@ export default function PublicPage() {
     setStatus('loading')
     setTitle('')
     setIcon(null)
+    setCover(null)
     setKind(null)
     const doc = new Y.Doc()
     let instance: Editor | undefined
@@ -146,6 +151,7 @@ export default function PublicPage() {
         setIcon(tree.icon)
         setKind(tree.kind)
         setFullWidth(detail.full_width === true)
+        setCover(detail.cover ?? null)
         const host = hostRef.current
         if (!host) return
         const ySync = $prose(() => ySyncPlugin(doc.getXmlFragment('prosemirror')))
@@ -229,6 +235,10 @@ export default function PublicPage() {
           .use(columnsSchema)
           .use(columnSchema)
           .use(embedSchema)
+          .use(bookmarkSchema) // 网页书签卡（与 Editor 同表）：元信息走公开端点，只认本页正文里真有的书签
+          .use(bookmarkView(`public:${id}`, (url) => api.publicLinkPreview(id, url)))
+          .use(linkMentionSchema) // 网页提及（行内，与 Editor 同表）：同书签卡走公开端点
+          .use(linkMentionView(`public:${id}`, (url) => api.publicLinkPreview(id, url)))
           .use(mathInlineSchema) // 公式（与 Editor 同表）
           .use(mathBlockSchema)
           .use(mathInlineView)
@@ -311,7 +321,8 @@ export default function PublicPage() {
           </span>
         )}
       </header>
-      <main className={'public-main' + (fullWidth ? ' full-width' : '')}>
+      {!missing && <PageCover cover={cover} readOnly />}
+      <main className={'public-main' + (fullWidth ? ' full-width' : '') + (cover && !missing ? ' has-cover' : '')}>
         {missing ? (
           <div className="public-missing">
             <p className="public-missing-text">{COPY.pub.missing}</p>
