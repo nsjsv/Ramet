@@ -163,7 +163,8 @@ test('移入回收站:整棵活子树从树里消失,正文与版本历史一行
   const alice = await login('alice', 'pw-a')
   const root = await createPage(alice)
   const child = await createPage(alice, { parent_id: root.id })
-  const grandchild = await createPage(alice, { parent_id: child.id })
+  // 下面按条数断言子页正文的增量：孙页的入口不往子页正文里写，免得多出一条
+  const grandchild = await createPage(alice, { parent_id: child.id, link_in_parent: false })
   await setTitle(alice, child.id, '子页标题')
   await seedContent(child.id)
 

@@ -9,6 +9,7 @@ import type { BoardFolder, BoardItem } from './api'
 import { COPY } from './copy'
 import { PageIcon } from './PageIcon'
 import { peekPageDrag, takePageDrag, type PageDrag } from './PageTree'
+import { startDirPageDrag } from './tree-drag'
 import { Icon } from './icons'
 
 export interface FolderNode extends BoardFolder {
@@ -528,6 +529,8 @@ function ItemRow({ item, depth, cb }: { item: BoardItem; depth: number; cb: Fold
         if ((e.target as HTMLElement).closest('button, input')) return
         itemDrag = { id: item.id }
         folderDrag = null
+        // 页面条目还能拖进页面树（文件条目不能，页面树里只有页面）
+        if (item.kind === 'page') startDirPageDrag({ itemId: item.id, pageId: item.item_id })
         e.dataTransfer.effectAllowed = 'move'
         document.addEventListener('dragend', () => { itemDrag = null }, { capture: true, once: true })
       }}

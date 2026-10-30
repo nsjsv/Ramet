@@ -1,6 +1,5 @@
 /* ---------- 页面树内容 ----------
- * TreeItem/buildTree/pageDrag/armDragEndCleanup、挪页正文镜像（withPageDoc/removePageRefs/appendPageRef）、
- * 树上改名同步（syncTitleToDoc）。
+ * TreeItem/buildTree/pageDrag/armDragEndCleanup、树上改名同步（syncTitleToDoc）。
  * <PageTreeBoard> 只渲染页面树的 <nav>（section 外壳 / 头部归 Boards.tsx）：行 = 空间顶层页
  * （parent_id null）及其子树，没有包装根页，也没有实体行（树由 pages.space_id 派生）。
  * 拖拽 / 展开 / 改名状态按空间 id 各自独立，模块级 pageDrag 单例全模块共享。
@@ -8,15 +7,14 @@
 import { useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import { HocuspocusProvider } from '@hocuspocus/provider'
-import * as Y from 'yjs'
 import { api, type Page } from './api'
 import { COPY } from './copy'
 import { PageIcon } from './PageIcon'
 import { Icon } from './icons'
 import { blockDragTarget, moveBlockToPage } from './editor/page-drop'
-import { iconAttrOf } from './editor/page-ref'
 import { writeTitleFragment } from './editor/title-fragment'
 import { usePersistentSet } from './tree-state'
+import { peekDirPageDrag, takeDirPageDrag } from './tree-drag'
 
 export interface PageNode extends Page {
   children: PageNode[]
@@ -40,6 +38,16 @@ function subtreeIds(node: PageNode): Set<string> {
 export type PageDrag = { id: string; subtree: Set<string>; kind: Page['kind'] }
 let pageDrag: PageDrag | null = null
 
+/** 页面树的落点接受的拖拽源：本树的页，或目录树拖来的页面条目（dirItemId；它在页面树里没有子树，
+ *  也不能进集合 —— 集合的行要按集合的列来，服务端不收） */
+type TreeDrag = PageDrag & { dirItemId?: string }
+function activeDrag(): TreeDrag | null {
+  if (pageDrag) return pageDrag
+  const dir = peekDirPageDrag()
+  return dir ? { id: dir.pageId, subtree: new Set([dir.pageId]), kind: 'doc', dirItemId: dir.itemId } : null
+}
+const intoCollectionOk = (d: TreeDrag): boolean => d.kind === 'doc' && !d.dirItemId
+
 /** 目录树（FolderTree.tsx）也接页面树拖来的页：dragover 现读，drop 取走（清源，免得页面树的 nav 再处理一遍） */
 export function peekPageDrag(): PageDrag | null {
   return pageDrag
@@ -48,12 +56,6 @@ export function takePageDrag(): PageDrag | null {
   const d = pageDrag
   pageDrag = null
   return d
-}
-
-/** 页被挪出旧父页之后（服务端已先改好 parent_id，link-watcher 的结构守卫才不会级联删页），
- *  摘掉旧父页正文里指向它的 page_ref 镜像。失败只记日志，树结构已经对了 */
-export async function unlinkFromParentDoc(pageId: string, parentId: string): Promise<void> {
-  await withPageDoc(parentId, (frag) => removePageRefs(frag, pageId))
 }
 
 /** 树行 dragover 高亮 / 树插入线的收尾：drop 落进缝隙 / 列表末尾 / 拖拽被取消时，行收不到
@@ -98,67 +100,6 @@ function collabUrl(): string {
   return `${proto}://${location.host}/collab`
 }
 
-/* 挪父级的文档镜像（树上拖拽与正文 page_ref 块保持一致）：
- * 树结构以 pages.parent_id 为准；slash 建的子页正文里还有 page_ref 块做镜像。树上拖拽
- * 只改 parent_id 时正文镜像会脱节（拖进 B，B 的正文里看不到页面块，旧父页正文还挂着旧块），
- * 所以挪页要双向同步正文：旧父页摘掉指向源页的 page_ref，新父页末尾补一个（去重）。
- * 摘引用安全的前提是 link-watcher 的结构守卫（引用消失但页已改挂别页时只清理、不级联删），
- * 所以 PATCH parent_id 必须先于摘引用完成。写正文走瞬时 provider（同 syncTitleToDoc），
- * 开着的编辑器经 collab 即时跟随。 */
-async function withPageDoc(id: string, fn: (frag: Y.XmlFragment) => void): Promise<boolean> {
-  const provider = new HocuspocusProvider({ url: collabUrl(), name: `page:${id}` })
-  try {
-    await new Promise<void>((resolve, reject) => {
-      const timer = window.setTimeout(() => reject(new Error('page doc sync 超时')), 4000)
-      provider.on('synced', () => {
-        window.clearTimeout(timer)
-        resolve()
-      })
-      provider.on('close', (payload: { event?: { code?: number } }) => {
-        const code = payload?.event?.code
-        if (code === 4401 || code === 4403) {
-          window.clearTimeout(timer)
-          reject(new Error(`page doc 无权限 (${code})`))
-        }
-      })
-      if (provider.synced) resolve()
-    })
-    fn(provider.document.getXmlFragment('prosemirror'))
-    return true
-  } catch (err) {
-    console.error(err)
-    return false
-  } finally {
-    provider.destroy()
-  }
-}
-
-/** 摘掉 doc 顶层指向 pageId 的 page_ref 块（降序删免位移） */
-function removePageRefs(frag: Y.XmlFragment, pageId: string): void {
-  const doomed: number[] = []
-  for (let i = 0; i < frag.length; i++) {
-    const el = frag.get(i)
-    if (el instanceof Y.XmlElement && el.nodeName === 'page_ref' && el.getAttribute('pageId') === pageId) {
-      doomed.push(i)
-    }
-  }
-  for (const i of doomed.reverse()) frag.delete(i, 1)
-}
-
-/** 末尾补一个指向 page 的 page_ref 块（已有同页引用则不重复） */
-function appendPageRef(frag: Y.XmlFragment, page: Page): void {
-  for (let i = 0; i < frag.length; i++) {
-    const el = frag.get(i)
-    if (el instanceof Y.XmlElement && el.nodeName === 'page_ref' && el.getAttribute('pageId') === page.id) return
-  }
-  const el = new Y.XmlElement('page_ref')
-  el.setAttribute('pageId', page.id)
-  el.setAttribute('title', page.title || COPY.untitled)
-  const icon = iconAttrOf(page.icon)
-  if (icon) el.setAttribute('icon', icon)
-  frag.insert(frag.length, [el])
-}
-
 /* 树上改名同步到该页 Yjs title fragment：REST 先行，这里补同步，用独立的瞬时 provider，写完即毁。
  * 失败互不阻断（各自 console.error），最终一致：
  * 正打开该页的另一端编辑器由 ySync 即时跟名，其 observeDeep 防抖会把相同值再写一次 DB（幂等无害）；
@@ -195,6 +136,8 @@ interface TreeCallbacks {
   /** 树拖拽挪父级 / 排序：源页插到目标父页子列表的 index 位（index 缺省 = 服务端不重排）；
    *  targetParentId=null = 挪回顶层（追加到根末尾）。不自动展开目标行 */
   onMovePage: (sourceId: string, targetParentId: string | null, index?: number) => void
+  /** 目录树的页面条目落进页面树：targetParentId null = 空间顶层 */
+  onMoveFromDir: (itemId: string, targetParentId: string | null, index?: number) => void
 }
 
 /**
@@ -242,38 +185,28 @@ export function PageTreeBoard({
     void syncTitleToDoc(id, draft)
   }
 
-  // 树拖拽挪父级 / 排序：PATCH parent_id + index（同父重排时只发 index），镜像双向同步只在
-  // 真正换父时做（同父重排不需要动正文 page_ref 的位置，正文顺序与树排序本就独立）。
-  // targetParentId=null = 挪回顶层（旧父页摘引用、无新父页不补块）。
-  // index 缺省 = 服务端不重排（保持原 position）。不自动展开目标行；结构失败弹提示，镜像失败静默
+  // 树拖拽挪父级 / 排序：PATCH parent_id + index（同父重排时只发 index）。换父时父页正文里的入口（子页面块）
+  // 由服务端随这次 PATCH 一起改：新父页补、旧父页摘，补不上整个移动不生效。
+  // index 缺省 = 服务端不重排（保持原 position）。不自动展开目标行
   async function movePage(sourceId: string, targetParentId: string | null, index?: number) {
-    const source = pages?.find((p) => p.id === sourceId)
-    const oldParentId = source?.parent_id ?? null
-    const target = targetParentId ? pages?.find((p) => p.id === targetParentId) : undefined
-    // 结构先行（link-watcher 的结构守卫靠 PATCH 先完成）：
     try {
       await api.movePage(sourceId, targetParentId, index)
     } catch (err) {
       console.error(err)
-      window.alert(COPY.tree.moveIntoSelf)
+      const cycle = err instanceof Error && err.message === 'parent_id would create a cycle'
+      window.alert(cycle ? COPY.tree.moveIntoSelf : COPY.tree.moveFailed)
       return
     }
-    if (oldParentId === targetParentId) {
-      // 同父重排：树已正确，正文镜像无需变动
-      onChanged()
-      return
-    }
-    // 文档镜像双向同步：旧父页摘掉指向源页的 page_ref（结构守卫保证不会级联删），
-    // 新父页末尾补一个。镜像写失败互不阻断（各自 console.error），树结构已正确。
-    // 集合不走这面镜像：集合页没有正文（拖进集合 = 成为行，不往集合文档里写块）；挪的是集合时，
-    // 它在正文里的块归服务端维护（删除语义挂在块上，块必须由服务端保证），
-    // 补一个 page_ref 反而让「删掉这个块」经 link-watcher 把整个集合连同行物理删掉
-    const mirror = source?.kind !== 'collection'
-    if (source && mirror && oldParentId && pages?.find((p) => p.id === oldParentId)?.kind !== 'collection') {
-      await withPageDoc(oldParentId, (frag) => removePageRefs(frag, sourceId))
-    }
-    if (source && mirror && targetParentId && target?.kind !== 'collection') {
-      await withPageDoc(targetParentId, (frag) => appendPageRef(frag, source))
+    onChanged()
+  }
+
+  // 目录树的页拖进来：摘挂载、进页面树、挂父页并在父页正文补入口，全在服务端一个请求里（失败整体不生效）
+  async function moveFromDir(itemId: string, targetParentId: string | null, index?: number) {
+    try {
+      await api.moveItemToPageTree(itemId, targetParentId, index)
+    } catch (err) {
+      console.error(err)
+      window.alert(err instanceof Error && err.message ? err.message : COPY.tree.moveFailed)
     }
     onChanged()
   }
@@ -352,6 +285,7 @@ export function PageTreeBoard({
     onCreateChild: (parentId) => onCreateChild(parentId),
     onRemove: (node) => onRemove(node),
     onMovePage: (sourceId, targetId, index) => void movePage(sourceId, targetId, index),
+    onMoveFromDir: (itemId, targetId, index) => void moveFromDir(itemId, targetId, index),
   }
 
   return (
@@ -363,7 +297,7 @@ export function PageTreeBoard({
       className="tree"
       onDragOver={(e) => {
         if (readOnly) return
-        const pg = pageDrag
+        const pg = activeDrag()
         if (!pg) return // 块拖拽：行自己接管
         const boundary = dropBoundaryAt(e.currentTarget, e.clientY, pg)
         if (!boundary) {
@@ -379,14 +313,18 @@ export function PageTreeBoard({
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropLine(null)
       }}
       onDrop={(e) => {
-        const pg = pageDrag
+        if (readOnly) return
+        const pg = activeDrag()
         if (!pg) return // 块拖拽：行自己接管
         const boundary = dropBoundaryAt(e.currentTarget, e.clientY, pg)
         if (!boundary) return
         e.preventDefault()
         pageDrag = null
         setDropLine(null)
-        void movePage(pg.id, boundary.parentId, boundary.index)
+        if (pg.dirItemId) {
+          takeDirPageDrag()
+          void moveFromDir(pg.dirItemId, boundary.parentId, boundary.index)
+        } else void movePage(pg.id, boundary.parentId, boundary.index)
       }}
     >
       {dropLine && (
@@ -417,7 +355,8 @@ function TreeItem({ node, depth, ...cb }: TreeCallbacks & { node: PageNode; dept
   const [dropOver, setDropOver] = useState(false)
   const dropOk = (): boolean => {
     if (cb.readOnly) return false
-    if (pageDrag) return !pageDrag.subtree.has(node.id)
+    const pg = activeDrag()
+    if (pg) return !pg.subtree.has(node.id)
     // 拖块进页对集合禁用：集合页没有正文
     return !isCollection && blockDragTarget(node.id) !== null
   }
@@ -443,14 +382,15 @@ function TreeItem({ node, depth, ...cb }: TreeCallbacks & { node: PageNode; dept
         }}
         onDragOver={(e) => {
           // 页面拖拽三区：中带(25%~75%) = 变子页高亮（行自己接管）；上下边缘 = nav 画插入线
-          if (pageDrag) {
+          const pg = cb.readOnly ? null : activeDrag()
+          if (pg) {
             const r = e.currentTarget.getBoundingClientRect()
             const rel = (e.clientY - r.top) / Math.max(1, r.height)
             if (rel < 0.25 || rel > 0.75) {
               setDropOver(false) // 移到边缘：摘掉变子页框（框与线互斥）
               return // 边缘区：nav 接管排序线
             }
-            if (pageDrag.id === node.id || pageDrag.subtree.has(node.id) || (isCollection && pageDrag.kind !== 'doc')) {
+            if (pg.id === node.id || pg.subtree.has(node.id) || (isCollection && !intoCollectionOk(pg))) {
               setDropOver(false) // 拖进自己/自己子树、非文档页拖进集合：非法，摘框
               return
             }
@@ -471,14 +411,20 @@ function TreeItem({ node, depth, ...cb }: TreeCallbacks & { node: PageNode; dept
         }}
         onDrop={(e) => {
           setDropOver(false)
-          if (pageDrag) {
+          const pg = cb.readOnly ? null : activeDrag()
+          if (pg) {
             // 中带落点 = 变子页：挂到该页下（子列表末尾），镜像同步在 movePage 里
             const r = e.currentTarget.getBoundingClientRect()
             const rel = (e.clientY - r.top) / Math.max(1, r.height)
             if (rel < 0.25 || rel > 0.75) return // 边缘区：nav 接管排序线
-            if (pageDrag.id === node.id || pageDrag.subtree.has(node.id) || (isCollection && pageDrag.kind !== 'doc')) return
+            if (pg.id === node.id || pg.subtree.has(node.id) || (isCollection && !intoCollectionOk(pg))) return
             e.preventDefault()
-            const sourceId = pageDrag.id
+            if (pg.dirItemId) {
+              takeDirPageDrag()
+              cb.onMoveFromDir(pg.dirItemId, node.id, node.children.length)
+              return
+            }
+            const sourceId = pg.id
             pageDrag = null
             // 拖进集合 = 成为行：不带 index（带了服务端会把集合所有行的 position 整列重编号），新行落在手动顺序末尾
             cb.onMovePage(sourceId, node.id, isCollection ? undefined : node.children.length)

@@ -502,7 +502,11 @@ export default function ChatView({ pageId, readOnly, pages, onPagesChanged, getE
       if (cand.kind === 'page') page = cand.page
       else {
         try {
-          page = await api.createPage(pageId, pages?.find((p) => p.id === pageId)?.space_id, { title: cand.title })
+          // 入口是插进消息里的提及，服务端不必再往对话正文里补子页面块
+          page = await api.createPage(pageId, pages?.find((p) => p.id === pageId)?.space_id, {
+            title: cand.title,
+            link_in_parent: false,
+          })
         } catch (err) {
           console.error(err)
           return

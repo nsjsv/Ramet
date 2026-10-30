@@ -375,7 +375,8 @@ test('公开克隆:匿名 401;登录后落个人空间(树+内容一致);未公�
 
   const { body: space } = await createSpace(alice, '被克隆树')
   const { page: parent } = await createPage(alice, { space_id: space.id })
-  const { page: child } = await createPage(alice, { space_id: space.id, parent_id: parent.id })
+  // 父页正文下面由 insertDocState 整份另造：服务端补的入口是另一条文档历史，合并后标题会出现两份
+  const { page: child } = await createPage(alice, { space_id: space.id, parent_id: parent.id, link_in_parent: false })
   await patchPage(alice, parent.id, { title: '源父页' })
   await patchPage(alice, child.id, { title: '源子页' })
   await insertDocState(parent.id, '源父页', '源父页正文')

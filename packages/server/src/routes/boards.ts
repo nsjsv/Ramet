@@ -7,8 +7,10 @@
 import { Hono } from 'hono'
 import type { Pool } from 'pg'
 import { requireAuth, type AuthEnv, type AuthUser } from '../auth.js'
+import type { DocWriter } from '../collab.js'
 import { ENSURE_DIR_TREE, withTransaction } from '../db.js'
-import { roleInSpace, trashPageSubtree, writable } from './pages.js'
+import { linkInParent, unlinkFromParent } from '../page-entry.js'
+import { parentOk, roleInSpace, trashPageSubtree, validParent as validPageParent, writable } from './pages.js'
 
 // 用 type 而非 interface：pg 的 query<T> 约束要求隐式索引签名，interface 给不了
 type BoardRow = {
@@ -91,6 +93,17 @@ const DELETE_BOARD = 'DELETE FROM boards WHERE id = $1'
 const DELETE_FOLDER = 'DELETE FROM folders WHERE id = $1'
 const DELETE_ITEM = 'DELETE FROM folder_items WHERE id = $1'
 
+// 回到页面树的落点父页：自己和整条祖先链都得在页面树里（否则挂上去的页跟着父页一起被页面树排除，哪棵树都看不见）
+const PARENT_IN_PAGE_TREE = `WITH RECURSIVE up AS (
+  SELECT id, parent_id, in_page_tree FROM live_pages WHERE id = $1
+  UNION
+  SELECT p.id, p.parent_id, p.in_page_tree FROM live_pages p JOIN up ON p.id = up.parent_id
+) SELECT bool_and(in_page_tree) AS ok FROM up`
+// 页面树同级列表：只算页面树成员（根级还躺着目录树文档，算进去下标就和前端看到的对不上）
+const PAGE_TREE_SIBLINGS = `SELECT id FROM live_pages
+  WHERE parent_id IS NOT DISTINCT FROM $1 AND space_id = $2 AND in_page_tree AND id <> $3
+  ORDER BY position ASC NULLS LAST, created_at, id`
+
 // 删目录 / 目录树要把范围内挂载的页面本体一起移入回收站。
 // 目录子树（含自身）的 id 集，删单个目录时用来圈定这个目录及其子目录里挂的页面
 const SELECT_FOLDER_SUBTREE = `WITH RECURSIVE sub AS (
@@ -132,7 +145,7 @@ async function reorder(
 // （改标题等）非常频繁，挂在同一个事件上每次都要白拉一遍目录树
 // 回收只用 pages.ts 的 trashPageSubtree（这里不另写回收 SQL）：它只盖章活子树，
 // 已回收 / 不存在的条目天然 no-op，目录里混着已回收页面时删除不会重复计数
-export function boardsRoutes(pool: Pool, notify?: () => void, notifyBoards?: () => void) {
+export function boardsRoutes(pool: Pool, notify?: () => void, notifyBoards?: () => void, write?: DocWriter) {
   const app = new Hono<AuthEnv>()
   app.use('*', requireAuth(pool))
 
@@ -368,7 +381,12 @@ export function boardsRoutes(pool: Pool, notify?: () => void, notifyBoards?: () 
   ): Promise<ItemRow | null> {
     const id = crypto.randomUUID()
     // 页面条目：挂载与脱离页面树同一事务，不会出现挂进了目录、页面树里也还在的半成品
-    const { itemId, pageMoved } = await withTransaction(pool, async (client) => {
+    const { itemId, pageMoved, oldParent } = await withTransaction(pool, async (client) => {
+      const old =
+        body.kind === 'page'
+          ? ((await client.query<{ parent_id: string | null }>('SELECT parent_id FROM pages WHERE id = $1 FOR UPDATE', [body.item_id])).rows[0]
+              ?.parent_id ?? null)
+          : null
       const { rows: upserted } = await client.query<{ id: string }>(
         `INSERT INTO folder_items (id, board_id, folder_id, kind, item_id) VALUES ($1, $2, $3, $4, $5)
          ON CONFLICT (kind, item_id) DO UPDATE SET board_id = EXCLUDED.board_id, folder_id = EXCLUDED.folder_id
@@ -376,10 +394,11 @@ export function boardsRoutes(pool: Pool, notify?: () => void, notifyBoards?: () 
         [id, boardId, folderId, body.kind, body.item_id],
       )
       const moved = body.kind === 'page' && (await client.query(DETACH_FROM_PAGE_TREE, [body.item_id])).rowCount === 1
-      return { itemId: upserted[0]!.id, pageMoved: moved }
+      return { itemId: upserted[0]!.id, pageMoved: moved, oldParent: old }
     })
-    // 页面离开了页面树：各端页面列表要跟上（目录树的广播由调用方发）
+    // 页面离开了页面树：各端页面列表要跟上（目录树的广播由调用方发）；目录树条目自己就是入口，旧父页里的入口摘掉
     if (pageMoved) notify?.()
+    if (write) await unlinkFromParent(pool, { write, user }, oldParent, body.item_id)
     return (await pool.query<ItemRow>(SELECT_ITEM, [itemId, user.id])).rows[0] ?? null
   }
 
@@ -454,6 +473,62 @@ export function boardsRoutes(pool: Pool, notify?: () => void, notifyBoards?: () 
     }
     notifyBoards?.()
     return c.json((await pool.query<ItemRow>(SELECT_ITEM, [id, user.id])).rows[0]!)
+  })
+
+  // 页面条目拖回页面树：摘掉挂载、标记回页面树、挂到 parent_id 下（null = 空间顶层）并按 index 排位，一个事务。
+  // 挂到某页下时，父页正文末尾同时补上子页面块：页面树里的子页在父页正文里必须有入口。
+  // 先改库再写正文；正文写不进去就把库改回原样再报错，宁可整个拖拽失败，也不留一个父页里找不到的子页
+  app.post('/api/folder-items/:id/to-page-tree', async (c) => {
+    const user = c.get('user')
+    const item = (await pool.query<ItemRow>(SELECT_ITEM, [c.req.param('id'), user.id])).rows[0]
+    if (!item) return c.json({ error: 'folder item not found' }, 404)
+    if (!(await folderWritable(user, item))) return c.json({ error: 'forbidden' }, 403)
+    if (item.kind !== 'page') return c.json({ error: 'only page items can move to the page tree' }, 400)
+    const body = (await c.req.json().catch(() => ({}))) as { parent_id?: unknown; index?: unknown }
+    if (body.parent_id !== null && typeof body.parent_id !== 'string') return c.json({ error: 'parent_id must be a string or null' }, 400)
+    if (body.index !== undefined && (typeof body.index !== 'number' || !Number.isInteger(body.index) || body.index < 0)) {
+      return c.json({ error: 'index must be a non-negative integer' }, 400)
+    }
+    const parentId = body.parent_id
+    const page = (await pool.query<{ id: string; space_id: string }>('SELECT id, space_id FROM live_pages WHERE id = $1', [item.item_id])).rows[0]
+    if (!page) return c.json({ error: 'page not found' }, 404)
+    if (parentId !== null) {
+      if (!(await parentOk(pool, user, parentId, page.space_id))) return c.json({ error: 'parent_id not found' }, 400)
+      if (!(await validPageParent(pool, page.id, parentId))) return c.json({ error: 'parent_id would create a cycle' }, 400)
+      const parent = (await pool.query<{ kind: string }>('SELECT kind FROM live_pages WHERE id = $1', [parentId])).rows[0]
+      // 集合 / 过程页 / skill 页没有可放子页面块的正文
+      if (parent?.kind !== 'doc') return c.json({ error: 'parent must be a doc page' }, 400)
+      const inTree = (await pool.query<{ ok: boolean | null }>(PARENT_IN_PAGE_TREE, [parentId])).rows[0]?.ok
+      if (inTree !== true) return c.json({ error: 'parent is not in the page tree' }, 400)
+      if (!write) return c.json({ error: 'doc writer unavailable' }, 500)
+    }
+    await withTransaction(pool, async (client) => {
+      await client.query(DELETE_ITEM, [item.id])
+      await client.query('UPDATE pages SET in_page_tree = true, parent_id = $1 WHERE id = $2', [parentId, page.id])
+      if (body.index === undefined) return
+      const kids = (await client.query<{ id: string }>(PAGE_TREE_SIBLINGS, [parentId, page.space_id, page.id])).rows.map((r) => r.id)
+      kids.splice(Math.min(body.index as number, kids.length), 0, page.id)
+      for (let i = 0; i < kids.length; i++) await client.query('UPDATE pages SET position = $1 WHERE id = $2', [i, kids[i]!])
+    })
+    if (parentId !== null) {
+      try {
+        await linkInParent(pool, { write: write!, user }, parentId, page.id)
+      } catch (err) {
+        console.error('[to-page-tree] parent doc write failed, rolling back', err)
+        await withTransaction(pool, async (client) => {
+          await client.query('UPDATE pages SET in_page_tree = false, parent_id = NULL WHERE id = $1', [page.id])
+          await client.query(
+            'INSERT INTO folder_items (id, board_id, folder_id, kind, item_id, position, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+            [item.id, item.board_id, item.folder_id, item.kind, item.item_id, item.position, item.created_at],
+          )
+        })
+        notify?.()
+        return c.json({ error: 'failed to link page into parent' }, 500)
+      }
+    }
+    notify?.()
+    notifyBoards?.()
+    return c.json({ id: page.id, parent_id: parentId })
   })
 
   app.delete('/api/folder-items/:id', async (c) => {

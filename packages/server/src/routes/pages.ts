@@ -4,7 +4,8 @@ import * as Y from 'yjs'
 import { withTransaction } from '../db.js'
 import { purgePageRows } from '../page-purge.js'
 import { requireAuth, type AuthEnv, type AuthUser } from '../auth.js'
-import { extractTitle, insertSnapshot, loadDocFromDb, materializeSnapshot, writeDocState } from '../collab.js'
+import { extractTitle, insertSnapshot, loadDocFromDb, materializeSnapshot, writeDocState, type DocWriter } from '../collab.js'
+import { linkInParent, needsEntry, unlinkFromParent } from '../page-entry.js'
 import { newPageDoc } from '../agents/markdown.js'
 import { myPersonalSpaceId } from '../clone.js'
 import { iconParams, isIconSourceMime, parseIconInput, SELECT_ICON_SOURCE_MIME, SET_PAGE_ICON, apiPageColumns, rowIcon, toApiPage } from '../page-icon.js'
@@ -242,6 +243,8 @@ export function pagesRoutes(
   notify?: () => void,
   getLiveDoc?: (docName: string) => Y.Doc | undefined,
   notifyBoards?: () => void,
+  /** 改父子关系时在父页正文补 / 摘子页面块（page-entry.ts）；缺省 = 不维护入口（只有不走这类写的测试才缺省） */
+  write?: DocWriter,
 ) {
   // 该子应用只有 /api/pages 一族路由,鉴权统一挂全量,未登录一律 401
   const app = new Hono<AuthEnv>()
@@ -285,6 +288,7 @@ export function pagesRoutes(
       space_id?: string | null
       in_page_tree?: unknown
       title?: unknown
+      link_in_parent?: unknown
     }
     const parentId = body.parent_id ?? null
     // 带标题建页（`[[新名字` 直接建页）：标题同时写进 pages.title 与文档的 title 片段 —— 编辑器以文档为准，
@@ -325,6 +329,17 @@ export function pagesRoutes(
     if (title) {
       await pool.query(SET_TITLE, [title, id])
       await writeDocState(pool, `page:${id}`, newPageDoc(title, []))
+    }
+    // 子页入口：缺省由服务端补在父页正文末尾。斜杠「创建页面」/ `[[新名字` 自己在光标处插入口（子页面块 / 提及），
+    // 传 link_in_parent: false，否则父页里会多出一个。补不上就把刚建的页删掉再报错，不留父页里找不到的子页
+    if (body.link_in_parent !== false && write && (await needsEntry(pool, parentId, 'doc'))) {
+      try {
+        await linkInParent(pool, { write, user }, parentId!, id)
+      } catch (err) {
+        console.error('[pages] link new child into parent failed, dropping it', err)
+        await withTransaction(pool, (client) => purgePageRows(client, [id]))
+        return c.json({ error: 'failed to link page into parent' }, 500)
+      }
     }
     notify?.()
     return c.json(toApiPage((await pool.query<PageRow>(SELECT_API_PAGE, [id])).rows[0]!), 201)
@@ -388,6 +403,20 @@ export function pagesRoutes(
       if (!(await validParent(pool, id, parentId))) return c.json({ error: 'parent_id would create a cycle' }, 400)
       await pool.query(SET_PARENT, [parentId, id])
       written = true
+      // 换了父页：新父页正文补入口（补不上把父子关系改回去再报错），旧父页的入口摘掉
+      const oldParent = page.parent_id ?? null
+      if (write && oldParent !== parentId) {
+        if (await needsEntry(pool, parentId, page.kind)) {
+          try {
+            await linkInParent(pool, { write, user }, parentId!, id)
+          } catch (err) {
+            console.error('[pages] link moved page into new parent failed, reverting', err)
+            await pool.query(SET_PARENT, [oldParent, id])
+            return c.json({ error: 'failed to link page into parent' }, 500)
+          }
+        }
+        if (page.kind === 'doc') await unlinkFromParent(pool, { write, user }, oldParent, id)
+      }
     }
     // 同级排序(侧栏拖拽插入线):index = 该页在目标父页子列表(按展示序)里的落点下标。
     // 摘除自身后钳制插入,整列重写 position 0..n-1(单事务);不传 index 不动排序。
@@ -398,10 +427,11 @@ export function pagesRoutes(
       }
       const targetParent = body.parent_id !== undefined ? body.parent_id ?? null : page.parent_id ?? null
       if (page.space_id === null) return c.json({ error: 'page has no space' }, 400)
-      // 兄弟列表必须限同一空间(同级=同空间,服务端约束;缺过滤会把别的用户的同级页一起重排!)
+      // 兄弟列表必须限同一空间(同级=同空间,服务端约束;缺过滤会把别的用户的同级页一起重排!)。
+      // 只算页面树成员:前端下标按页面树算,根级的目录树文档算进来落点就错位
       const kids = (
         await pool.query<{ id: string }>(
-          `SELECT id FROM live_pages WHERE parent_id IS NOT DISTINCT FROM $1 AND space_id = $2 AND id <> $3
+          `SELECT id FROM live_pages WHERE parent_id IS NOT DISTINCT FROM $1 AND space_id = $2 AND in_page_tree AND id <> $3
            ORDER BY position ASC NULLS LAST, created_at, id`,
           [targetParent, page.space_id, id],
         )

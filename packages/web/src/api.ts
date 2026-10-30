@@ -516,13 +516,20 @@ export const api = {
   createPage: (
     parent_id: string | null = null,
     space_id?: string | null,
-    opts?: { in_page_tree?: boolean; title?: string },
+    opts?: { in_page_tree?: boolean; title?: string; link_in_parent?: boolean },
   ) =>
     request<Page>('/api/pages', {
       method: 'POST',
       // space_id 缺省（undefined）由服务端落到个人空间。in_page_tree false = 目录树自建文档，不进页面树。
-      // title：服务端建页时就把标题写进库与文档（`[[新名字` 直接建页用，省得客户端再补两步）
-      body: JSON.stringify({ parent_id, space_id, in_page_tree: opts?.in_page_tree, title: opts?.title }),
+      // title：服务端建页时就把标题写进库与文档（`[[新名字` 直接建页用，省得客户端再补两步）。
+      // link_in_parent false：调用方自己在父页正文里插入口（斜杠建页 / `[[新名字`）；缺省由服务端补在父页末尾
+      body: JSON.stringify({
+        parent_id,
+        space_id,
+        in_page_tree: opts?.in_page_tree,
+        title: opts?.title,
+        link_in_parent: opts?.link_in_parent,
+      }),
     }),
   /** 导入 markdown（.md / .zip；文件夹由调用方先打成 zip）：multipart，不走 JSON request() */
   importMarkdown: async (spaceId: string, file: Blob, name: string, parentId: string | null): Promise<ImportResult> => {
@@ -829,6 +836,13 @@ export const api = {
     request<BoardItem>(`/api/folder-items/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(index === undefined ? { folder_id } : { folder_id, index }),
+    }),
+  /** 目录树的页面条目移回页面树：parent_id null = 空间顶层；挂到某页下时服务端同时在父页正文补子页面块，
+   *  补不上整个操作回滚。index = 页面树同级落点下标（缺省 = 不重排） */
+  moveItemToPageTree: (id: string, parent_id: string | null, index?: number) =>
+    request<{ id: string; parent_id: string | null }>(`/api/folder-items/${id}/to-page-tree`, {
+      method: 'POST',
+      body: JSON.stringify(index === undefined ? { parent_id } : { parent_id, index }),
     }),
   /** 脱挂（页面/文件本体不受影响） */
   detachItem: (id: string) => request<unknown>(`/api/folder-items/${id}`, { method: 'DELETE' }),

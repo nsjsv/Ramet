@@ -347,7 +347,11 @@ export function startEditorSession(deps: EditorSessionDeps): () => void {
           enabled: !readOnly,
           // `[[新名字`：建当前页的子页（同空间），建好广播刷新侧栏
           createPage: async (title) => {
-            const created = await api.createPage(id, pagesRef.current?.find((p) => p.id === id)?.space_id, { title })
+            // 入口是正文里插的这个提及，服务端不必再补子页面块
+            const created = await api.createPage(id, pagesRef.current?.find((p) => p.id === id)?.space_id, {
+              title,
+              link_in_parent: false,
+            })
             onChanged()
             return created
           },

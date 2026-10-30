@@ -121,7 +121,8 @@ export interface SlashActions {
  *  落点规则（空段替换 / 当前块后 / 列表里跳出到顶层列表之后）在 block-insert.ts，集合块共用 */
 async function createPageAtCursor(view: EditorView, actions: SlashActions): Promise<void> {
   try {
-    const created = await api.createPage(actions.pageId, actions.getSpaceId())
+    // 入口由这里插在光标处，服务端不必再补
+    const created = await api.createPage(actions.pageId, actions.getSpaceId(), { link_in_parent: false })
     actions.onChanged()
     actions.onChildLinked?.(created.id) // 先登记再插块，之后此块从文档消失才会触发删页
     const pageRef = view.state.schema.nodes.page_ref

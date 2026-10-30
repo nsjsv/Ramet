@@ -227,7 +227,8 @@ describe('公开、复制、agent、页面列表、搜索', () => {
     const coll = await postCollection(t.owner.cookie, { space_id: t.spaceId, parent_id: host, inline: true, title: '内嵌集合' })
     expect(coll.status).toBe(201)
     const row = (await postRow(t.owner.cookie, coll.body.id, { title: '行' })).body
-    const sub = await postPage(t.owner.cookie, { space_id: t.spaceId, parent_id: host, title: '普通子页' })
+    // 宿主正文不写：一写就触发存储钩子按正文清理没被引用的过程页，而下面的过程页是直接插库造的
+    const sub = await postPage(t.owner.cookie, { space_id: t.spaceId, parent_id: host, title: '普通子页', link_in_parent: false })
     const run = crypto.randomUUID()
     await pool.query(`INSERT INTO pages (id, parent_id, owner_id, space_id, kind, title) VALUES ($1, $2, $3, $4, 'run', '过程')`, [
       run,

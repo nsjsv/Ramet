@@ -216,6 +216,7 @@ export function startServer(
       // 手动快照取当前内容：内存有活文档（协同中）直接编码，避免重放增量
       (name) => hocuspocus.documents.get(name),
       () => notifyBoardsChanged(hocuspocus),
+      createDocWriter(() => hocuspocus),
     ),
   )
   // 块文本端点（提及快照）：同样活文档优先，补 id 插件刚写入的块 id 立即可读
@@ -240,6 +241,7 @@ export function startServer(
       pool,
       () => notifyPagesChanged(hocuspocus),
       () => notifyBoardsChanged(hocuspocus),
+      createDocWriter(() => hocuspocus),
     ),
   )
   // 集合：每条路由各自挂 requireAuth，不挂 '*' 中间件。

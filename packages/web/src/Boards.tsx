@@ -15,7 +15,7 @@ import { useCachedLoad } from './cached-load'
 import { subscribeControl } from './control'
 import { COPY } from './copy'
 import { uploadFile } from './editor/media'
-import { PageTreeBoard, unlinkFromParentDoc, type PageDrag, type PageNode } from './PageTree'
+import { PageTreeBoard, type PageDrag, type PageNode } from './PageTree'
 import { publishBoards } from './boards-store'
 import { Icon } from './icons'
 import { usePersistentSet } from './tree-state'
@@ -217,7 +217,7 @@ export default function Boards({
 
   /** 页面树的页拖进目录树（folderId null = 顶层；index 缺省 = 末尾）。目录树条目是叶子、画不出子页，
    *  带子页的页拖进来子页会从两棵树里一起消失，所以拒收；服务端同一道闸，这里先拦是为了给出说得清的提示。
-   *  挂上后页离开页面树（服务端同事务清掉父页并标记不进页面树），旧父页正文里的子页引用随后摘掉 */
+   *  挂上后页离开页面树（服务端同事务清掉父页并标记不进页面树，旧父页正文里的入口也由服务端摘） */
   function dropPage(drag: PageDrag, folderId: string | null, index?: number): void {
     if (drag.kind !== 'doc') {
       window.alert(COPY.tree.dropNotDoc)
@@ -229,15 +229,11 @@ export default function Boards({
     }
     const board = dirBoard
     if (!board) return
-    const page = pages?.find((p) => p.id === drag.id)
-    const oldParent = page?.parent_id ? pages?.find((p) => p.id === page.parent_id) : undefined
     if (folderId) expandFolders(folderChain(folderId))
     const attach = folderId ? api.attachItem(folderId, 'page', drag.id) : api.attachItemRoot(board.id, 'page', drag.id)
     attach
       .then(async (item) => {
         if (index !== undefined) await api.moveItem(item.id, folderId, index)
-        // 集合页没有正文，不存在子页引用
-        if (oldParent && oldParent.kind !== 'collection') await unlinkFromParentDoc(drag.id, oldParent.id)
       })
       .then(() => {
         refresh()
