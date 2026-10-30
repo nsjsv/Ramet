@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { api, type Page } from './api'
+import { api, type BoardFolder, type BoardsPayload, type Page } from './api'
+import { useBoardsSnapshot } from './boards-store'
 import { editInfoOf, refreshEditMarks, subscribeEditMarks, type EditInfo } from './edit-marks-store'
 import { copyText } from './clipboard'
 import { isFavorite, toggleFavorite, useFavorites } from './favorites-store'
@@ -16,7 +17,8 @@ import ProjectToggle from './project/ProjectToggle'
  * 一条 48px，sticky 钉在 .main 滚动口顶部：左面包屑（[data-flip]：侧栏收起 / 展开时 FLIP 跟着滑），
  * 右「X分钟前编辑」（点开版本历史）+ 在场头像 + 文档 / 对话切换（一个图标钮，图标是要去的那个视图）+ 收藏星标
  * + ⋮（版本历史 / 导出 zip / 分享 / 源码模式 / 全宽；分隔线下是字数与上次编辑，菜单打开时现算 / 现取）。
- * 面包屑数据全在 pages 扁平表里沿 parent_id 上溯，零新取数；跨空间 / 缺父 / 环状脏数据即停。导航走 onNavigate。 */
+ * 面包屑数据全在 pages 扁平表里沿 parent_id 上溯，零新取数；跨空间 / 缺父 / 环状脏数据即停。导航走 onNavigate。
+ * 链顶的页挂在目录树里时，前面再接上它所在的目录链（目录数据共享侧栏已取的那份）。 */
 
 interface Props {
   pages: Page[] | null
@@ -205,9 +207,22 @@ function FavoritePageButton({ pageId }: { pageId: string }) {
   )
 }
 
-/** 根祖先 → … → 父页 → 当前页。根页也渲染（只有当前页一段，位置常驻不跳变）。
- *  集合祖先不列：行页面的面包屑直接从集合所在的页接到行，不显示集合名 */
+/** 挂着该页的目录，从目录树顶层往下排；不在目录树里 / 挂在目录树顶层 = 空 */
+function folderPathOf(boards: BoardsPayload | null, pageId: string | undefined): BoardFolder[] {
+  const item = pageId ? boards?.items.find((it) => it.kind === 'page' && it.item_id === pageId) : undefined
+  if (!boards || !item) return []
+  const byId = new Map(boards.folders.map((f) => [f.id, f]))
+  const path: BoardFolder[] = []
+  for (let f = item.folder_id ? byId.get(item.folder_id) : undefined; f && !path.includes(f); f = f.parent_id ? byId.get(f.parent_id) : undefined) {
+    path.unshift(f)
+  }
+  return path
+}
+
+/** 目录 → … → 根祖先 → … → 父页 → 当前页。根页也渲染（只有当前页一段，位置常驻不跳变）。
+ *  集合祖先不列：行页面的面包屑直接从集合所在的页接到行，不显示集合名。目录段只是位置提示，不可点 */
 function Crumbs({ pages, pageId, onNavigate }: { pages: Page[] | null; pageId: string | undefined; onNavigate: (to: string) => void }) {
+  const boards = useBoardsSnapshot()
   const byId = new Map((pages ?? []).map((pg) => [pg.id, pg]))
   const chain: Page[] = []
   const seen = new Set<string>(pageId ? [pageId] : [])
@@ -220,8 +235,15 @@ function Crumbs({ pages, pageId, onNavigate }: { pages: Page[] | null; pageId: s
     seen.add(parent.id)
     cur = parent
   }
+  const folders = folderPathOf(boards, cur?.id)
   return (
     <nav className="crumbs" aria-label={COPY.top.crumbs} data-flip>
+      {folders.map((f) => (
+        <span key={f.id} className="crumb" title={f.name}>
+          <Icon name="folder" size={16} />
+          <span>{f.name}</span>
+        </span>
+      ))}
       {chain.map((pg) => (
         <button key={pg.id} type="button" className="crumb" title={pg.title || COPY.untitled} onClick={() => onNavigate(`/page/${pg.id}`)}>
           <PageIcon icon={pg.icon} placeholder />

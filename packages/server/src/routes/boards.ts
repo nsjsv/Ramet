@@ -78,8 +78,13 @@ const SELECT_ITEM = `SELECT fi.*, b.space_id AS space_id FROM folder_items fi
   JOIN boards b ON b.id = fi.board_id
   WHERE fi.id = $1 AND b.space_id IS NOT NULL
     AND EXISTS (SELECT 1 FROM space_members m WHERE m.space_id = b.space_id AND m.user_id = $2)`
-const VISIBLE_PAGE = `SELECT 1 FROM live_pages p JOIN space_members m ON m.space_id = p.space_id AND m.user_id = $2
+const VISIBLE_PAGE = `SELECT p.space_id, p.kind,
+    EXISTS (SELECT 1 FROM live_pages c WHERE c.parent_id = p.id) AS has_children
+  FROM live_pages p JOIN space_members m ON m.space_id = p.space_id AND m.user_id = $2
   WHERE p.id = $1`
+// 挂进目录树的页一律是脱离页面树的独立页：拿掉父子关系并标记不进页面树。已经是这样的页不改（不白记一条页面变更）
+const DETACH_FROM_PAGE_TREE = `UPDATE pages SET parent_id = NULL, in_page_tree = false
+  WHERE id = $1 AND (parent_id IS NOT NULL OR in_page_tree)`
 const SELECT_BOARD_BY_SPACE = 'SELECT id, space_id, created_at FROM boards WHERE space_id = $1'
 const INSERT_FOLDER = 'INSERT INTO folders (id, board_id, parent_id, name) VALUES ($1, $2, $3, $4)'
 const DELETE_BOARD = 'DELETE FROM boards WHERE id = $1'
@@ -327,14 +332,25 @@ export function boardsRoutes(pool: Pool, notify?: () => void, notifyBoards?: () 
   })
 
   // 挂载体校验（kind / item_id，本体存在且可见）。目录级和树顶层两处挂载入口共用
-  async function itemTargetError(user: AuthUser, body: { kind?: unknown; item_id?: unknown }): Promise<string | null> {
+  async function itemTargetError(
+    user: AuthUser,
+    spaceId: string,
+    body: { kind?: unknown; item_id?: unknown },
+  ): Promise<string | null> {
     if (body.kind !== 'page' && body.kind !== 'file') return 'kind must be page or file'
     if (typeof body.item_id !== 'string') return 'item_id must be a string'
     if (body.kind === 'page') {
       // 页面必须存在（未进回收站）且是我所在空间的页，admin 也不例外：挂进目录后标题会进目录树列表，
       // 而列表是列举类读路径（同 visiblePages）
-      const visible = await pool.query(VISIBLE_PAGE, [body.item_id, user.id])
-      if (!visible.rows[0]) return 'page not found'
+      const page = (
+        await pool.query<{ space_id: string; kind: string; has_children: boolean }>(VISIBLE_PAGE, [body.item_id, user.id])
+      ).rows[0]
+      if (!page) return 'page not found'
+      // 挂载会改写页面本身（脱离页面树），页面必须就在这棵目录树的空间里，不能借目录树改别的空间的页
+      if (page.space_id !== spaceId) return 'page not in this space'
+      // 目录树条目是叶子，画不出子页：带子页的页挂进来，子页就从两棵树里都消失了
+      if (page.kind !== 'doc') return 'only doc pages can be attached'
+      if (page.has_children) return 'page has children'
     } else {
       if (!(await pool.query('SELECT 1 FROM files WHERE id = $1', [body.item_id])).rows[0]) {
         return 'file not found'
@@ -351,13 +367,20 @@ export function boardsRoutes(pool: Pool, notify?: () => void, notifyBoards?: () 
     body: { kind: 'page' | 'file'; item_id: string },
   ): Promise<ItemRow | null> {
     const id = crypto.randomUUID()
-    const { rows: upserted } = await pool.query<{ id: string }>(
-      `INSERT INTO folder_items (id, board_id, folder_id, kind, item_id) VALUES ($1, $2, $3, $4, $5)
-       ON CONFLICT (kind, item_id) DO UPDATE SET board_id = EXCLUDED.board_id, folder_id = EXCLUDED.folder_id
-       RETURNING id`,
-      [id, boardId, folderId, body.kind, body.item_id],
-    )
-    return (await pool.query<ItemRow>(SELECT_ITEM, [upserted[0]!.id, user.id])).rows[0] ?? null
+    // 页面条目：挂载与脱离页面树同一事务，不会出现挂进了目录、页面树里也还在的半成品
+    const { itemId, pageMoved } = await withTransaction(pool, async (client) => {
+      const { rows: upserted } = await client.query<{ id: string }>(
+        `INSERT INTO folder_items (id, board_id, folder_id, kind, item_id) VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (kind, item_id) DO UPDATE SET board_id = EXCLUDED.board_id, folder_id = EXCLUDED.folder_id
+         RETURNING id`,
+        [id, boardId, folderId, body.kind, body.item_id],
+      )
+      const moved = body.kind === 'page' && (await client.query(DETACH_FROM_PAGE_TREE, [body.item_id])).rowCount === 1
+      return { itemId: upserted[0]!.id, pageMoved: moved }
+    })
+    // 页面离开了页面树：各端页面列表要跟上（目录树的广播由调用方发）
+    if (pageMoved) notify?.()
+    return (await pool.query<ItemRow>(SELECT_ITEM, [itemId, user.id])).rows[0] ?? null
   }
 
   // 挂载到目录：已挂他处即移动，UNIQUE (kind,item_id) 保证全局单归属
@@ -367,7 +390,7 @@ export function boardsRoutes(pool: Pool, notify?: () => void, notifyBoards?: () 
     if (!folder) return c.json({ error: 'folder not found' }, 404)
     if (!(await folderWritable(user, folder))) return c.json({ error: 'forbidden' }, 403)
     const body = (await c.req.json().catch(() => ({}))) as { kind?: unknown; item_id?: unknown }
-    const err = await itemTargetError(user, body)
+    const err = await itemTargetError(user, folder.space_id!, body)
     if (err) return c.json({ error: err }, 400)
     const row = await attach(user, folder.board_id, folder.id, body as { kind: 'page' | 'file'; item_id: string })
     notifyBoards?.()
@@ -381,7 +404,7 @@ export function boardsRoutes(pool: Pool, notify?: () => void, notifyBoards?: () 
     if (!board) return c.json({ error: 'board not found' }, 404)
     if (!(await canWriteBoard(user, board))) return c.json({ error: 'forbidden' }, 403)
     const body = (await c.req.json().catch(() => ({}))) as { kind?: unknown; item_id?: unknown }
-    const err = await itemTargetError(user, body)
+    const err = await itemTargetError(user, board.space_id, body)
     if (err) return c.json({ error: err }, 400)
     const row = await attach(user, board.id, null, body as { kind: 'page' | 'file'; item_id: string })
     notifyBoards?.()

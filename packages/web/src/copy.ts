@@ -133,6 +133,8 @@ export const COPY = {
     deleteFailed: '删除失败',
     deleteFolderFailed: '删除目录失败',
     moveFailed: '移动失败',
+    dropHasChildren: '带子页面的页面不能拖进目录树：目录树里的页面没有层级，请先把子页面移走',
+    dropNotDoc: '只有普通文档页能拖进目录树',
     detachFailed: '移除失败',
     uploadFailed: '上传失败',
   },

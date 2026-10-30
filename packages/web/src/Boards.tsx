@@ -15,7 +15,8 @@ import { useCachedLoad } from './cached-load'
 import { subscribeControl } from './control'
 import { COPY } from './copy'
 import { uploadFile } from './editor/media'
-import { PageTreeBoard, type PageNode } from './PageTree'
+import { PageTreeBoard, unlinkFromParentDoc, type PageDrag, type PageNode } from './PageTree'
+import { publishBoards } from './boards-store'
 import { Icon } from './icons'
 import { usePersistentSet } from './tree-state'
 import {
@@ -87,6 +88,8 @@ export default function Boards({
   useEffect(() => {
     if (loaded.error) console.error(loaded.error)
   }, [loaded.error])
+  // 顶栏面包屑要目录结构：共享这份列表，不另取
+  useEffect(() => publishBoards(data), [data])
 
   // 别的标签页 / 别的成员改了目录树：只认 'boards'（页面写的 'changed' 很频繁，不连带重拉）；'sync' 补断线期间漏掉的
   useEffect(
@@ -209,6 +212,42 @@ export default function Boards({
       .catch((err: unknown) => {
         console.error(err)
         window.alert(err instanceof Error && err.message ? err.message : COPY.tree.createFailed)
+      })
+  }
+
+  /** 页面树的页拖进目录树（folderId null = 顶层；index 缺省 = 末尾）。目录树条目是叶子、画不出子页，
+   *  带子页的页拖进来子页会从两棵树里一起消失，所以拒收；服务端同一道闸，这里先拦是为了给出说得清的提示。
+   *  挂上后页离开页面树（服务端同事务清掉父页并标记不进页面树），旧父页正文里的子页引用随后摘掉 */
+  function dropPage(drag: PageDrag, folderId: string | null, index?: number): void {
+    if (drag.kind !== 'doc') {
+      window.alert(COPY.tree.dropNotDoc)
+      return
+    }
+    if (drag.subtree.size > 1) {
+      window.alert(COPY.tree.dropHasChildren)
+      return
+    }
+    const board = dirBoard
+    if (!board) return
+    const page = pages?.find((p) => p.id === drag.id)
+    const oldParent = page?.parent_id ? pages?.find((p) => p.id === page.parent_id) : undefined
+    if (folderId) expandFolders(folderChain(folderId))
+    const attach = folderId ? api.attachItem(folderId, 'page', drag.id) : api.attachItemRoot(board.id, 'page', drag.id)
+    attach
+      .then(async (item) => {
+        if (index !== undefined) await api.moveItem(item.id, folderId, index)
+        // 集合页没有正文，不存在子页引用
+        if (oldParent && oldParent.kind !== 'collection') await unlinkFromParentDoc(drag.id, oldParent.id)
+      })
+      .then(() => {
+        refresh()
+        onPageChanged()
+      })
+      .catch((err: unknown) => {
+        console.error(err)
+        window.alert(err instanceof Error && err.message ? err.message : COPY.tree.moveFailed)
+        refresh()
+        onPageChanged()
       })
   }
 
@@ -462,6 +501,7 @@ export default function Boards({
                 onMoveItem: (itemId, folderId) => run(() => api.moveItem(itemId, folderId), COPY.tree.moveFailed),
                 onMoveItemTo: (id, parentId, index) =>
                   run(() => api.moveItem(id, parentId, index), COPY.tree.moveFailed),
+                onDropPage: dropPage,
                 onDetachItem: (it) => {
                   // 页面恒属一个空间：页面条目移入回收站（可恢复）；
                   // 文件条目只脱挂（文件永不删除）

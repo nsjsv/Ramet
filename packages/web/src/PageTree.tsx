@@ -36,8 +36,25 @@ function subtreeIds(node: PageNode): Set<string> {
   return ids
 }
 
-/** kind：只有文档页能拖进集合成为行（集合 / 过程页 / skill 页不是行） */
-let pageDrag: { id: string; subtree: Set<string>; kind: Page['kind'] } | null = null
+/** kind：只有文档页能拖进集合成为行（集合 / 过程页 / skill 页不是行），也只有它能拖进目录树 */
+export type PageDrag = { id: string; subtree: Set<string>; kind: Page['kind'] }
+let pageDrag: PageDrag | null = null
+
+/** 目录树（FolderTree.tsx）也接页面树拖来的页：dragover 现读，drop 取走（清源，免得页面树的 nav 再处理一遍） */
+export function peekPageDrag(): PageDrag | null {
+  return pageDrag
+}
+export function takePageDrag(): PageDrag | null {
+  const d = pageDrag
+  pageDrag = null
+  return d
+}
+
+/** 页被挪出旧父页之后（服务端已先改好 parent_id，link-watcher 的结构守卫才不会级联删页），
+ *  摘掉旧父页正文里指向它的 page_ref 镜像。失败只记日志，树结构已经对了 */
+export async function unlinkFromParentDoc(pageId: string, parentId: string): Promise<void> {
+  await withPageDoc(parentId, (frag) => removePageRefs(frag, pageId))
+}
 
 /** 树行 dragover 高亮 / 树插入线的收尾：drop 落进缝隙 / 列表末尾 / 拖拽被取消时，行收不到
  * drop/dragleave，高亮或插入线会卡住，所以在高亮首次出现时武装一次 document 捕获 dragend

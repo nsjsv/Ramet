@@ -8,6 +8,7 @@ import { NavLink } from 'react-router-dom'
 import type { BoardFolder, BoardItem } from './api'
 import { COPY } from './copy'
 import { PageIcon } from './PageIcon'
+import { peekPageDrag, takePageDrag, type PageDrag } from './PageTree'
 import { Icon } from './icons'
 
 export interface FolderNode extends BoardFolder {
@@ -43,9 +44,17 @@ export function buildForest(
   return { roots, rootItems }
 }
 
-// 目录 / 条目拖拽（模块级单例，仅目录树用）
+// 目录 / 条目拖拽（模块级单例，仅目录树用）。页面树拖来的页走 PageTree 的单例，落点规则与条目相同
 let folderDrag: { id: string; subtree: Set<string> } | null = null
 let itemDrag: { id: string } | null = null
+
+type DragSource = { kind: 'folder' | 'item'; id: string; subtree: Set<string>; page?: PageDrag }
+function currentDrag(readOnly: boolean): DragSource | null {
+  if (folderDrag) return { kind: 'folder', id: folderDrag.id, subtree: folderDrag.subtree }
+  if (itemDrag) return { kind: 'item', id: itemDrag.id, subtree: new Set() }
+  const page = readOnly ? null : peekPageDrag()
+  return page ? { kind: 'item', id: page.id, subtree: new Set(), page } : null
+}
 
 /** 与 PageTree 同款收尾：drop 落缝 / 取消时行收不到 dragleave，document 捕获 dragend 统一清 */
 const dragEndCleanups: { row?: () => void; line?: () => void } = {}
@@ -212,6 +221,8 @@ export interface FolderTreeCallbacks {
   /** nav 插入线落点 = 条目挪到指定父级与序号 */
   onMoveItemTo: (id: string, parentId: string | null, index: number) => void
   onDetachItem: (item: BoardItem) => void
+  /** 页面树的页拖进来：folderId null = 目录树顶层；index 缺省 = 挂到末尾。能不能收由 Boards 判（报错也在那边） */
+  onDropPage: (drag: PageDrag, folderId: string | null, index?: number) => void
   /** 防环子树计算用（目录树全量扁平目录） */
   folders: BoardFolder[]
 }
@@ -237,19 +248,22 @@ export function FolderTreeBoard({
     { boardId: string; parentId: string | null; index: number; y: number; left: number; width: number; key: string } | null
   >(null)
 
+  /** 落点边界；空目录树没有行可算边界，页面树拖来的页落到顶层 */
+  function boundaryOf(nav: HTMLElement, clientY: number, d: DragSource) {
+    const b = dropBoundaryAt(board.id, folders, items, nav, clientY, d)
+    if (b || !d.page || nav.querySelector('.dir-row[data-dir], .dir-item[data-item]')) return b
+    return { boardId: board.id, parentId: null, index: 0, y: 4, left: 6, width: Math.max(80, nav.clientWidth - 12), key: 'empty' }
+  }
+
   return (
     <nav
       className="tree"
       onDragOver={(e) => {
         // 拖拽源：目录拖拽带子树防环；条目拖拽叶子无子树。行自己接管的落点（目录行中带/
         // 条目拖到目录行）由 dropBoundaryAt 返回 null，行高亮接管
-        const d = folderDrag
-          ? { kind: 'folder' as const, id: folderDrag.id, subtree: folderDrag.subtree }
-          : itemDrag
-            ? { kind: 'item' as const, id: itemDrag.id, subtree: new Set<string>() }
-            : null
+        const d = currentDrag(cb.readOnly)
         if (!d) return
-        const boundary = dropBoundaryAt(board.id, folders, items, e.currentTarget, e.clientY, d)
+        const boundary = boundaryOf(e.currentTarget, e.clientY, d)
         if (!boundary) {
           setDropLine(null)
           return
@@ -263,19 +277,18 @@ export function FolderTreeBoard({
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropLine(null)
       }}
       onDrop={(e) => {
-        const d = folderDrag
-          ? { kind: 'folder' as const, id: folderDrag.id, subtree: folderDrag.subtree }
-          : itemDrag
-            ? { kind: 'item' as const, id: itemDrag.id, subtree: new Set<string>() }
-            : null
+        const d = currentDrag(cb.readOnly)
         if (!d) return
-        const boundary = dropBoundaryAt(board.id, folders, items, e.currentTarget, e.clientY, d)
+        const boundary = boundaryOf(e.currentTarget, e.clientY, d)
         if (!boundary) return
         e.preventDefault()
         folderDrag = null
         itemDrag = null
         setDropLine(null)
-        if (d.kind === 'folder') cb.onMoveFolder(d.id, boundary.parentId, boundary.index)
+        if (d.page) {
+          takePageDrag()
+          cb.onDropPage(d.page, boundary.parentId, boundary.index)
+        } else if (d.kind === 'folder') cb.onMoveFolder(d.id, boundary.parentId, boundary.index)
         else cb.onMoveItemTo(d.id, boundary.parentId, boundary.index)
       }}
     >
@@ -355,8 +368,8 @@ function DirRow({ node, depth, cb }: { node: FolderNode; depth: number; cb: Fold
           document.addEventListener('dragend', () => { folderDrag = null }, { capture: true, once: true })
         }}
         onDragOver={(e) => {
-          if (itemDrag) {
-            // 条目拖到目录行 = 移动（无插入线，整行接收）
+          if (itemDrag || (!cb.readOnly && peekPageDrag())) {
+            // 条目 / 页面树的页拖到目录行 = 放进这个目录（无插入线，整行接收）
             e.preventDefault()
             e.dataTransfer.dropEffect = 'move'
             armDragEndCleanup('row', () => setDropOver(false))
@@ -390,6 +403,12 @@ function DirRow({ node, depth, cb }: { node: FolderNode; depth: number; cb: Fold
             const itemId = itemDrag.id
             itemDrag = null
             cb.onMoveItem(itemId, node.id)
+            return
+          }
+          const page = cb.readOnly ? null : takePageDrag()
+          if (page) {
+            e.preventDefault()
+            cb.onDropPage(page, node.id)
             return
           }
           if (!folderDrag) return

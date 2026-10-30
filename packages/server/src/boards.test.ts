@@ -823,8 +823,9 @@ test('目录树文档属于空间但不进页面树；子孙跟着排除；存�
   const legacy = await createPage(dave, { space_id: spaceId })
   const nested = await createPage(dave, { space_id: spaceId, parent_id: normal.id })
   const board = await dirTreeOf(dave, spaceId)
-  expect((await attachRoot(dave, board.id, 'page', legacy.id)).status).toBe(201)
-  expect((await attach(dave, (await createFolder(dave, board.id, { name: '夹' })).id, 'page', nested.id)).status).toBe(201)
+  // 存量挂载直接写库：现在的挂载接口会顺手把页移出页面树，模拟不出老数据
+  await pool.query(`INSERT INTO folder_items (id, board_id, kind, item_id) VALUES ($1, $2, 'page', $3), ($4, $2, 'page', $5)`,
+    [crypto.randomUUID(), board.id, legacy.id, crypto.randomUUID(), nested.id])
   await initDb(pool)
   const flags = await pool.query<{ id: string; in_page_tree: boolean }>(
     'SELECT id, in_page_tree FROM pages WHERE id = ANY($1::text[])',
