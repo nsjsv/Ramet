@@ -39,7 +39,7 @@ import { embedSchema } from './editor/embed'
 import { mathBlockView, mathInlineView } from './editor/math-view'
 import { underlineSchema } from './editor/underline'
 import { blockSyncSchema } from './editor/block-sync'
-import { imageDisplaySchema, lightboxPlugin } from './editor/media'
+import { imageDisplaySchema, imageView, lightboxPlugin } from './editor/media'
 
 /* ---------- 公开预览页（/p/:id）----------
  * 游离在登录壳之外：匿名可看，无侧边栏、无编辑入口、无历史版本。
@@ -238,6 +238,7 @@ export default function PublicPage() {
           .use(blockRefSchema) // 块提及 chip（行内）：编辑端文档可能含它，点击跳 /p/ 定位
           .use(blockSyncSchema) // 同步块：公开页只渲染 toDOM 静态占位（不挂 nodeView/不连源页）
           .use(textFlash) // 文字定位链接的高亮（同 Editor）
+          .use(imageView) // 图片加载占位（同 Editor）
           .use(lightboxPlugin) // 点图片全屏看原图（只读页无上传，不挂 uploadPlugin）
           .use(ySync)
           .create()

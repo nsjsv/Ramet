@@ -515,6 +515,137 @@
   cursor: zoom-in; /* 点图弹全屏灯箱看原图（media.ts lightboxPlugin），提示可放大 */
 }
 
+/* 图片加载中（media.ts imageView）：文档没存宽高，先撑一个固定比例的浅底框，中间淡灰图片图标缓慢呼吸。
+   不用转圈：会动的强调色只留给 AI（--live），这里只是"东西在路上"，越安静越好。
+   整体延迟淡入：快网 / 缓存命中时图到得比延迟早，不闪占位 */
+.ProseMirror .img-wrap.is-loading {
+  width: min(100%, 420px);
+  aspect-ratio: 3 / 2;
+  vertical-align: top;
+  overflow: hidden;
+  background: var(--bg-sunk);
+  box-shadow: inset 0 0 0 1px var(--line);
+  animation: img-loading-in var(--d-2) ease-out 150ms both;
+}
+.ProseMirror .img-wrap.is-loading img {
+  visibility: hidden; /* 加载中的 img 可能画出替代文字 / 破图框，藏掉，只看占位 */
+}
+.ProseMirror .img-wrap.is-loading::before {
+  content: '';
+  position: absolute;
+  inset: calc(50% - 14px) auto auto calc(50% - 14px);
+  width: 28px;
+  height: 28px;
+  background: var(--ink-3);
+  -webkit-mask: var(--image-glyph) center / contain no-repeat;
+  mask: var(--image-glyph) center / contain no-repeat;
+  animation: img-glyph-breathe 1.6s ease-in-out infinite;
+}
+
+/* 上传占位（upload.ts widget）：盒模型与 .img-wrap 一致，图片占位里是本地预览，替换成真图时尺寸不变；
+   预览上叠浅色蒙层（任何图上都读得出"还没好"），底部细进度条走真实上传进度（--p，0..1，只动 transform）。
+   解不了的图 / 非图片退成附件卡片同款：图标 + 文件名 + 百分比 */
+.ProseMirror .upload-ph {
+  display: inline-block;
+  position: relative;
+  max-width: 100%;
+  margin: 8px 0;
+  border-radius: 6px;
+  vertical-align: top;
+  overflow: hidden;
+  user-select: none;
+  cursor: progress;
+}
+.ProseMirror .upload-ph img {
+  cursor: progress;
+}
+.ProseMirror .upload-ph:not(.is-card)::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--bg) 45%, transparent);
+}
+.ProseMirror .upload-ph-bar {
+  position: absolute;
+  z-index: 1;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  height: 4px;
+  border-radius: var(--r-pill);
+  overflow: hidden;
+  background: color-mix(in srgb, var(--bg) 70%, transparent);
+  box-shadow: 0 0 0 1px var(--line);
+}
+.ProseMirror .upload-ph-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--ink-2);
+  transform: scaleX(var(--p, 0));
+  transform-origin: left;
+  transition: transform var(--d-2) var(--ease-out);
+}
+.ProseMirror .upload-ph.is-card {
+  display: flex;
+  align-items: center;
+  margin: 2px 0;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  color: var(--ink-2);
+}
+.ProseMirror .upload-ph.is-card .upload-ph-bar {
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+}
+.ProseMirror .upload-ph.is-card .upload-ph-bar > span {
+  background: var(--ink-3);
+}
+.ProseMirror .upload-ph-icon {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-right: 8px;
+  background: currentColor;
+  -webkit-mask: var(--page-icon) center / contain no-repeat;
+  mask: var(--page-icon) center / contain no-repeat;
+}
+.ProseMirror .upload-ph-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ProseMirror .upload-ph-pct {
+  flex: none;
+  margin-left: 8px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-3);
+}
+
+@keyframes img-loading-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes img-glyph-breathe {
+  50% {
+    opacity: 0.35;
+  }
+}
+/* 循环动画不走时长令牌，减弱动效时显式关掉 */
+@media (prefers-reduced-motion: reduce) {
+  .ProseMirror .img-wrap.is-loading::before {
+    animation: none;
+  }
+}
+
 /* gfm 待办项：<li data-item-type="task" data-checked="...">，复选框用 ::before 画。
  * ::before 必须 absolute：li 内容是块级 <p>，inline ::before 会被匿名块包住独占一行（checkbox 一行、光标掉第二行）。
  * 锚在 li 左侧固定列，与首行文字垂直居中：li 用 flow-root 挡住 p 的 margin 塌陷（否则 p 顶边距挤出 li，首行中心位算不准）。

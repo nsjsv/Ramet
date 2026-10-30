@@ -31,6 +31,9 @@ export const COPY = {
     loadingOriginal: '加载原图中…',
     originalFailed: '原图加载失败，点击重试',
   },
+  upload: {
+    uploading: (name: string) => `正在上传 ${name}`,
+  },
   top: {
     crumbs: '页面路径',
     toChat: '切换到对话视图',

@@ -19,7 +19,7 @@ import { agentCommandsFor, agentStateFor, pageAgent, sendAgentMessage } from './
 import { agentName } from './ai-block'
 import { REMEMBER_COMMAND } from '../memory/remember'
 import { startMessageDraft } from './doc-send'
-import { pickAndInsert } from './media'
+import { pickAndInsert } from './upload'
 import { iconSvg, type IconName } from '../icons'
 import { END_SESSION, endSessionSoon, parseAt, sessionField, slashQuery, type Session } from './trigger-session'
 // 补丁版 SlashProvider：修 isSame 被后续 no-op 事务顶掉导致 IME 提交 "/" 后菜单不弹，详见 vendor/plugin-slash-patched.js 头部
@@ -224,7 +224,7 @@ function blockItems(view: EditorView, actions: SlashActions): SlashItem[] {
       if (pos !== null) openInlineMathEditor(v, pos)
     }),
     block('blocks', svg('divider'), ['hr', 'divider', 'line'])('分隔线', H.divider, (v) => insertBlockAtCursor(v, nodeType(v, 'hr').create())),
-    // 上传入口：共用 pickAndInsert（media.ts）—— 隐藏 file input → uploadFile → 按 mime 插 image/attachment。
+    // 上传入口：共用 pickAndInsert（upload.ts）—— 隐藏 file input → uploadFile → 按 mime 插 image/attachment。
     // 「图片」限定 image/* 只是选择器初筛，选中非图片仍按附件插（accept 不是硬约束）
     block('media', svg('image'), ['image', 'img', 'picture', 'photo'])('图片', H.image, (v) => pickAndInsert(v, 'image/*')),
     block('media', svg('paperclip'), ['file', 'attachment', 'upload'])('附件', H.attachment, (v) => pickAndInsert(v, '')),

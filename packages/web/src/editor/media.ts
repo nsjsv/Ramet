@@ -1,14 +1,14 @@
-/* ---------- 媒体：上传 + 粘贴/拖拽接入 + 图片 webp 显示 + 图片灯箱 ----------
+/* ---------- 媒体：上传请求 + 图片 webp 显示 + 图片灯箱（编辑器里的上传占位 / 插入见 upload.ts） ----------
  * 后端契约（POST /api/files）：登录态 multipart，10MB 上限，201 回
  * {id, url, display, name, mime, size}；url=/api/files/<id> 原图，display=/api/files/<id>/display
  * 是 sharp 生成的 webp 压缩版（无则服务端退原图）。原图 URL 是文档里的 canonical 地址：
  * 快照/markdown 一律用原图，视图层（toDOM）与灯箱默认换成 display，见 imageDisplaySchema。 */
 
-import { $nodeSchema, $prose } from '@milkdown/kit/utils'
+import { $nodeSchema, $prose, $view } from '@milkdown/kit/utils'
 import { Plugin, PluginKey } from '@milkdown/kit/prose/state'
 import { Decoration, DecorationSet } from '@milkdown/kit/prose/view'
-import type { EditorView } from '@milkdown/kit/prose/view'
 import type { Node as ProsemirrorNode } from '@milkdown/kit/prose/model'
+import type { NodeViewConstructor } from '@milkdown/kit/prose/view'
 import { COPY } from '../copy'
 import { formatSize } from './attachment'
 import { directUrl } from '../file-fallback'
@@ -27,18 +27,38 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024
 
 /** 上传原文件，不做客户端压缩。
  * 不走 api.ts 的 request()：那边硬编码 Content-Type: application/json，
- * FormData 必须让浏览器自己生成 multipart boundary。 */
-export async function uploadFile(file: File): Promise<FileMeta> {
+ * FormData 必须让浏览器自己生成 multipart boundary。
+ * 传 onProgress（0..1）时改走 XHR：fetch 拿不到请求体的上传进度。 */
+export async function uploadFile(file: File, onProgress?: (ratio: number) => void): Promise<FileMeta> {
   if (file.size > MAX_FILE_SIZE) throw new Error(`文件超过 10MB（${formatSize(file.size)}），请压缩后再上传`)
   const form = new FormData()
   form.append('file', file)
-  const res = await fetch('/api/files', { method: 'POST', body: form })
-  if (!res.ok) {
-    if (res.status === 413) throw new Error('文件超过 10MB，请压缩后再上传')
-    const body = (await res.json().catch(() => null)) as { error?: string } | null
-    throw new Error(body?.error ?? `上传失败（${res.status}）`)
+  const { status, body } = onProgress ? await postWithProgress(form, onProgress) : await postWithFetch(form)
+  if (status < 200 || status >= 300) {
+    if (status === 413) throw new Error('文件超过 10MB，请压缩后再上传')
+    throw new Error((body as { error?: string } | null)?.error ?? `上传失败（${status}）`)
   }
-  return (await res.json()) as FileMeta
+  return body as FileMeta
+}
+
+async function postWithFetch(form: FormData): Promise<{ status: number; body: unknown }> {
+  const res = await fetch('/api/files', { method: 'POST', body: form })
+  return { status: res.status, body: await res.json().catch(() => null) }
+}
+
+function postWithProgress(form: FormData, onProgress: (ratio: number) => void): Promise<{ status: number; body: unknown }> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open('POST', '/api/files')
+    xhr.responseType = 'json'
+    xhr.upload.addEventListener('progress', (e) => {
+      if (e.lengthComputable && e.total > 0) onProgress(e.loaded / e.total)
+    })
+    xhr.addEventListener('load', () => resolve({ status: xhr.status, body: xhr.response as unknown }))
+    xhr.addEventListener('error', () => reject(new Error('网络错误，上传失败')))
+    xhr.addEventListener('abort', () => reject(new Error('上传已取消')))
+    xhr.send(form)
+  })
 }
 
 /* ---------- image schema 覆盖：视图层渲染 webp display 版 ----------
@@ -85,7 +105,7 @@ export const imageDisplaySchema = $nodeSchema('image', () => ({
   ],
   toDOM: (node) => {
     const src = typeof node.attrs.src === 'string' ? node.attrs.src : ''
-    const displaySrc = FILE_URL_RE.test(src) ? `${src}/display` : src
+    const displaySrc = toDisplay(src)
     // 包一层 span：img 是 replaced 元素，伪元素 / inset 阴影 / 背景都叠不上，
     // 选中态的遮罩与包边需要可定位盒子，全落在 wrapper（prose.css .img-wrap）。
     // parseDOM 仍匹配内层 img[src]，剪贴板 / 拖拽 / 外部粘贴解析不受影响
@@ -111,6 +131,54 @@ export const imageDisplaySchema = $nodeSchema('image', () => ({
     },
   },
 }))
+
+/** 本站上传的图视图层换 webp display 版；外链 / 历史裸图原样 */
+export function toDisplay(src: string): string {
+  return FILE_URL_RE.test(src) ? `${src}/display` : src
+}
+
+/* 图片 nodeView：DOM 结构与 toDOM 一致（span.img-wrap > img），只多一个加载态。
+ * 文档里没存图片宽高，弱网下图片没下完时 wrapper 塌成 0 高，看不出这里有图；
+ * 未完成加载时打 is-loading，CSS 画固定尺寸占位框 + 转圈，load / error 后撤掉恢复图片本身尺寸。
+ * 浏览器缓存命中的图设完 src 同步就是 complete，不进加载态，不会闪占位。
+ * toDOM 仍是剪贴板 / 序列化的出口，两处的 DOM 形状要同改。 */
+const createImageView: NodeViewConstructor = (initial) => {
+  let node = initial
+  const dom = document.createElement('span')
+  dom.className = 'img-wrap'
+  const img = document.createElement('img')
+  dom.appendChild(img)
+  img.addEventListener('load', () => dom.classList.remove('is-loading'))
+  // 图床失败时 file-fallback 的 window 捕获监听先一步把 src 换成 ?direct=1 重试，此时 complete 为 false，
+  // 保持加载态；源站也失败（破图 complete 为 true）才撤
+  img.addEventListener('error', () => {
+    if (img.complete) dom.classList.remove('is-loading')
+  })
+  // 记自己设过的地址而不读 img 的 src 属性：回退改过的 ?direct=1 不能在 update 时被改回图床地址
+  let shown: string | null = null
+  const render = (n: ProsemirrorNode) => {
+    const src = typeof n.attrs.src === 'string' ? n.attrs.src : ''
+    img.alt = typeof n.attrs.alt === 'string' ? n.attrs.alt : ''
+    img.title = typeof n.attrs.title === 'string' ? n.attrs.title : ''
+    const next = toDisplay(src)
+    if (next === shown) return
+    shown = next
+    img.setAttribute('src', shown)
+    dom.classList.toggle('is-loading', !!shown && !img.complete)
+  }
+  render(node)
+  return {
+    dom,
+    update: (next) => {
+      if (next.type !== node.type) return false
+      node = next
+      render(next)
+      return true
+    },
+  }
+}
+
+export const imageView = $view(imageDisplaySchema.node, () => createImageView)
 
 /** 纯图片块 / 条目：paragraph 只含一个 image（文字加图混合不算）。
  * 选中高亮（Editor.tsx selected-img-item）与列表符号隐藏（imageItemMark）共用。
@@ -151,94 +219,6 @@ export const imageItemMark = $prose(
     }),
 )
 
-/** 图片 mime → 插 commonmark image 节点（src 存原图 URL）；视频 / 音频 → 播放器（embed.ts）；其他文件 → 附件卡片 */
-function nodeForFile(view: EditorView, meta: FileMeta): ProsemirrorNode | null {
-  const schema = view.state.schema
-  if (meta.mime.startsWith('image/')) {
-    const image = schema.nodes.image
-    return image ? image.create({ src: meta.url, alt: meta.name, title: '' }) : null
-  }
-  const media = meta.mime.startsWith('video/') ? 'video' : meta.mime.startsWith('audio/') ? 'audio' : null
-  if (media && schema.nodes.embed) return schema.nodes.embed.create({ kind: media, src: meta.url, height: '' })
-  const attachment = schema.nodes.attachment
-  return attachment ? attachment.create({ src: meta.url, name: meta.name, size: meta.size }) : null
-}
-
-/** 在 pos（null = 当前选区）插入节点。上传是异步的，落点可能因协同/输入失效：
- * 插不进去就退回选区插入，保证文件不白传。 */
-function insertNode(view: EditorView, node: ProsemirrorNode, pos: number | null): void {
-  if (view.isDestroyed) return
-  try {
-    const tr = view.state.tr
-    if (pos != null) tr.insert(Math.min(Math.max(0, pos), tr.doc.content.size), node)
-    else tr.replaceSelectionWith(node)
-    view.dispatch(tr)
-  } catch {
-    if (view.isDestroyed) return
-    view.dispatch(view.state.tr.replaceSelectionWith(node))
-  }
-}
-
-/** 顺序上传并逐个插入；任一失败 alert 后继续剩下的（多选拖拽不因一个坏文件全丢） */
-async function insertFiles(view: EditorView, files: File[], pos: number | null): Promise<void> {
-  let at = pos
-  for (const file of files) {
-    try {
-      const meta = await uploadFile(file)
-      const node = nodeForFile(view, meta)
-      if (!node) continue
-      insertNode(view, node, at)
-      // 同一落点插多个时后插的要排在先插的后面：落点按节点尺寸前移（选区插入则 PM 自己维护光标）
-      if (at != null) at += node.nodeSize
-    } catch (err) {
-      window.alert(err instanceof Error && err.message ? err.message : '上传失败，请重试')
-    }
-  }
-}
-
-/** slash 菜单入口：隐藏 file input（accept 限定可选类型），选中后走同一上传插入路径 */
-export function pickAndInsert(view: EditorView, accept: string): void {
-  const input = document.createElement('input')
-  input.type = 'file'
-  if (accept) input.accept = accept
-  input.style.display = 'none'
-  document.body.appendChild(input)
-  input.addEventListener('change', () => {
-    const files = input.files ? Array.from(input.files) : []
-    input.remove()
-    void insertFiles(view, files, null)
-  })
-  // 取消选择时 change 不触发，input 会一直留在 DOM 里，靠 cancel 事件摘掉
-  input.addEventListener('cancel', () => input.remove())
-  input.click()
-}
-
-/* ---------- uploadPlugin：接管粘贴 / 拖拽的文件 ----------
- * clipboardData / DataTransfer.files 非空才接管（返回 true 让 PM preventDefault）；
- * 只读实例直接放行，挂了插件也不会触发上传。上传期间没有占位态。 */
-export const uploadPlugin = $prose(
-  () =>
-    new Plugin({
-      props: {
-        handlePaste: (view, event) => {
-          const files = event.clipboardData?.files
-          if (!files || files.length === 0) return false
-          if (!view.editable) return false
-          void insertFiles(view, Array.from(files), null)
-          return true
-        },
-        handleDrop: (view, event) => {
-          const files = event.dataTransfer?.files
-          if (!files || files.length === 0) return false
-          if (!view.editable) return false
-          const at = view.posAtCoords({ left: event.clientX, top: event.clientY })
-          void insertFiles(view, Array.from(files), at ? at.pos : null)
-          return true
-        },
-      },
-    }),
-)
-
 /* ---------- lightboxPlugin：点图片看大图（默认压缩版，按钮才拉原图） ----------
  * handleClickOn 命中 image 节点时开全屏浮层，默认显示 display 版（编辑区已加载过，浏览器缓存命中，
  * 不产生新请求）；点浮层底部「显示原图」才下载 attrs.src（原图 URL）。外链图片 / 历史裸图没有
@@ -252,7 +232,7 @@ function openLightbox(src: string): void {
   const overlay = document.createElement('div')
   overlay.className = 'lightbox'
   const img = document.createElement('img')
-  const shown = FILE_URL_RE.test(src) ? `${src}/display` : src
+  const shown = toDisplay(src)
   img.src = shown
   overlay.appendChild(img)
   if (shown !== src) overlay.appendChild(originalButton(img, src))

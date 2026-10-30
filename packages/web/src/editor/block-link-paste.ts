@@ -5,7 +5,7 @@
  * - 同步块：插 block_sync 块级节点（实时跟随源块，editor/block-sync.ts 渲染）；
  * - 原样粘贴：URL 文本原封不动插入。
  * Esc 或点外部取消，什么都不插。只在 editable 实例接管（公开页只读，没有弹窗）；
- * 与 uploadPlugin 处理的 payload 互斥（文件 vs URL 文本），.use 顺序无所谓。 */
+ * 与 uploadPlugin（upload.ts）处理的 payload 互斥（文件 vs URL 文本），.use 顺序无所谓。 */
 
 import { $prose } from '@milkdown/kit/utils'
 import { Plugin } from '@milkdown/kit/prose/state'

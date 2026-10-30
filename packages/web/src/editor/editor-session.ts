@@ -73,7 +73,8 @@ import { blockLinkPaste } from './block-link-paste'
 import { blockSyncSchema, blockSyncView } from './block-sync'
 import { taskToggle } from './task-toggle'
 import { attachmentSchema } from './attachment'
-import { imageDisplaySchema, uploadPlugin, lightboxPlugin, imageItemMark } from './media'
+import { imageDisplaySchema, imageView, lightboxPlugin, imageItemMark } from './media'
+import { uploadPlugin } from './upload'
 import { listDrag } from './list-drag'
 import { createPageDrop, setPageDropBridge } from './page-drop'
 import { collabUrl } from './collab-url'
@@ -334,6 +335,7 @@ export function startEditorSession(deps: EditorSessionDeps): () => void {
       .use(blockSyncView) // 同步块 nodeView（仅编辑器挂：自持 provider 实时拉源页）
       .use(blockLinkPaste) // 粘贴块链接 → 三选弹窗（editable 守卫，PublicPage 不挂）
       .use(uploadPlugin) // 粘贴/拖拽文件上传（readOnly 实例插件内部有 editable 守卫）
+      .use(imageView) // 图片加载中显示占位框（弱网下进页面能看出这里有图）
       .use(lightboxPlugin) // 点图片全屏看原图 + 附件卡片在编辑器内的下载点击接管
       .use(extraInputRules)
       .use(taskToggle) // 点待办复选框（::before 无 DOM）翻转 checked
