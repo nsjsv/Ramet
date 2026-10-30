@@ -123,9 +123,11 @@ async function reorder(
 }
 
 // notify：目录 / 目录树删除会连带页面回收，必须广播让各端页面树跟上。
+// notifyBoards：目录树结构变了（任何写成功），各端只重拉目录树列表。和 notify 分开是因为页面写
+// （改标题等）非常频繁，挂在同一个事件上每次都要白拉一遍目录树
 // 回收只用 pages.ts 的 trashPageSubtree（这里不另写回收 SQL）：它只盖章活子树，
 // 已回收 / 不存在的条目天然 no-op，目录里混着已回收页面时删除不会重复计数
-export function boardsRoutes(pool: Pool, notify?: () => void) {
+export function boardsRoutes(pool: Pool, notify?: () => void, notifyBoards?: () => void) {
   const app = new Hono<AuthEnv>()
   app.use('*', requireAuth(pool))
 
@@ -222,6 +224,7 @@ export function boardsRoutes(pool: Pool, notify?: () => void) {
     if (!writable(role)) return c.json({ error: 'forbidden' }, 403)
     const inserted = (await pool.query(ENSURE_DIR_TREE, [spaceId])).rowCount
     const board = (await pool.query<BoardRow>(SELECT_BOARD_BY_SPACE, [spaceId])).rows[0]!
+    if (inserted === 1) notifyBoards?.()
     return c.json({ board }, inserted === 1 ? 201 : 200)
   })
 
@@ -239,6 +242,7 @@ export function boardsRoutes(pool: Pool, notify?: () => void) {
       return ids
     })
     notify?.()
+    notifyBoards?.()
     return c.json({ trashed })
   })
 
@@ -256,6 +260,7 @@ export function boardsRoutes(pool: Pool, notify?: () => void) {
     }
     const id = crypto.randomUUID()
     await pool.query(INSERT_FOLDER, [id, board.id, parentId, body.name])
+    notifyBoards?.()
     return c.json((await visibleFolder(user, id))!, 201)
   })
 
@@ -298,6 +303,7 @@ export function boardsRoutes(pool: Pool, notify?: () => void) {
         body.index,
       )
     }
+    notifyBoards?.()
     return c.json((await visibleFolder(user, id))!)
   })
 
@@ -316,6 +322,7 @@ export function boardsRoutes(pool: Pool, notify?: () => void) {
       return ids
     })
     notify?.()
+    notifyBoards?.()
     return c.json({ trashed })
   })
 
@@ -363,6 +370,7 @@ export function boardsRoutes(pool: Pool, notify?: () => void) {
     const err = await itemTargetError(user, body)
     if (err) return c.json({ error: err }, 400)
     const row = await attach(user, folder.board_id, folder.id, body as { kind: 'page' | 'file'; item_id: string })
+    notifyBoards?.()
     return c.json(row!, 201)
   })
 
@@ -376,6 +384,7 @@ export function boardsRoutes(pool: Pool, notify?: () => void) {
     const err = await itemTargetError(user, body)
     if (err) return c.json({ error: err }, 400)
     const row = await attach(user, board.id, null, body as { kind: 'page' | 'file'; item_id: string })
+    notifyBoards?.()
     return c.json(row!, 201)
   })
 
@@ -420,6 +429,7 @@ export function boardsRoutes(pool: Pool, notify?: () => void) {
         body.index,
       )
     }
+    notifyBoards?.()
     return c.json((await pool.query<ItemRow>(SELECT_ITEM, [id, user.id])).rows[0]!)
   })
 
@@ -429,6 +439,7 @@ export function boardsRoutes(pool: Pool, notify?: () => void) {
     if (!item) return c.json({ error: 'folder item not found' }, 404)
     if (!(await folderWritable(user, item))) return c.json({ error: 'forbidden' }, 403)
     await pool.query(DELETE_ITEM, [item.id])
+    notifyBoards?.()
     return c.json({})
   })
 

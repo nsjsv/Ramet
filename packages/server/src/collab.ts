@@ -436,6 +436,12 @@ export function notifyMemoriesChanged(hocuspocus: Hocuspocus): void {
   hocuspocus.documents.get(CONTROL_DOC_NAME)?.broadcastStateless('memories')
 }
 
+// 目录树结构变了（目录 / 挂载增删改、挂着的页面被恢复）：客户端据此只重拉目录树列表。
+// 单独一个事件，页面写（'changed'）不连带重拉目录树，同样不带内容
+export function notifyBoardsChanged(hocuspocus: Hocuspocus): void {
+  hocuspocus.documents.get(CONTROL_DOC_NAME)?.broadcastStateless('boards')
+}
+
 // 端口预览的共享列表变了（共享 / 停止 / 授权收回）：客户端据此重拉这一页的预览列表。
 // payload 形如 `previews:<pageId>`，控制信道上所有在线客户端都会收到，只带页面 id，不带任何内容
 export function notifyPreviewsChanged(hocuspocus: Hocuspocus, pageId: string): void {

@@ -4,6 +4,7 @@
  * 展开态不在本文件持有：跨刷新记忆的所有者是 tree-state.ts 的 usePersistentSet（key 由
  * Boards 按目录树共用一条给出），这里只读 cb.expanded / 调 cb.onToggle。 */
 import { useState } from 'react'
+import { NavLink } from 'react-router-dom'
 import type { BoardFolder, BoardItem } from './api'
 import { COPY } from './copy'
 import { PageIcon } from './PageIcon'
@@ -182,6 +183,8 @@ function dropBoundaryAt(
 
 /** 目录行的回调集：全部由 Boards（目录树外壳）提供，创建 / 改名 / 菜单 / 上传的 state 都在那边 */
 export interface FolderTreeCallbacks {
+  /** viewer 空间：不给 ＋ / ⋯ / 删除 / 拖拽 / 双击改名（服务端另有 403 一道闸） */
+  readOnly: boolean
   expanded: Set<string>
   renaming: RenameTarget
   menu: MenuTarget
@@ -209,7 +212,6 @@ export interface FolderTreeCallbacks {
   /** nav 插入线落点 = 条目挪到指定父级与序号 */
   onMoveItemTo: (id: string, parentId: string | null, index: number) => void
   onDetachItem: (item: BoardItem) => void
-  onNavigate: (pageId: string) => void
   /** 防环子树计算用（目录树全量扁平目录） */
   folders: BoardFolder[]
 }
@@ -331,7 +333,7 @@ function DirRow({ node, depth, cb }: { node: FolderNode; depth: number; cb: Fold
         className={'tree-item dir-row' + (dropOver ? ' droptarget' : '')}
         data-dir={node.id}
         style={{ '--depth': depth } as React.CSSProperties}
-        draggable
+        draggable={!cb.readOnly}
         /* 整行可点 = 展开 / 折叠（叶子行无子节点则无动作）；
            行内的 ＋/⋯/菜单/改名输入各自处理，点击不吃这一发（箭头按钮不单独绑 onClick，
            它落在行上、由这里统一 toggle，键盘 Enter/Space 触发的 click 同样走这条路） */
@@ -423,15 +425,21 @@ function DirRow({ node, depth, cb }: { node: FolderNode; depth: number; cb: Fold
             onBlur={(e) => cb.onRenameCommit({ type: 'folder', id: node.id }, e.currentTarget.value)}
           />
         ) : (
-          <span className="tree-label" title={node.name} onDoubleClick={() => cb.onRenameStart({ type: 'folder', id: node.id })}>
+          <span
+            className="tree-label"
+            title={node.name}
+            onDoubleClick={() => !cb.readOnly && cb.onRenameStart({ type: 'folder', id: node.id })}
+          >
             {node.name}
           </span>
         )}
-        <span className="tree-actions">
-          {/* ＋ 打开行内菜单（同目录树头 ＋ 模式）：建子目录 / 建文档 / 传文件进该目录 */}
-          <button className="icon-btn" title={COPY.tree.addMenu} onClick={(e) => cb.onMenu({ type: 'folder-plus', id: node.id }, e)}><Icon name="plus" size={14} /></button>
-          <button className="icon-btn" title={COPY.tree.folderMenu} onClick={(e) => cb.onMenu({ type: 'folder', id: node.id }, e)}><Icon name="more" size={14} /></button>
-        </span>
+        {!cb.readOnly && (
+          <span className="tree-actions">
+            {/* ＋ 打开行内菜单（同目录树头 ＋ 模式）：建子目录 / 建文档 / 传文件进该目录 */}
+            <button className="icon-btn" title={COPY.tree.addMenu} onClick={(e) => cb.onMenu({ type: 'folder-plus', id: node.id }, e)}><Icon name="plus" size={14} /></button>
+            <button className="icon-btn" title={COPY.tree.folderMenu} onClick={(e) => cb.onMenu({ type: 'folder', id: node.id }, e)}><Icon name="more" size={14} /></button>
+          </span>
+        )}
         {menuOpen && (
           <div className="dir-menu" style={cb.menuStyle}>
             <button onClick={() => { cb.onMenu(null); cb.onRenameStart({ type: 'folder', id: node.id }) }}>{COPY.tree.rename}</button>
@@ -496,7 +504,7 @@ function ItemRow({ item, depth, cb }: { item: BoardItem; depth: number; cb: Fold
       className={'tree-item dir-item' + (item.kind === 'page' ? ' dir-item-page' : '')}
       data-item={item.id}
       style={{ '--depth': depth } as React.CSSProperties}
-      draggable
+      draggable={!cb.readOnly}
       onDragStart={(e) => {
         if ((e.target as HTMLElement).closest('button, input')) return
         itemDrag = { id: item.id }
@@ -511,25 +519,36 @@ function ItemRow({ item, depth, cb }: { item: BoardItem; depth: number; cb: Fold
           <Icon name="file" size={18} className="dir-glyph" />
         )}
       </span>
-      <button
-        className="tree-label"
-        title={item.kind === 'page' ? item.title || COPY.untitled : item.name || ''}
-        onClick={() => {
-          if (item.kind === 'page') cb.onNavigate(item.item_id)
-          else window.open(`/api/files/${item.item_id}/display`, '_blank')
-        }}
-      >
-        {item.kind === 'page' ? item.title || COPY.untitled : item.name || COPY.tree.unnamedFile}
-      </button>
-      <span className="tree-actions">
-        <button
-          className="icon-btn danger"
-          title={item.kind === 'page' ? COPY.tree.removePage : COPY.tree.detachFile}
-          onClick={() => cb.onDetachItem(item)}
+      {/* 页面条目用 NavLink：当前页高亮与页面树同一套（.tree-label.active），也能中键开新标签 */}
+      {item.kind === 'page' ? (
+        <NavLink
+          to={`/page/${item.item_id}`}
+          className={({ isActive }) => 'tree-label' + (isActive ? ' active' : '')}
+          title={item.title || COPY.untitled}
+          draggable={false}
         >
-          <Icon name="x" size={14} />
+          {item.title || COPY.untitled}
+        </NavLink>
+      ) : (
+        <button
+          className="tree-label"
+          title={item.name || ''}
+          onClick={() => window.open(`/api/files/${item.item_id}/display`, '_blank')}
+        >
+          {item.name || COPY.tree.unnamedFile}
         </button>
-      </span>
+      )}
+      {!cb.readOnly && (
+        <span className="tree-actions">
+          <button
+            className="icon-btn danger"
+            title={item.kind === 'page' ? COPY.tree.removePage : COPY.tree.detachFile}
+            onClick={() => cb.onDetachItem(item)}
+          >
+            <Icon name="x" size={14} />
+          </button>
+        </span>
+      )}
     </div>
   )
 }

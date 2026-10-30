@@ -4,6 +4,7 @@
  *   'agents'   agent 目录变了（connector 上线 / 下线；catalog = 本机配置 + 在线 connector）
  *   'inbox'    收件箱里有东西可能变了（审批 / 回合 / 使用申请 / 机器接入…），服务端 300ms 去抖，不带内容，只通知去重拉
  *   'memories' 空间公共记忆被增删（不带 spaceId / 内容，记忆面板收到后重拉当前空间）
+ *   'boards'   目录树结构变了（目录 / 挂载增删改、挂着的页被恢复），只重拉目录树列表
  * 客户端据此失效各自的缓存。这条连接全局只开一份：App（刷侧栏树）、agent 目录（失效缓存）、
  * 设置弹窗（刷连接器在线态）订同一条，各开一条 ws 是白费带宽。
  * 另有本地事件 'sync'：(重)连上时发一次，补拉断线期间错过的广播。
@@ -12,7 +13,7 @@
 import { HocuspocusProvider } from '@hocuspocus/provider'
 import { collabUrl } from './editor/collab-url'
 
-export type ControlEvent = 'changed' | 'agents' | 'inbox' | 'memories' | 'sync'
+export type ControlEvent = 'changed' | 'agents' | 'inbox' | 'memories' | 'boards' | 'sync'
 
 const listeners = new Set<(ev: ControlEvent) => void>()
 /** 旁听者：不让连接因它而建立 / 保持（见 listenControl） */
@@ -32,7 +33,8 @@ export function subscribeControl(cb: (ev: ControlEvent) => void): () => void {
         for (const l of previewListeners) l(payload.slice('previews:'.length))
         return
       }
-      emit(payload === 'agents' ? 'agents' : payload === 'inbox' ? 'inbox' : payload === 'memories' ? 'memories' : 'changed')
+      const known: ControlEvent[] = ['agents', 'inbox', 'memories', 'boards']
+      emit(known.find((ev) => ev === payload) ?? 'changed')
     })
     p.on('synced', () => {
       emit('sync')

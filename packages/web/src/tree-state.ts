@@ -25,9 +25,12 @@ function write(key: string, ids: Set<string>): void {
   }
 }
 
-/** 一个可跨刷新保持的 id 集合，返回 [集合, 翻转单个 id]。key 决定记忆归属
- *  （页面树按空间 id 分，目录树共用一条，目录 id 本身全局唯一）。 */
-export function usePersistentSet(key: string): [Set<string>, (id: string) => void] {
+/** 一个可跨刷新保持的 id 集合，返回 [集合, 翻转单个 id, 批量加入]。key 决定记忆归属
+ *  （页面树按空间 id 分，目录树共用一条，目录 id 本身全局唯一）。
+ *  批量加入用于「新东西落进折叠的目录 / 定位当前页」时展开祖先，全部已在集合里就不产生新 Set */
+export function usePersistentSet(
+  key: string,
+): [Set<string>, (id: string) => void, (ids: readonly string[]) => void] {
   const [ids, setIds] = useState<Set<string>>(() => read(key))
 
   // 落盘放 effect 而不是 setState updater，updater 必须是纯函数
@@ -44,5 +47,14 @@ export function usePersistentSet(key: string): [Set<string>, (id: string) => voi
     })
   }, [])
 
-  return [ids, toggle]
+  const add = useCallback((more: readonly string[]) => {
+    setIds((prev) => {
+      if (more.every((id) => prev.has(id))) return prev
+      const next = new Set(prev)
+      for (const id of more) next.add(id)
+      return next
+    })
+  }, [])
+
+  return [ids, toggle, add]
 }

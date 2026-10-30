@@ -186,13 +186,18 @@ export default function Sidebar({
     }
   }
 
+  // 页面树 / 目录树的回收都走这里：先摘本地列表再离开，Home 才不会挑中刚删的页
+  function pagesTrashed(ids: string[]) {
+    onPagesRemoved(ids)
+    if (ids.some((id) => location.pathname === `/page/${id}`)) navigate('/')
+  }
+
   // 用户删页 = 移入回收站（可恢复）；只有回收站里的「永久删除」才走物理删（api.deletePage）
   async function remove(node: PageNode) {
     if (!window.confirm(COPY.tree.confirmTrash(node.title || COPY.untitled))) return
     try {
       const { trashed } = await api.trashPage(node.id)
-      onPagesRemoved(trashed)
-      if (trashed.some((id) => location.pathname === `/page/${id}`)) navigate('/')
+      pagesTrashed(trashed)
       onChanged()
     } catch (err) {
       console.error(err)
@@ -277,6 +282,8 @@ export default function Sidebar({
         onCreatePage={(parentId) => void createChild(parentId)}
         onCreateCollection={() => void createCollection()}
         onRemovePage={(node) => void remove(node)}
+        onPagesTrashed={pagesTrashed}
+        onPageCreated={onPageCreated}
         onPageChanged={onChanged}
       />
       {/* Notion 式工作区切换器，菜单向上弹 */}

@@ -25,7 +25,7 @@ import { publicRoutes } from './routes/public.js'
 import { filesRoutes } from './routes/files.js'
 import { searchRoutes } from './routes/search.js'
 import { adminRoutes, authRoutes, userFromRequest, type AuthEnv } from './auth.js'
-import { createDocWriter, createHocuspocus, drainDocWrites, loadDocFromDb, notifyAgentsChanged, notifyInboxChanged, notifyMemoriesChanged, notifyPagesChanged, notifyPreviewsChanged } from './collab.js'
+import { createDocWriter, createHocuspocus, drainDocWrites, loadDocFromDb, notifyAgentsChanged, notifyInboxChanged, notifyBoardsChanged, notifyMemoriesChanged, notifyPagesChanged, notifyPreviewsChanged } from './collab.js'
 import { loadAgents } from './agents/registry.js'
 import { AgentManager } from './agents/manager.js'
 import { ConnectorHub } from './agents/hub.js'
@@ -215,6 +215,7 @@ export function startServer(
       () => notifyPagesChanged(hocuspocus),
       // 手动快照取当前内容：内存有活文档（协同中）直接编码，避免重放增量
       (name) => hocuspocus.documents.get(name),
+      () => notifyBoardsChanged(hocuspocus),
     ),
   )
   // 块文本端点（提及快照）：同样活文档优先，补 id 插件刚写入的块 id 立即可读
@@ -233,7 +234,14 @@ export function startServer(
     ),
   )
   // 目录树路由：目录 / 条目变更不广播，但删目录（树）会把页面移入回收站，页面树要跟着变，所以注入同一份页面广播回调
-  app.route('/', boardsRoutes(pool, () => notifyPagesChanged(hocuspocus)))
+  app.route(
+    '/',
+    boardsRoutes(
+      pool,
+      () => notifyPagesChanged(hocuspocus),
+      () => notifyBoardsChanged(hocuspocus),
+    ),
+  )
   // 集合：每条路由各自挂 requireAuth，不挂 '*' 中间件。
   // 改值经 DocWriter 写进行文档（记给用户）后，等投影器把副本落库再响应；只有改了页面列表的操作才广播 changed
   app.route(

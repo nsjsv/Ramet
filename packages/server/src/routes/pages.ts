@@ -235,8 +235,14 @@ export async function parentOk(
 // notify:树变更广播回调(注入 notifyPagesChanged,测试可不传保持原签名)。
 // 只在写库成功的端点调,GET 不通知 —— 广播给 control:global 让各端免刷新跟树。
 // getLiveDoc:内存活文档查找(注入 hocuspocus.documents.get,测试可不传走 DB 重建分支),
-// 手动快照取当前内容时优先用活文档,避免重放增量
-export function pagesRoutes(pool: Pool, notify?: () => void, getLiveDoc?: (docName: string) => Y.Doc | undefined) {
+// 手动快照取当前内容时优先用活文档,避免重放增量。
+// notifyBoards:恢复的页面可能挂在目录里,而目录树列表不含回收站里的页,得让各端重拉一次
+export function pagesRoutes(
+  pool: Pool,
+  notify?: () => void,
+  getLiveDoc?: (docName: string) => Y.Doc | undefined,
+  notifyBoards?: () => void,
+) {
   // 该子应用只有 /api/pages 一族路由,鉴权统一挂全量,未登录一律 401
   const app = new Hono<AuthEnv>()
   app.use('*', requireAuth(pool))
@@ -478,7 +484,9 @@ export function pagesRoutes(pool: Pool, notify?: () => void, getLiveDoc?: (docNa
     const role = entry ? await pageRole(pool, user, entry) : null
     if (!entry || role === null) return c.json({ error: 'page not found' }, 404)
     if (!writable(role)) return c.json({ error: 'forbidden' }, 403)
-    return c.json({ restored: await restorePageSubtree(pool, id, notify) })
+    const restored = await restorePageSubtree(pool, id, notify)
+    notifyBoards?.()
+    return c.json({ restored })
   })
 
   // 清空回收站:一次清掉某个空间回收站里的全部条目(空间是回收站的归属维度)。

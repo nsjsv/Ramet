@@ -7,10 +7,12 @@
  * 两者都没有就显示空态和两个入口（新建页面 / 新建目录树）。内容区分派：页面树走 <PageTreeBoard>
  * （PageTree.tsx），目录树走 <FolderTreeBoard>（FolderTree.tsx）。
  * 空间动作（改名/删除空间）只在底部空间切换器，不在这里。 */
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import { pagesInPageTree } from '@ramet/shared/page-tree'
-import { api, type Board, type BoardsPayload, type Page } from './api'
+import { api, type Board, type BoardItem, type BoardsPayload, type Page } from './api'
 import { useCachedLoad } from './cached-load'
+import { subscribeControl } from './control'
 import { COPY } from './copy'
 import { uploadFile } from './editor/media'
 import { PageTreeBoard, type PageNode } from './PageTree'
@@ -36,6 +38,8 @@ export default function Boards({
   onCreatePage,
   onCreateCollection,
   onRemovePage,
+  onPagesTrashed,
+  onPageCreated,
   onPageChanged,
 }: {
   /** listPages 全量（页面树行在此组装，按空间过滤）；null = 加载中 */
@@ -52,6 +56,11 @@ export default function Boards({
   onCreateCollection: () => void
   /** 页面树行删除（移入回收站） */
   onRemovePage: (node: PageNode) => void
+  /** 目录树操作把页面移入回收站后（删条目 / 删目录 / 删目录树）：带服务端返回的权威 id 集，
+   *  由 Shell 摘本地列表，正开着其中一页时离开 */
+  onPagesTrashed: (ids: string[]) => void
+  /** 目录树「创建文档」建好的页先进本地列表：条目只画活列表里有的页，晚一步就会闪没 */
+  onPageCreated: (page: Page) => void
   /** 树结构变化（拖拽/改名）后通知 Shell 刷新 */
   onPageChanged: () => void
 }) {
@@ -60,7 +69,7 @@ export default function Boards({
   /** 本次挂载里用户亲手开合过的 section：只有它们展开时播入场 */
   const [toggled, setToggled] = useState<Set<string>>(new Set())
   /** 目录行展开态（key=folderId；与 section 折叠 Set 分开存）；跨刷新保持 */
-  const [expandedFolders, toggleFolder] = usePersistentSet('ramet.tree.folders')
+  const [expandedFolders, toggleFolder, expandFolders] = usePersistentSet('ramet.tree.folders')
   const [renaming, setRenaming] = useState<RenameTarget>(null)
   const [menu, setMenu] = useState<MenuTarget>(null)
   /** 当前打开菜单的锚点坐标（打开时随触发按钮一并记录） */
@@ -79,26 +88,49 @@ export default function Boards({
     if (loaded.error) console.error(loaded.error)
   }, [loaded.error])
 
-  // 目录条目里的页面标题来自 boards payload（静态快照）；页面改名走编辑器实时写回 → pages 变化，
-  // 以「挂载条目的页面 id + 最新标题」为键重拉列表，条目名才不陈旧（键值不变则不触发）。
-  // 页已不在活列表里必须换成别的标记：新文档标题是空串，消失后回落也是空串，键不变就永远不重拉，
-  // 目录树会留着已回收页面的挂载，再点删除就是对已回收页再 trash，得到 404 page not found
-  const itemTitleKey =
-    pages === null
-      ? ''
-      : (data?.items ?? [])
-          .filter((it) => it.kind === 'page')
-          .map((it) => {
-            const page = pages.find((p) => p.id === it.item_id)
-            return page ? `${it.item_id}:${page.title}` : `${it.item_id}:gone`
-          })
-          .join('|')
-  // 挂载那一次由上面的 hook 取，这里只管之后键变了的重拉
-  const seenTitleKey = useRef<string | null>(null)
+  // 别的标签页 / 别的成员改了目录树：只认 'boards'（页面写的 'changed' 很频繁，不连带重拉）；'sync' 补断线期间漏掉的
+  useEffect(
+    () =>
+      subscribeControl((ev) => {
+        if (ev === 'boards' || ev === 'sync') void loaded.reload()
+      }),
+    [loaded.reload],
+  )
+
+  // 页面条目的标题 / 图标以活页面列表为准：payload 里的是拉取那一刻的快照，改名 / 换图标后当次就跟，
+  // 不为此重拉目录树。活列表里没有的页（移入回收站，含别处删的）不画，不然再点删除就是对已回收页
+  // 再 trash（404）；恢复时服务端广播 'boards'，重拉后条目回来
+  const items = useMemo((): BoardItem[] => {
+    const raw = data?.items ?? []
+    if (pages === null) return raw
+    const byId = new Map(pages.map((p) => [p.id, p]))
+    return raw.flatMap((it) => {
+      if (it.kind !== 'page') return [it]
+      const page = byId.get(it.item_id)
+      return page ? [{ ...it, title: page.title, icon: page.icon }] : []
+    })
+  }, [data, pages])
+
+  /** 目录及其全部祖先目录的 id（展开它们，这个目录里的东西才看得见） */
+  function folderChain(folderId: string): string[] {
+    const byId = new Map((data?.folders ?? []).map((f) => [f.id, f]))
+    const chain: string[] = []
+    for (let id: string | null = folderId; id && !chain.includes(id); id = byId.get(id)?.parent_id ?? null) chain.push(id)
+    return chain
+  }
+
+  // 打开的页挂在折叠的目录里（搜索 / 链接跳进来、刷新恢复）：展开到它，高亮行才看得见。
+  // 每个页只定位一次，之后用户自己收起不会被列表重拉又撑开
+  const location = useLocation()
+  const activePageId = location.pathname.match(/^\/page\/([\w-]+)$/)?.[1] ?? null
+  const revealed = useRef<string | null>(null)
   useEffect(() => {
-    if (seenTitleKey.current !== null && seenTitleKey.current !== itemTitleKey) void loaded.reload()
-    seenTitleKey.current = itemTitleKey
-  }, [itemTitleKey, loaded.reload])
+    if (!activePageId || revealed.current === activePageId) return
+    const hit = items.find((it) => it.kind === 'page' && it.item_id === activePageId)
+    if (!hit) return // 列表还没到 / 不在目录树里：等下一次
+    revealed.current = activePageId
+    if (hit.folder_id) expandFolders(folderChain(hit.folder_id))
+  }, [activePageId, items])
 
   function refresh(): void {
     void loaded.reload()
@@ -146,6 +178,8 @@ export default function Boards({
     setCreating(null)
     const name = draft.trim()
     if (!cur || !name || cur.type !== 'folder') return
+    // 输入行在父目录里时是强制展开的，提交后父目录得真展开，不然新目录一出现就被收起来
+    if (cur.parentId) expandFolders(folderChain(cur.parentId))
     run(() => api.createFolder(cur.boardId, cur.parentId, name))
   }
 
@@ -161,6 +195,8 @@ export default function Boards({
     if (!spaceId) return
     api.createPage(null, spaceId, { in_page_tree: false })
       .then((page) => {
+        onPageCreated(page)
+        if (folderId) expandFolders(folderChain(folderId))
         const attach = folderId
           ? api.attachItem(folderId, 'page', page.id)
           : api.attachItemRoot(boardId, 'page', page.id)
@@ -181,7 +217,8 @@ export default function Boards({
     if (!window.confirm(COPY.tree.confirmDeleteTree)) return
     api
       .deleteBoard(board.id)
-      .then(() => {
+      .then(({ trashed }) => {
+        onPagesTrashed(trashed)
         refresh()
         onPageChanged()
       })
@@ -207,7 +244,7 @@ export default function Boards({
   const dirBoard = (data?.boards ?? []).find((b) => b.space_id === selectedSpaceId) ?? null
   // section 折叠 key：页面树无实体 id，用空间 id；目录树用行 id
   const pageKey = `page_tree:${selectedSpaceId ?? ''}`
-  const forest = buildForest(data?.folders ?? [], data?.items ?? [])
+  const forest = buildForest(data?.folders ?? [], items)
   const showPageTree = data !== null && pageTreePages !== null && pageTreePages.length > 0
   const showDirTree = dirBoard !== null && data !== null
 
@@ -383,8 +420,9 @@ export default function Boards({
               roots={forest.roots.get(dirBoard.id) ?? []}
               rootItems={forest.rootItems.get(dirBoard.id) ?? []}
               folders={data?.folders ?? []}
-              items={data?.items ?? []}
+              items={items}
               cb={{
+                readOnly,
                 expanded: expandedFolders,
                 renaming,
                 menu,
@@ -406,7 +444,8 @@ export default function Boards({
                   // 删目录会把子树里挂的页面移入回收站（可恢复），页面树与回收站都要跟着刷
                   api
                     .deleteFolder(id)
-                    .then(() => {
+                    .then(({ trashed }) => {
+                      onPagesTrashed(trashed)
                       refresh()
                       onPageChanged()
                     })
@@ -430,22 +469,17 @@ export default function Boards({
                     run(() => api.detachItem(it.id), COPY.tree.detachFailed)
                     return
                   }
-                  // 活列表里已经没有这页（页面树刚回收过，或回收广播先到）：挂载是过期投影。
-                  // 再 trash 会 404 page not found。重拉后服务端按 live_pages 把条目摘掉
-                  if (pages !== null && !pages.some((p) => p.id === it.item_id)) {
-                    refresh()
-                    onPageChanged()
-                    return
-                  }
                   if (!window.confirm(COPY.tree.confirmTrash(it.title || COPY.untitled))) return
                   api
                     .trashPage(it.item_id)
-                    .then(() => {
+                    .then(({ trashed }) => {
+                      onPagesTrashed(trashed)
                       refresh()
                       onPageChanged()
                     })
                     .catch((err: unknown) => {
                       if (err instanceof Error && err.message === 'page not found') {
+                        onPagesTrashed([it.item_id])
                         refresh()
                         onPageChanged()
                         return
@@ -454,7 +488,6 @@ export default function Boards({
                       window.alert(err instanceof Error && err.message ? err.message : COPY.tree.deleteFailed)
                     })
                 },
-                onNavigate,
                 folders: data?.folders ?? [],
               }}
             />,
@@ -490,6 +523,7 @@ export default function Boards({
             setUploadTarget(null)
             e.target.value = ''
             if (!file) return
+            if (target.folderId) expandFolders(folderChain(target.folderId))
             uploadFile(file)
               .then((meta) =>
                 target.folderId

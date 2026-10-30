@@ -465,8 +465,9 @@ function Shell({ user }: { user: User }) {
   useEffect(
     () =>
       subscribeControl((ev) => {
-        // 'agents'（目录）、'inbox'（收件箱）、'memories'（记忆面板）各有各的订阅方；树与空间只跟页面 / 空间写库和重连补拉
-        if (ev !== 'agents' && ev !== 'inbox' && ev !== 'memories') refresh()
+        // 'agents'（目录）、'inbox'（收件箱）、'memories'（记忆面板）、'boards'（目录树）各有各的订阅方；
+        // 树与空间只跟页面 / 空间写库和重连补拉
+        if (ev === 'changed' || ev === 'sync') refresh()
       }),
     [refresh],
   )
