@@ -27,13 +27,15 @@ jobs:
     if: github.repository == 'nsjsv/Ramet'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Trusted Publishing 要 npm 11.5.1 以上，Node 24 自带
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
+          # 发布用的构建不吃缓存：缓存被污染就会直接进 npm 包
+          package-manager-cache: false
 
       - run: npm ci --no-audit --no-fund
 
