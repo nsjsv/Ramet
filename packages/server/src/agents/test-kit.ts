@@ -17,6 +17,7 @@ import { textOf } from '../updates.js'
 import type { AgentEvent, PermissionEvent } from './types.js'
 import { provisionConnector, truncateAll } from '../test-helpers.js'
 import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { materializeSnapshot } from '../collab.js'
@@ -30,15 +31,32 @@ if (!process.env.DATABASE_URL) {
   throw new Error('需要 DATABASE_URL 指向测试库,例如 postgres://postgres:postgres@localhost:5432/ramet_test')
 }
 
-// startServer 里 loadAgents 读 env,必须在起服前设好。两个 agent 跑同一份假脚本，启动参数给不同的命令名：
-// `claude` 这个 id 让主人校验走真的 posture 表（生产代码不为 fake 开分支）；`fake` 保持目录第一个
-export const FAKE_AGENT = fileURLToPath(new URL('./fake-agent.mjs', import.meta.url))
+// startServer 里 loadAgents 读 env，必须在起服前设好。两个 agent 跑同一份剧本（agents/fake/scenario.mjs），各走一家原生驱动：
+// `fake` = 假 codex（保持目录第一个，是没指定 agent 时的回落）；`claude` = 假 claude，这个 id 让主人校验走真的 posture 表
+// （生产代码不为测试开分支）。会话记录目录各自独占一个临时目录，中心本机与进程内 connector 读的是同一份
+export const FAKE_CODEX = fileURLToPath(new URL('./fake/codex.mjs', import.meta.url))
+export const FAKE_CLAUDE = fileURLToPath(new URL('./fake/claude.mjs', import.meta.url))
 // 中心默认不跑本机 agent（index.ts），测试要用本机假 agent，显式打开
 process.env.RAMET_LOCAL_AGENTS = '1'
-process.env.RAMET_AGENTS = JSON.stringify([
-  { id: 'fake', label: 'Fake', command: process.execPath, args: [FAKE_AGENT, 'fake-cmd'] },
-  { id: 'claude', label: 'Claude', command: process.execPath, args: [FAKE_AGENT, 'claude-cmd'] },
-])
+// 驱动自己存的会话记录（搬会话的副本等）也放临时目录，不落到真的 ~/.ramet
+process.env.RAMET_SESSIONS_DIR ??= mkdtempSync(join(tmpdir(), 'ramet-test-sessions-'))
+// 要换一套 agent 的测试文件先 import 一个设 RAMET_TEST_AGENTS 的模块（见 claude-native-env.ts）。这里读完就删：
+// 同一个 worker 里后面的测试文件不能沿用
+const customAgents = process.env.RAMET_TEST_AGENTS
+delete process.env.RAMET_TEST_AGENTS
+process.env.RAMET_AGENTS = customAgents ?? JSON.stringify(defaultTestAgents())
+
+/** 测试缺省的两个本机 agent；家目录每次新建（各测试文件独占）。用各 CLI 自己认的变量（CODEX_HOME / CLAUDE_CONFIG_DIR），
+ *  搬会话的端口与假 CLI 看的是同一个位置。进程内 connector 读同一份配置，所以几台 connector 共用这两个家目录 */
+function defaultTestAgents(): unknown[] {
+  return [
+    { id: 'fake', label: 'Fake', driver: 'codex', command: FAKE_CODEX, env: { CODEX_HOME: mkdtempSync(join(tmpdir(), 'ramet-test-codex-')) } },
+    {
+      id: 'claude', label: 'Claude', driver: 'claude', command: FAKE_CLAUDE,
+      env: { CLAUDE_CONFIG_DIR: mkdtempSync(join(tmpdir(), 'ramet-test-claude-')), FAKE_COMMAND: 'claude-cmd' },
+    },
+  ]
+}
 
 export const pool = getPool()
 await initDb(pool)
@@ -237,8 +255,11 @@ export async function continuePage(pageId: string, cookie: string, body: Record<
   return res.status
 }
 
-export async function agentSession(pageId: string): Promise<Record<string, { sessionId: string; cwd: string; lastSyncedHash: string | null }> | null> {
-  const { rows } = await pool.query<{ agent_session: { sessions?: Record<string, { sessionId: string; cwd: string; lastSyncedHash: string | null }> } | null }>(
+/** 页面上各 agent 的会话记录（SavedSession）：seen = 会话看到的最后一块；lastSyncedHash 只有老记录有 */
+export type SessionRow = { sessionId: string; cwd: string; seen?: string | null; lastSyncedHash?: string | null; userId?: string; tools?: string }
+
+export async function agentSession(pageId: string): Promise<Record<string, SessionRow> | null> {
+  const { rows } = await pool.query<{ agent_session: { sessions?: Record<string, SessionRow> } | null }>(
     'SELECT agent_session FROM pages WHERE id = $1', [pageId],
   )
   return rows[0]?.agent_session?.sessions ?? null

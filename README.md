@@ -88,14 +88,14 @@ Page tree · Block editor · Real-time collaboration · Permanent version histor
 
 ## Deploy
 
-You need **Docker**, plus **Node.js 22+** to build the frontend.
+You only need **Docker**. The image bundles the frontend and the server; Postgres runs next to it.
 
 ```bash
-git clone https://github.com/nsjsv/Ramet.git ramet && cd ramet
-cp .env.example .env                # edit as needed (see Configuration); at least change POSTGRES_PASSWORD
-npm ci
-npm run build -w packages/web       # build the frontend
-docker compose -f docker-compose.prod.yml up -d --build
+mkdir ramet && cd ramet
+curl -fsSLO https://raw.githubusercontent.com/nsjsv/Ramet/main/docker-compose.prod.yml
+curl -fsSL https://raw.githubusercontent.com/nsjsv/Ramet/main/.env.example -o .env
+# edit .env as needed (see Configuration); at least change POSTGRES_PASSWORD
+docker compose -f docker-compose.prod.yml up -d
 ```
 
 Then:
@@ -103,18 +103,18 @@ Then:
 1. Open `http://<server>:8080`. **The first visit shows a setup page where you create the admin account.** Do this right after deploying.
 2. The admin creates other accounts from the admin panel (there is no self-registration), then invites them into spaces.
 
+One port serves the pages, the API and the WebSockets. To put it on a domain with HTTPS, point your reverse proxy (nginx, Caddy, ...) at that port for the whole site; it must pass the `Upgrade` header through on `/collab`, `/term` and `/connector`, and set `X-Forwarded-Proto`.
+
+To build the image yourself instead, clone the repository and run `docker compose -f docker-compose.prod.yml up -d --build` in it.
+
 ### Upgrade
 
-Pull, rebuild the frontend, restart:
-
 ```bash
-git pull && npm ci
-npm run build -w packages/web
-docker compose -f docker-compose.prod.yml up -d --build      # cached unless dependencies changed
-docker compose -f docker-compose.prod.yml restart server
+docker compose -f docker-compose.prod.yml pull
+docker compose -f docker-compose.prod.yml up -d --remove-orphans
 ```
 
-The database schema is updated automatically on startup; there are no manual migrations.
+The database schema is updated automatically on startup; there are no manual migrations. `--remove-orphans` stops the separate nginx container that older versions used.
 
 ### Backup
 

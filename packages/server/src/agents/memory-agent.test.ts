@@ -2,11 +2,12 @@
  * 一、propose_memory：agent 只能「提议」。中心在当前页弹一张「记住这条？」审批（Ramet 自己的审批，进收件箱），
  *    点「记住」才写库（记在点的人名下、来源是当前页）；点「不用」/ 这一轮被停止 / 调用方断开都不写；
  *    写不进去（空 / 超长 / 空间满）在打扰用户之前就回告 agent。
- * 二、注入：每轮开跑把这个空间的全部记忆带上（全文重放时在文档前面）。
- * 三、hash：会话复用的基线 hash 把记忆算进去，记忆没变是原生续聊（load + 只发新消息），记忆变了新建会话全文重放；
- *    没有记忆时 hash 与不带记忆的算法逐字节一致（老会话不因此重放）。起止同口径（收尾 hash 用本轮开头那份记忆）。
+ * 二、注入：新建会话的全文重放把这个空间的全部记忆带在文档前面；接着用已有会话时只发新内容，不重复带记忆。
+ * 三、记忆变化不让会话作废：加 / 删记忆后下一轮仍是同一个会话、只发新消息；下一次新建会话（换工作区等）才带上新记忆。
  * agent 拿到什么，用 fake agent 的「回显提示词」看。 */
-import { createHash } from 'node:crypto'
+import { mkdtemp } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { expect, test } from 'vitest'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
@@ -14,7 +15,6 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import type { HocuspocusProvider } from '@hocuspocus/provider'
 import { mintPageToken } from '../page-read.js'
 import { addMemory, memoryBlock } from '../memories.js'
-import { promptHash } from './prompt-env.js'
 import type { InboxItem } from '../inbox.js'
 import {
   SSECollector,
@@ -23,7 +23,6 @@ import {
   base,
   connectDoc,
   continuePage,
-  docText,
   joinPageSpace,
   insertUser,
   login,
@@ -40,7 +39,6 @@ import {
 } from './test-kit.js'
 
 const RAMET_MCP = fileURLToPath(new URL('../mcp/ramet.mjs', import.meta.url))
-const sha = (text: string): string => createHash('sha256').update(text).digest('hex')
 
 type World = {
   pageId: string
@@ -249,10 +247,16 @@ async function echo(sse: SSECollector, p: HocuspocusProvider, w: World, n: numbe
   return replyBlocks(p)[n - 1]!.text
 }
 
-const savedHash = async (pageId: string): Promise<string | null | undefined> => (await agentSession(pageId))?.fake?.lastSyncedHash
-const savedSession = async (pageId: string): Promise<string | undefined> => (await agentSession(pageId))?.fake?.sessionId
+const saved = async (pageId: string) => (await agentSession(pageId))?.fake
+const savedSession = async (pageId: string): Promise<string | undefined> => (await saved(pageId))?.sessionId
 
-test('没有记忆：提示词里没有这一段，收尾 hash 就是对文档视图的 sha256（与引入记忆之前逐字节一致），下一轮照常原生续聊', async () => {
+/** 换工作区：结构性原因，下一轮新建会话全文重放 */
+async function moveWorkspace(w: World): Promise<void> {
+  const res = await postJson(`/api/pages/${w.pageId}/agent-cwd`, w.alice, { agent: 'fake', cwd: await mkdtemp(join(tmpdir(), 'ramet-mem-')) })
+  expect(res.status).toBe(200)
+}
+
+test('没有记忆：提示词里没有这一段，下一轮照常原生续聊（会话记录记着看到哪一块）', async () => {
   const w = await world()
   const sse = new SSECollector()
   await sse.start(w.pageId, w.alice)
@@ -261,7 +265,7 @@ test('没有记忆：提示词里没有这一段，收尾 hash 就是对文档�
   const first = await echo(sse, p, w, 1, '第一问')
   expect(first).not.toContain('公共记忆')
   const session = await savedSession(w.pageId)
-  await waitFor(async () => (await savedHash(w.pageId)) === sha(docText(p)))
+  expect((await saved(w.pageId))?.seen).toBe(replyBlocks(p)[0]!.id)
 
   const second = await echo(sse, p, w, 2, '第二问')
   expect(second).not.toContain('公共记忆')
@@ -271,7 +275,7 @@ test('没有记忆：提示词里没有这一段，收尾 hash 就是对文档�
   p.destroy()
 })
 
-test('有记忆：全文重放时全部记忆在文档前面；hash 把记忆算进去；没变就原生续聊（不再重复发）；加一条 / 删光后下一轮全文重放', async () => {
+test('有记忆：新建会话时全部记忆在文档前面；接着用会话不重复发；加一条 / 删光都不重置会话，新建会话时才按新的带', async () => {
   const w = await world()
   await addMemory(pool, w.spaceId, '部署只用 scripts/deploy.sh', w.id.alice, null)
   await addMemory(pool, w.spaceId, '注释与提交信息用中文\n界面文案进 COPY', w.id.bob, null)
@@ -285,37 +289,38 @@ test('有记忆：全文重放时全部记忆在文档前面；hash 把记忆算
   expect(first.startsWith(block1)).toBe(true)
   expect(first.indexOf('公共记忆')).toBeLessThan(first.indexOf('>> 回显提示词 第一问'))
   const session1 = await savedSession(w.pageId)
-  await waitFor(async () => (await savedHash(w.pageId)) === promptHash(block1, docText(p)))
-  expect(await savedHash(w.pageId)).not.toBe(sha(docText(p))) // 记忆算进了 hash
 
-  // 第二轮：记忆没变 → 原生续聊，只发新消息（记忆已在会话里，不再重复）
+  // 第二轮：原生续聊，只发新消息（记忆已在会话里，不再重复）
   const second = await echo(sse, p, w, 2, '第二问')
-  expect(second).not.toContain('公共记忆')
   expect(second).toBe('回显提示词 第二问')
   expect(await savedSession(w.pageId)).toBe(session1)
-  await waitFor(async () => (await savedHash(w.pageId)) === promptHash(block1, docText(p)))
 
-  // 第三轮：加了一条 → hash 不等 → 新建会话全文重放，带上新记忆
+  // 第三轮：加了一条记忆 → 会话不作废，仍只发新消息（同说明文件：会话开始时读一次）
   await addMemory(pool, w.spaceId, '测试库叫 ramet_test', w.id.alice, null)
   const block2 = memoryBlock([{ text: '部署只用 scripts/deploy.sh' }, { text: '注释与提交信息用中文\n界面文案进 COPY' }, { text: '测试库叫 ramet_test' }])
   const third = await echo(sse, p, w, 3, '第三问')
-  expect(third.startsWith(block2)).toBe(true)
-  expect(third).toContain('测试库叫 ramet_test')
-  const session3 = await savedSession(w.pageId)
-  expect(session3).not.toBe(session1)
-  await waitFor(async () => (await savedHash(w.pageId)) === promptHash(block2, docText(p)))
+  expect(third).toBe('回显提示词 第三问')
+  expect(await savedSession(w.pageId)).toBe(session1)
 
-  // 第四轮：记忆没变 → 又回到原生续聊（起止 hash 同口径，收尾那份记忆就是开头那份）
+  // 第四轮：换工作区 → 新建会话全文重放，这时才带上新记忆
+  await moveWorkspace(w)
   const fourth = await echo(sse, p, w, 4, '第四问')
-  expect(fourth).toBe('回显提示词 第四问')
-  expect(await savedSession(w.pageId)).toBe(session3)
+  expect(fourth.startsWith(block2)).toBe(true)
+  const session4 = await savedSession(w.pageId)
+  expect(session4).not.toBe(session1)
 
-  // 第五轮：删光 → 新建会话全文重放，不再带记忆，hash 回到没有记忆时的算法
+  // 第五轮：删光 → 会话照旧，只发新消息
   await pool.query('DELETE FROM space_memories WHERE space_id = $1', [w.spaceId])
   const fifth = await echo(sse, p, w, 5, '第五问')
-  expect(fifth.startsWith('这个空间的公共记忆')).toBe(false)
-  expect(await savedSession(w.pageId)).not.toBe(session3)
-  await waitFor(async () => (await savedHash(w.pageId)) === sha(docText(p)))
+  expect(fifth).toBe('回显提示词 第五问')
+  expect(await savedSession(w.pageId)).toBe(session4)
+
+  // 第六轮：再换工作区新建会话，不再带记忆
+  await moveWorkspace(w)
+  const sixth = await echo(sse, p, w, 6, '第六问')
+  expect(sixth.startsWith('这个空间的公共记忆')).toBe(false) // 正文里旧回复回显过记忆，只看开头
+  expect(sixth).toContain('>> 回显提示词 第六问')
+  expect(await savedSession(w.pageId)).not.toBe(session4)
   sse.stop()
   p.destroy()
 })

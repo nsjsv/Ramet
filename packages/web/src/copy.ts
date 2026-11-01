@@ -2,13 +2,14 @@
  * 按界面分组，带参数的串是函数。
  * 已迁入：外壳（侧栏、页面树 / 目录树、空间切换）、页面顶栏与分享、编辑方式、公开页，其余界面的串逐步迁入。
  * 收件箱的串在 inbox/inbox-copy.ts（并进 COPY.inbox；单独成文件是为了本文件不超过 800 行），
- * 公共记忆在 memory/memory-copy.ts，带队在 team/team-copy.ts，工具档位在 editor/tools-copy.ts，集合在 collection/collection-copy.ts（同理）。 */
+ * 公共记忆在 memory/memory-copy.ts，带队在 team/team-copy.ts，工具档位在 editor/tools-copy.ts，集合在 collection/collection-copy.ts，评论在 comments/comments-copy.ts（同理）。 */
 import { CONNECT_COPY, CONNECTORS_COPY } from './connector-copy'
 import { INBOX_COPY } from './inbox/inbox-copy'
 import { MEMORY_COPY } from './memory/memory-copy'
 import { TEAM_COPY } from './team/team-copy'
 import { TOOLS_COPY } from './editor/tools-copy'
 import { COLLECTION_COPY } from './collection/collection-copy'
+import { COMMENTS_COPY } from './comments/comments-copy'
 
 export const COPY = {
   inbox: INBOX_COPY,
@@ -16,6 +17,7 @@ export const COPY = {
   memory: MEMORY_COPY,
   team: TEAM_COPY,
   collection: COLLECTION_COPY,
+  comments: COMMENTS_COPY,
   untitled: '无标题',
   /** 浏览器标签页标题里空标题页的叫法 */
   blankPage: '新页面',
@@ -156,6 +158,9 @@ export const COPY = {
     continueRest: (n: number) => `继续剩下的 ${n} 个`,
     regenerate: '重新生成',
     regenerateFailed: '重新生成失败',
+    /** 停止的最后一块回复上「已停止 · 继续」的按钮；失败块的续跑仍叫「重试」 */
+    resume: '继续',
+    resumeFailed: '没能接着跑',
     truncated: '内容超限，已截断',
     partTruncated: '部分内容超限，已截断',
     /** 步骤展开（run-view.ts）：常规展示 + 「高级」 */
@@ -169,6 +174,8 @@ export const COPY = {
     killedBy: (signal: string) => `被信号 ${signal} 终止`,
     /** 停止 agent 在终端里跑的这条命令（只停命令，不停整轮） */
     stopCommand: '停止这条命令',
+    /** 停止一个子代理（只停它，主回合照常继续） */
+    stopSubagent: '停止子代理',
     stopCommandFailed: '停止命令失败',
     /** 「高级」里可编辑的那行文字的说明 */
     stepText: '这一行的文字（会进下一轮上下文，可以改）',
@@ -176,7 +183,7 @@ export const COPY = {
   ask: {
     fallbackTitle: 'Agent 请求权限',
     failed: '审批失败',
-    /** agent 的提问（ACP elicitation）：提交 / 跳过；「补充文本」输入框的占位；布尔题的两个按钮 */
+    /** agent 的提问：提交 / 跳过；「补充文本」输入框的占位；布尔题的两个按钮 */
     form: { title: 'Agent 有个问题', submit: '提交', skip: '跳过', other: '其他答案（可选）', yes: '是', no: '否', required: (f: string) => `「${f}」必填` },
     answering: (t: string) => `等你回答：${t}`,
   },
@@ -276,6 +283,8 @@ export const COPY = {
     noAgents: '没有可用 agent：本机没装 CLI，或还没连 connector（设置 → 连接器）',
     loadingAgents: 'agent 列表加载中…',
     noAgentsShort: '没有可用 agent',
+    /** 这一页锁定了工具（第一块回复用的），而这个工具现在一台在线的都没有：不回落到别的工具 */
+    lockedEmpty: (tool: string) => `这个对话用的是 ${tool}，现在没有可用的 ${tool}`,
     loadingShort: '加载中…',
     agent: '来源',
     model: '模型',
@@ -299,7 +308,7 @@ export const COPY = {
     /** 离开默认档时输入卡上方的提示行：「<模式名> · <说明>」+ 这句（能用 ⇧Tab 轮换时才带） */
     rotateHint: '⇧Tab 切换',
   },
-  /** agent 的计划清单（ACP plan）：回复里的计划卡。条目文字就是 agent 写的，这里只有框架文案 */
+  /** agent 的计划清单：回复里的计划卡。条目文字就是 agent 写的，这里只有框架文案 */
   plan: {
     title: '计划',
     toggle: '展开或收起计划',

@@ -12,9 +12,10 @@ import { loadDocFromDb, pageAccess, type DocWriter } from '../collab.js'
 import { inheritedAttrs, userMessageElement } from './queue-message.js'
 import { SendQueue } from './send-queue.js'
 import { memoryBlockOfPage } from '../memories.js'
-import { AcpAgent } from './acp.js'
+import { DriverBase } from './drivers/base.js'
+import { createAdapter } from './drivers/create.js'
 import { listDirs, type DirListing } from './dirs.js'
-import { lastUserMessageAttrs, mentionChain, redoTarget } from './doc.js'
+import { lastUserMessageAttrs, lockedTool, mentionChain } from './doc.js'
 import type { Conn, ConnectorHub, InflightPrompt, ResumePlan } from './hub.js'
 import type { AgentAdapter, AgentConfig, AgentEvent, AskContent, ConfigOption, PermissionEvent } from './types.js'
 import { IdleRecycler } from './idle.js'
@@ -28,24 +29,20 @@ import { TeamExec, type TeamRoundHost } from './team.js'
 import { TeamPlanError, TeamPlans } from './team-plan.js'
 import { TeamToolError } from './team.js'
 import { agentPosture, authorize, ForbiddenError } from './posture.js'
+import { agentVersions, unavailableAgents } from './drivers/cli-version.js'
 import { assertCanUse, assertLocalOwner, inConnectorSpace, LOCAL_MACHINE, MachinePass, usableConnectors, type MachineScope } from './machine-access.js'
 import { recordMachineUse } from './machine-grants.js'
 import { RemoteAgent } from './remote-agent.js'
 import { createRunState, type RunState } from './run-state.js'
-import {
-  planRemoteResume,
-  requestCancel,
-  requestCancelByPage,
-  terminalStatus,
-  type RemoteRunHost,
-} from './remote-run.js'
+import { planRemoteResume, requestCancel, requestCancelByPage, terminalStatus, type RemoteRunHost } from './remote-run.js'
+import { SessionSync } from './session-sync.js'
 import {
   AgentOfflineError,
   BadAnswerError,
   BusyError,
-  NoUserMessageError,
   REMOTE_PREFIX,
-  ReplyNotFoundError,
+  fitsLock,
+  ToolLockedError,
   UnknownAgentError,
   UnknownApprovalError,
   parseRemoteId,
@@ -60,9 +57,11 @@ import {
 } from './manager-types.js'
 import { prepareSession, restoreMsgBefore, setSessionConfig } from './session-config.js'
 import { SessionMirror } from './session-mirror.js'
-import { effectiveCwd, loadChoice, loadToolProfile, persistConfigs, persistSession, saveChoice, saveToolProfile, saveWorkspace } from './session-store.js'
+import { effectiveCwd, loadChoice, loadToolProfile, persistConfigs, saveChoice, saveToolProfile, saveWorkspace } from './session-store.js'
 import type { ToolProfile } from './tool-profile.js'
 import { runTurn } from './turn.js'
+import { runResume } from './resume-turn.js'
+import { redoRunTarget, resumeRunTarget } from './reply-target.js'
 
 /** 关停时给 adapter 回应取消的时间（取消也带用量）；过了就不等它，直接收尾 */
 const SHUTDOWN_GRACE_MS = 1500
@@ -72,7 +71,7 @@ const LS_TIMEOUT_MS = 10_000
 /** 适配器池里的原始条目，不对外。外面拿到的只有 view() 签出的操作人视图（AdapterEntry），
  *  原始适配器只在这个文件里被 kill / 取消 / 听事件 */
 type PoolEntry = {
-  shared: AcpAgent | RemoteAgent
+  shared: DriverBase | RemoteAgent
   loaded: Set<string>
   key: string
   pageTokens: Map<string, string>
@@ -88,7 +87,7 @@ function approvalDetail(
   approval: PermissionEvent,
   body: { agentId: string; requestId: string; optionId: string | null; content?: AskContent },
 ): Record<string, unknown> {
-  const { command } = approvalPreview(approval.toolCall)
+  const { command } = approvalPreview(approval.toolCall, approval.view)
   return {
     agentId: body.agentId,
     requestId: body.requestId,
@@ -125,7 +124,7 @@ export class AgentManager {
       if (run?.adapterKey === agentId && run.sessionId === ev.sessionId) run.record?.permission(ev)
     },
   })
-  /** Ramet 自己的审批（知识中枢的删除等）：不经 ACP 会话，由这里持有、广播、应答（own-approvals.ts） */
+  /** Ramet 自己的审批（知识中枢的删除等）：不经 agent 会话，由这里持有、广播、应答（own-approvals.ts） */
   private ownApprovals = new OwnApprovals((pageId, ev) => this.broadcast(pageId, ev))
   /** 各页各 agent 最近一次广播的生效工作区（pageId → agentId → cwd）。cwd 只在 prepare / 改绑时广播，
    *  而 prepare 常赶在 SSE 连上之前（刷新时两者同时发出）：不留一份给新订阅者回放，路径 chip 会回落成
@@ -139,6 +138,8 @@ export class AgentManager {
   readonly plans: TeamPlans
   /** 运行中排队发送（send-queue.ts）：路由经它入队 / 撤回 / 立即发送；一轮结束时 release 调它派发 */
   readonly queue: SendQueue
+  /** 会话记录在中心的副本：收尾后同步、换机器时下发（session-sync.ts）。依赖 pool / hub，在构造函数体里建 */
+  private readonly sessions: SessionSync
   /** 在飞的 run_agent 子运行（不在 runIndex 里）：授权被收回时按「机器 + 人」当场取消 */
   private subRuns = new Set<{ connectorId: string; userId: string; cancel: () => void }>()
   /** 闲置回收（判据与 connector 同一份：busy = 在飞 prompt 或有待批审批）。远端 busy 时不 kill，
@@ -168,6 +169,7 @@ export class AgentManager {
       writeDoc?: DocWriter
     },
   ) {
+    this.sessions = new SessionSync(pool, opts.hub)
     this.queue = new SendQueue(pool, {
       running: (pageId) => this.running(pageId),
       stop: (pageId) => this.stop(pageId),
@@ -175,10 +177,13 @@ export class AgentManager {
         const role = await pageAccess(pool, pageId, user)
         return role !== null && role !== 'viewer'
       },
-      usable: async (user, agent) => {
+      usable: async (pageId, user, agent) => {
         if (!agent) return null
         try {
-          return (await this.resolve(agent, user)) ? null : '这条消息指定的 agent 当前不可用'
+          if (!(await this.resolve(agent, user))) return '这条消息指定的 agent 当前不可用'
+          // 一页一种工具：写进文档之前就拦，别留下一条发不出去的消息
+          const lock = lockedTool(await this.pageFragment(pageId))
+          return fitsLock(lock, agent) ? null : new ToolLockedError(lock).message
         } catch (err) {
           // 机器使用权不够（assertLocalOwner / assertCanUse 抛 ForbiddenError）
           return err instanceof Error ? err.message : String(err)
@@ -360,8 +365,10 @@ export class AgentManager {
   async catalog(user: { id: string; role: string }): Promise<CatalogAgent[]> {
     const out: CatalogAgent[] = []
     if (user.role === 'admin') {
+      const down = await this.localUnavailable()
       for (const a of this.opts.agents) {
-        out.push({ id: a.id, label: a.label, logo: a.logo ?? null, posture: agentPosture(user, { local: a }), machine: false })
+        const unavailable = down.get(a.id)
+        out.push({ id: a.id, label: a.label, logo: a.logo ?? null, posture: agentPosture(user, { local: a }), machine: false, ...(unavailable ? { unavailable } : {}) })
       }
     }
     const { rows } = await this.pool.query<{ space_id: string }>(
@@ -380,11 +387,19 @@ export class AgentManager {
             logo: a.logo ?? null,
             posture: agentPosture(user, { remote: remoteOf(conn, a.id) }),
             machine: machines.has(conn.id),
+            // 对端给的原因：只当文案，限长
+            ...(typeof a.unavailable === 'string' && a.unavailable ? { unavailable: a.unavailable.slice(0, 200) } : {}),
           })
         }
       }
     }
     return out
+  }
+
+  /** 本机 agent 的不可用原因（CLI 版本低于驱动要求）：探测一次（要起进程问版本），之后用缓存 */
+  private unavailableLocal: Promise<Map<string, string>> | null = null
+  private localUnavailable(): Promise<Map<string, string>> {
+    return (this.unavailableLocal ??= agentVersions(this.opts.agents).then((v) => unavailableAgents(this.opts.agents, v)))
   }
 
   /** id → 执行目标，同时是机器使用权的唯一判定点：造出 ResolvedAgent 的只有这里，它带着 assertCanUse 签出的凭据。
@@ -403,7 +418,15 @@ export class AgentManager {
     return { id: agentId, remote: remoteOf(conn, parsed.agentId), pass }
   }
 
-  /** 收件箱的数据源（只读快照）：各页面上待批的审批（ACP 会话的 + Ramet 自己的）。谁看得到由 inbox.ts 判，这里不判 */
+  /** 让执行端彻底放掉一个会话（换机器把中心那份记录写到这台机器之前）：本地缓存的「已加载」标记先清掉，下一轮一定走 load。
+   *  远端的 session-close 是 machine 范围的帧：pass 要是这台机器的 machine 范围凭据（缺省用 agent.pass，只够本机 agent） */
+  async closeSession(agent: ResolvedAgent, sessionId: string, pass: MachinePass = agent.pass): Promise<void> {
+    const entry = this.ensureAdapter({ ...agent, pass })
+    entry.loaded.delete(sessionId)
+    await entry.adapter.closeSession(sessionId)
+  }
+
+  /** 收件箱的数据源（只读快照）：各页面上待批的审批（agent 会话的 + Ramet 自己的）。谁看得到由 inbox.ts 判，这里不判 */
   pendingApprovals(): PendingApproval[] {
     return [
       ...this.mirror.allApprovals().map((a) => ({ ...a, own: false })),
@@ -481,6 +504,7 @@ export class AgentManager {
    *  找不到抛 UnknownApprovalError(404)；agent 所在的机器不在线抛 AgentOfflineError(409)，审批留着可以再答；
    *  选项会把会话送进「跳过全部确认」而用户不是机器主人抛 ForbiddenError(403)。
    *  移除只由执行端的 permission_resolved 驱动，这里不动镜像。
+   *  普通审批：optionId 必须是这条审批的选项之一或 null（取消），否则抛 BadAnswerError 400；
    *  提问（带 form 的审批）：optionId 只能是 accept / decline，accept 的 content 按表单校验（不合抛 BadAnswerError 400）；
    *  送达后把「问题 → 答：…」写进那一步工具调用的 activity（运行条 / 过程页 / 下一轮的过程摘要都显示它） */
   async answerPermission(
@@ -488,7 +512,7 @@ export class AgentManager {
     body: { agentId: string; requestId: string; optionId: string | null; content?: unknown },
     user: { id: string; role: string },
   ): Promise<void> {
-    // Ramet 自己的审批（知识中枢的删除等）：这里持有，不经 ACP 会话，不碰任何人的机器
+    // Ramet 自己的审批（知识中枢的删除等）：这里持有，不经 agent 会话，不碰任何人的机器
     if (this.ownApprovals.answer(pageId, body.agentId, body.requestId, body.optionId, user.id)) return
     const agent = await this.resolve(body.agentId, user)
     const approval = this.mirror.approval(pageId, body.agentId, body.requestId)
@@ -501,6 +525,9 @@ export class AgentManager {
         if (!checked.ok) throw new BadAnswerError(checked.error)
         content = checked.content
       }
+    } else if (body.optionId !== null && !approval.options.some((o) => o.optionId === body.optionId)) {
+      // 驱动把认不出的选项当拒绝（codex 回 decline、omp 回 cancelled），客户端写错的 id 会被静默拒掉
+      throw new BadAnswerError('这条审批没有这个选项')
     }
     const pooled = this.adapters.get(body.agentId)
     if (!agent || !pooled) throw new AgentOfflineError()
@@ -539,14 +566,14 @@ export class AgentManager {
     if (run.sessionId && entry) entry.shared.cancel(run.sessionId)
   }
 
-  /** 停止 agent 在 ACP 终端里跑的一条命令（terminal/kill）：只作用于这一页正在跑的那一轮的会话。
+  /** 停止这一轮里一个可停的东西（步骤 view.handle：子代理）：只作用于这一页正在跑的那一轮的会话。
    *  和 stop 一样不要机器使用凭据（只会让机器停下来），谁能停由路由的页面写权限决定。
-   *  false = 这一页没有在跑的一轮 / 终端不属于这个会话 / 已经退出（远端：帧没送出去） */
-  killCommand(pageId: string, terminalId: string): boolean {
+   *  false = 这一页没有在跑的一轮 / 句柄不属于这个会话 / 已经结束（远端：帧没送出去） */
+  killCommand(pageId: string, handle: string): boolean {
     const run = this.pages.get(pageId)?.run
     const entry = run?.adapterKey ? this.adapters.get(run.adapterKey) : undefined
     if (!run || run.closed || !run.sessionId || !entry) return false
-    return entry.shared.killCommand(run.sessionId, terminalId)
+    return entry.shared.killCommand(run.sessionId, handle)
   }
 
   /** 文档的正文 fragment：活文档优先，否则从库重建 */
@@ -565,7 +592,10 @@ export class AgentManager {
     body: { agent?: string },
     user: { id: string; role: string },
   ): Promise<RunTarget> {
-    const msg = lastUserMessageAttrs(await this.pageFragment(pageId))
+    const fragment = await this.pageFragment(pageId)
+    const msg = lastUserMessageAttrs(fragment)
+    // 一页一种工具（第一块回复定的）：回落只在这个工具里挑，选到别的工具（消息 chip / 请求体）拒绝；显式 @ 点名不受限
+    const lock = lockedTool(fragment)
     const catalog = await this.catalog(user)
     // @ 点名：最后一条消息 @ 了几家、回复还没跑完，这一轮只跑「下一家」（按 @ 的顺序）。优先于消息 chip 与请求体，
     // 点名了谁就是谁；那一家不可用抛 UnknownAgentError，不悄悄换别家
@@ -576,9 +606,10 @@ export class AgentManager {
     // 回落规则同一口径（pickAgent）。前端也会收敛掉失效 attrs（message-chips 的 repairStaleAgent）。
     const specified = msg.agent !== ''
     const fromMsg = !mentioned && specified ? await this.resolve(msg.agent, user) : null
-    const target = mentioned ?? (fromMsg ? msg.agent : body.agent || catalog[0]?.id)
+    const target = mentioned ?? (fromMsg ? msg.agent : body.agent || catalog.find((a) => !a.unavailable && fitsLock(lock, a.id))?.id)
     const agent = fromMsg ?? (target ? await this.resolve(target, user) : null)
-    if (!agent) throw new UnknownAgentError()
+    if (!agent) throw lock && !target ? new ToolLockedError(lock, true) : new UnknownAgentError()
+    if (!mentioned && !fitsLock(lock, agent.id)) throw new ToolLockedError(lock)
     // 消息 attrs 里的 cwd / opts 属于消息 chip 选的那个 agent：这一轮换了别家（点名）就不沿用
     // （目录在另一台机器上可能不存在，config id 对别的 agent 无意义）
     const own = !mentioned || msg.agent === agent.id
@@ -607,20 +638,15 @@ export class AgentManager {
     }
   }
 
-  /** 重新生成 / 重试的执行目标（POST /replies/:replyId/regenerate）：agent 取回复块自己的 `agent` 属性，
-   *  cwd / opts 取它往前最近一条用户消息的（优先级同 resolveRun：消息 attrs > 页面级）。
-   *  找不到回复抛 ReplyNotFoundError(404)；之前没有用户消息抛 NoUserMessageError(400)；
-   *  那个 agent 已不可用抛 UnknownAgentError(400) */
+  /** 重新生成 / 不是最后一块的失败回复的重试（POST /replies/:replyId/regenerate）：agent 取回复块自己的，
+   *  cwd / opts 取它往前最近一条用户消息的（实现与错误见 reply-target.ts） */
   async resolveRedo(pageId: string, replyId: string, user: { id: string; role: string }): Promise<RunTarget> {
-    const target = redoTarget(await this.pageFragment(pageId), replyId)
-    if (!target.ok) throw target.reason === 'no-reply' ? new ReplyNotFoundError() : new NoUserMessageError()
-    const agent = await this.resolve(target.agent, user)
-    if (!agent) throw new UnknownAgentError()
-    const { message } = target
-    // opts 里是另一个 agent 的 config id 时无意义：消息指定了别的 agent 就不下发
-    const opts = message.agent === '' || message.agent === agent.id ? message.opts : {}
-    const cwd = message.cwd || (await effectiveCwd(this.pool, pageId, agent))
-    return { agent, cwd, opts, redo: replyId }
+    return redoRunTarget(this.host(), await this.pageFragment(pageId), pageId, replyId, user)
+  }
+
+  /** 续跑的执行目标（POST /replies/:replyId/resume）：只收最后一块、失败或停止的回复，否则 NotResumableError(409) */
+  async resolveResume(pageId: string, replyId: string, user: { id: string; role: string }): Promise<RunTarget> {
+    return resumeRunTarget(this.host(), await this.pageFragment(pageId), pageId, replyId, user)
   }
 
   /** 发起生成;立即返回,进度走 SSE。并发调用抛 BusyError(路由转 409) */
@@ -634,7 +660,7 @@ export class AgentManager {
     const page = this.pages.get(pageId) ?? { subscribers: new Set(), run: null }
     this.pages.set(pageId, page)
     if (page.run) throw new BusyError()
-    const { agent, cwd, opts, redo } = target
+    const { agent, cwd, opts, redo, resume } = target
     // 凭据属于发起这一轮的人：resolve 为 user 签的，不能拿别人的 ResolvedAgent 替他跑
     if (agent.pass.userId !== user.id) throw new ForbiddenError('机器使用凭据与发起人不一致')
     const run = createRunState({
@@ -650,10 +676,10 @@ export class AgentManager {
     this.broadcast(pageId, { type: 'status', state: 'running' })
     try {
       // 非机器主人的使用要留痕（发起 / 继续 / 重新生成 / @ 链的每一家都走这里）；写不进审计就不开跑
-      await recordMachineUse(this.pool, agent, user.id, 'run', pageId, { agent: agent.id, cwd, ...(redo ? { redo } : {}), ...(target.team ? { team: target.team.planId } : {}) })
+      await recordMachineUse(this.pool, agent, user.id, 'run', pageId, { agent: agent.id, cwd, ...(redo ? { redo } : {}), ...(resume ? { resume } : {}), ...(target.team ? { team: target.team.planId } : {}) })
       // 带队的执行轮：draft → running 的原子翻转（并发的第二次开工 / 刚被取消 → 409，走下面的 catch）
       if (run.team?.kind === 'exec') await this.plans.begin(pageId, run.team, user)
-      await runTurn(this.host(), pageId, agent, cwd, user, cookieHeader, run, redo)
+      await (resume ? runResume(this.host(), pageId, agent, cwd, user, cookieHeader, run, resume) : runTurn(this.host(), pageId, agent, cwd, user, cookieHeader, run, redo))
     } catch (err) {
       // 失败原因必须到用户面前：status:error 只带「生成失败」这句通用文案，真正的原因
       // （connector 掉线 / agent 侧报错 / 请求超时）只有这里知道，走 error 通道，前端 RunErrorBar 读它。
@@ -768,8 +794,8 @@ export class AgentManager {
       if (parseRemoteId(key)?.connectorId !== connectorId) continue
       const entry = this.adapters.get(key)
       if (!entry) continue
-      // 断线时分不清进程还是不是同一个。loaded 留着的话，新进程下一轮会跳过 session/load，
-      // agent 回 Unsupported ACP session。在飞的这一轮已经 load 过，清缓存不影响它。
+      // 断线时分不清进程还是不是同一个。loaded 留着的话，新进程下一轮会跳过 load，
+      // agent 报找不到这个会话。在飞的这一轮已经 load 过，清缓存不影响它。
       entry.loaded.clear()
       if (this.adapterHasRun(key) || entry.shared.busy) continue
       this.dropAdapter(key)
@@ -805,15 +831,15 @@ export class AgentManager {
   private ensureAdapter(agent: ResolvedAgent): AdapterEntry {
     const key = agent.id
     const existing = this.adapters.get(key)
-    // 还没起过进程的 AcpAgent（刚被并行调用建出来、第一次 newSession 还没轮到）不是僵尸，复用别杀（见 AcpAgent.pristine）
-    if (existing && (existing.shared.alive || (existing.shared instanceof AcpAgent && existing.shared.pristine))) {
+    // 还没起过 / 正在起的本机适配器（刚被并行调用建出来、握手还没完）不是僵尸，复用别杀（见 DriverBase.reusable）
+    if (existing && (existing.shared.alive || (existing.shared instanceof DriverBase && existing.shared.reusable))) {
       this.idle.arm(key)
       return this.view(existing, agent.pass)
     }
     if (existing) existing.shared.kill()
     // 远端：同一 connector 的同一 agent 共用 hub 持有的一个 RemoteAgent（同一 WSS 连接，会话级副本在里面）
     const shared = agent.local
-      ? new AcpAgent(agent.local)
+      ? createAdapter(agent.local)
       : this.opts.hub.remote(agent.remote!.connectorId, agent.remote!.agentId)
     const created: PoolEntry = { shared, loaded: new Set(), key, pageTokens: new Map() }
     this.adapters.set(key, created)
@@ -860,6 +886,11 @@ export class AgentManager {
   async setToolProfile(pageId: string, profile: ToolProfile): Promise<void> {
     await saveToolProfile(this.pool, pageId, profile)
     this.broadcast(pageId, { type: 'tool_profile', profile })
+  }
+
+  /** 本页锁定的工具（SSE 首帧由路由读它发给新订阅者）；还没有回复 = '' */
+  async toolLock(pageId: string): Promise<string> {
+    return lockedTool(await this.pageFragment(pageId))
   }
 
   /** 本页记住的来源（SSE 首帧由路由读它发给新订阅者）；没有 = '' */
@@ -916,6 +947,7 @@ export class AgentManager {
   private release(pageId: string, run: RunState, chained = false): void {
     this.vacate(pageId, run)
     this.idle.arm(run.adapterKey)
+    this.sessions.afterRun(run) // 会话记录同步到中心（换机器时从中心下发）：不占页面槽，排在这一页的同步链上
     run.finished.resolve()
     // 远端关停不是结局：不广播「服务重启，本轮已中止」，占位块还是 o:run。
     if (run.hold && !run.ended) return
@@ -953,6 +985,7 @@ export class AgentManager {
       wsPort: this.opts.wsPort,
       botSecret: this.opts.botSecret,
       notifyPagesChanged: this.opts.notifyPagesChanged,
+      writeDoc: this.opts.writeDoc,
       getLiveDoc: (docName) => this.opts.getLiveDoc(docName),
       broadcast: (pageId, ev) => this.broadcast(pageId, ev),
       resolve: (agentId, user) => this.resolve(agentId, user),
@@ -966,6 +999,9 @@ export class AgentManager {
       teamTools: (entry, user, agent, pageId, round) => this.teamTools(entry, user, agent, pageId, round),
       team: this.teamHost(),
       mirror: this.mirror,
+      sessions: this.sessions,
+      catalog: (user) => this.catalog(user),
+      agentLabel: (agentId) => this.opts.agents.find((a) => a.id === agentId)?.label,
     }
   }
 
@@ -975,6 +1011,7 @@ export class AgentManager {
       wsPort: this.opts.wsPort,
       botSecret: this.opts.botSecret,
       notifyPagesChanged: this.opts.notifyPagesChanged,
+      writeDoc: this.opts.writeDoc,
       broadcast: (pageId, ev) => this.broadcast(pageId, ev),
       notifyRunError: (pageId, message, replyId) => this.notifyRunError(pageId, message, replyId),
       findRun: (runId) => this.runIndex.get(runId),
@@ -1002,9 +1039,6 @@ export class AgentManager {
         const entry = this.ensureAdapter(agent)
         entry.loaded.add(sessionId)
         this.mirror.bind(pageId, catalogId, sessionId, entry.adapter)
-      },
-      persistFinalHash: async (pageId, catalogId, sessionId, cwd, hash, userId, tools) => {
-        if (sessionId) await persistSession(this.pool, pageId, catalogId, sessionId, cwd, hash, userId, tools)
       },
       restoreBefore: (catalogId, pass, sessionId, before) => {
         const pooled = this.adapters.get(catalogId)

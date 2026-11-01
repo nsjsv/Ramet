@@ -1,6 +1,7 @@
 import { Pool, type PoolClient } from 'pg'
 import { COVER_COLUMNS } from './page-cover.js'
 import { API_PAGE_FIELDS } from './page-icon.js'
+import { COMMENTS_DDL } from './comments/schema.js'
 
 // 页面变更日志（page-sync.ts）的 UPDATE 触发列：对外字段（API_PAGE_FIELDS，含 position）+ 图标两列 + 封面三列 + deleted_at。
 // 由白名单拼出，不另抄一份列清单，对外字段加列时触发条件跟着变。content_text / agent_session /
@@ -118,7 +119,7 @@ ALTER TABLE page_snapshots ADD COLUMN IF NOT EXISTS actor_agent TEXT;
 -- 回收站:删页是软删除,deleted_at NULL = 活,now()::text = 回收时刻。行留在 pages
 -- (树/外键/空间归属全不动),正文(yjs 两表)与版本历史(page_snapshots)原地保留,恢复只是清标记
 ALTER TABLE pages ADD COLUMN IF NOT EXISTS deleted_at TEXT;
--- Agent 会话状态:{sessions: {<agentId>: {sessionId, cwd, lastSyncedHash}}},由 agent 适配层读写
+-- Agent 会话状态:{sessions: {<agentId>: {sessionId, cwd, seen, userId, tools}}},由 agent 适配层读写
 ALTER TABLE pages ADD COLUMN IF NOT EXISTS agent_session jsonb;
 -- 正文纯文本索引:collab onStoreDocument 时从 Y.Doc 正文 fragment 抽取填充;
 -- 老数据不做回填,首次存储自然覆盖。供 /api/search 模糊匹配
@@ -608,6 +609,22 @@ CREATE OR REPLACE TRIGGER page_changes_ins_del AFTER INSERT OR DELETE ON pages
   FOR EACH ROW EXECUTE FUNCTION page_changes_log();
 CREATE OR REPLACE TRIGGER page_changes_upd AFTER UPDATE ON pages
   FOR EACH ROW WHEN (${PAGE_CHANGE_WHEN}) EXECUTE FUNCTION page_changes_log();
+${COMMENTS_DDL}
+-- 续跑的远端回合接着记的过程页 id:跨重启认领时先接上旧档案再折重放的事件,收尾写回同一页(普通回合为空)
+ALTER TABLE open_runs ADD COLUMN IF NOT EXISTS base_run TEXT;
+-- 换机器搬会话:中心存的原生会话记录副本(盘上在 UPLOAD_DIR/agent-sessions/,agents/session-copies.ts)。
+-- 一页一个工具只留当前会话:session_id 变了就删旧行与旧目录;页面物理删除时行级联、目录由 page-purge.ts 删。
+-- size = 已收到的字节数(盘上文件可能更长:追加到一半断了,以这里为准);tail_hash = 已收到部分最后 4KB 的 sha256
+CREATE TABLE IF NOT EXISTS agent_session_files (
+  page_id TEXT NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+  tool TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  size BIGINT NOT NULL,
+  tail_hash TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT (now()::text),
+  PRIMARY KEY (page_id, tool, name)
+);
 `
 
 // 存量数据迁移(幂等,可重复执行):

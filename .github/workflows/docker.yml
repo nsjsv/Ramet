@@ -1,0 +1,54 @@
+# 构建自托管镜像（根目录 Dockerfile）并推到 Docker Hub。
+# 需要的仓库配置（Settings → Secrets and variables → Actions）：
+#   secrets   DOCKERHUB_USERNAME、DOCKERHUB_TOKEN（Docker Hub → Account settings → Personal access tokens，Read & Write）
+#   variables DOCKERHUB_IMAGE（如 yourname/ramet；不设就用 <DOCKERHUB_USERNAME>/ramet）
+# 标签：main 上的每次推送 → latest + sha-<短提交>；推 v1.2.3 这样的 tag → 1.2.3、1.2 再加 sha。
+name: docker
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  image:
+    # 只在公开仓库发布：fork 与其它副本没有 Docker Hub 凭据，跑了也只会失败
+    if: github.repository == 'nsjsv/Ramet'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ vars.DOCKERHUB_IMAGE || format('{0}/ramet', secrets.DOCKERHUB_USERNAME) }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=sha-
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

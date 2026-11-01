@@ -15,6 +15,7 @@ import type { AgentEvent, PromptResult, SessionState } from './types.js'
 import { touchConnector } from './connectors.js'
 import { DRIVEN_SCOPE, FRAME_CAP, type ConnectorAgentInfo, type ConnMsg, type CenterMsg, type DrivenMsg } from './protocol.js'
 import { ConnectorOutdatedError, PROJECT_CAP, TerminalUnsupportedError, WRITE_CAP } from './project-types.js'
+import { SESSION_CAP } from './session-types.js'
 import { PreviewBridge } from './preview-bridge.js'
 import { PtyBridge } from './pty-bridge.js'
 import { TERMINAL_CAP } from './pty-types.js'
@@ -22,9 +23,8 @@ import { MachinePass, type MachineScope } from './machine-access.js'
 import { revokedUsersOf } from './machine-grants.js'
 import { RemoteAgent } from './remote-agent.js'
 
-/** 冷启动类请求（session/new、session/load）的应答上限。claude 的 ACP 适配器是
- *  `npx -y @agentclientprotocol/claude-agent-acp`，首次要下载 + 起 CLI + 握手，可能超过 120s 才回 session/new。
- *  这类请求不在 HTTP 路径上（prepare 立即 202、配置项走 SSE），放宽没有代价。600s 是保守上界。 */
+/** 冷启动类请求（new、load）的应答上限。驱动要当场起 CLI、等它握手（老 connector 上的 ACP 适配器首次还要下载），
+ *  慢的机器上可能超过 120s。这类请求不在 HTTP 路径上（prepare 立即 202、配置项走 SSE），放宽没有代价。600s 是保守上界。 */
 const REQUEST_TIMEOUT_MS = 600_000
 
 /** hello 认领回调正在跑。bindRun 发生在这次回调里时，waiter 归这条连接，
@@ -263,7 +263,9 @@ export class ConnectorHub {
     if (need && !conn.caps.includes(need)) {
       // 终端能力单独说明：connector 够新（有项目面板）但 node-pty 没装上，和「版本太旧」不是一回事
       if (need === TERMINAL_CAP && conn.caps.includes(PROJECT_CAP)) throw new TerminalUnsupportedError()
-      throw need === WRITE_CAP ? new ConnectorOutdatedError('这台机器上的 connector 版本太旧，升级后才能改文件') : new ConnectorOutdatedError()
+      if (need === WRITE_CAP) throw new ConnectorOutdatedError('这台机器上的 connector 版本太旧，升级后才能改文件')
+      if (need === SESSION_CAP) throw new ConnectorOutdatedError('这台机器上的 connector 版本太旧，接不上别的机器上的会话')
+      throw new ConnectorOutdatedError()
     }
     return { conn, msg }
   }
@@ -430,8 +432,8 @@ export class ConnectorHub {
     }
   }
 
-  /** 停止 agent 在 ACP 终端里跑的一条命令。刻意不要 MachinePass：非驱动帧，只会让机器停下来（同 cancel）；
-   *  谁能停由页面写权限决定，connector 只认「这个 agent 的这个会话」自己的终端 */
+  /** 停止一个可停的东西（子代理；老 connector 上是 ACP 终端里的命令）。刻意不要 MachinePass：非驱动帧，只会让机器停下来（同 cancel）；
+   *  谁能停由页面写权限决定，connector 只认「这个 agent 的这个会话」自己的句柄 */
   killCommand(connectorId: string, msg: Extract<CenterMsg, { t: 'kill-cmd' }>): boolean {
     return this.sendTo(connectorId, msg)
   }

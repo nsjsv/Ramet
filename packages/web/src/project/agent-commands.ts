@@ -1,14 +1,13 @@
 /* ---------- 「agent 跑的命令」：本页最近几轮里 agent 的命令步骤（只读）----------
- * 两路来源，步骤形状相同：命令步骤（kind = execute）的命令行、实时输出（step.output，ACP 终端里跑的由服务端追加）、
- * 退出状态（acp.terminalExit）都在步骤里。
+ * 两路来源，步骤形状相同：命令步骤（kind = execute）的命令行、实时输出（step.output，由服务端追加）、
+ * 退出状态都在步骤里（经 viewOf 读）。
  *   - 已结束的轮次：各自过程页的 runs.record（归档后不再变，以它为准）；
  *   - 在跑的这一轮：页面事件流里已有的 live run（agent-bar 的 store），不另取、不另连。一轮结束、store 清掉 run
  *     到过程页出现在页面列表里之间有个空档，面板开着期间看过的命令先留着（remember）补上。
  * 两路的 key 都是「回复块 id : 步骤 id」（record.replyId 就是那一轮的回复块），同一条命令不会列两遍。 */
 
-import { isTerminal, type RunEntry, type ToolEntry } from '@ramet/shared/run-model'
+import { isTerminal, viewOf, type RunEntry, type ToolEntry } from '@ramet/shared/run-model'
 import type { Page } from '../api'
-import { commandOf, rec } from '../editor/run-detail'
 import { stepExit, stepTerminalId } from '../editor/step-terminal'
 
 export type CommandState = 'running' | 'done' | 'failed'
@@ -20,14 +19,14 @@ export interface AgentCommand {
   state: CommandState
   exitCode: number | null
   signal: string | null
-  /** ACP 终端里的命令才有（可以点「停止这条命令」） */
+  /** 握着句柄的命令才有（可以点「停止这条命令」） */
   terminalId: string | null
   entry: ToolEntry
 }
 
-/** 命令行：rawInput.command → 步骤标题 */
+/** 命令行：视图里的命令 → 步骤标题 */
 function commandLine(e: ToolEntry): string {
-  return commandOf(rec(e.acp).rawInput) || e.title || e.detail || ''
+  return viewOf(e).command || e.title || e.detail || ''
 }
 
 export function agentCommandsOf(replyId: string, entries: readonly RunEntry[]): AgentCommand[] {

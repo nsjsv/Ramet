@@ -17,9 +17,11 @@ import { readConnectorConfig, type ConnectorConfig } from './access.js'
 import { runConnector } from './index.js'
 import { loadNodePty } from './pty.js'
 
-const FAKE_AGENT = fileURLToPath(new URL('../agents/fake-agent.mjs', import.meta.url))
+const FAKE_CODEX = fileURLToPath(new URL('../agents/fake/codex.mjs', import.meta.url))
 // connector 自己 loadAgents()：显式给一个，免得去自动检测本机装了什么
-process.env.RAMET_AGENTS = JSON.stringify([{ id: 'fake', label: 'Fake', command: process.execPath, args: [FAKE_AGENT] }])
+process.env.RAMET_AGENTS = JSON.stringify([
+  { id: 'fake', label: 'Fake', driver: 'codex', command: FAKE_CODEX, env: { CODEX_HOME: mkdtempSync(join(tmpdir(), 'ramet-codex-')) } },
+])
 
 const HOUR = 3_600_000
 const iso = (offsetMs: number): string => new Date(Date.now() + offsetMs).toISOString()

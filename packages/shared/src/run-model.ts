@@ -3,12 +3,14 @@
 // 事件是服务端已经决定好的原语：什么时候换段由服务端判定后显式发 `said`，reducer 只照做，
 // 所以服务端的 record 与每个前端的状态必然一致（中途订阅 = 快照 + 之后的事件）。
 
-/** kind/status 取 ACP ToolKind / ToolCallStatus 的字面量集合（协议外的值由适配层窄化） */
+import { mergeView, type ToolView } from './tool-view.js'
+
+/** kind/status 的字面量集合（沿用 ACP ToolKind / ToolCallStatus 的取值，老记录照读；各家驱动映射到这里） */
 export type StepKind =
   | 'read' | 'edit' | 'delete' | 'move' | 'search' | 'execute' | 'think' | 'fetch' | 'switch_mode' | 'other'
 export type StepStatus = 'pending' | 'in_progress' | 'completed' | 'failed'
 
-/** agent 报的本轮用量（ACP PromptResponse.usage，UNSTABLE）。缺项不补 0，没报就是没有 */
+/** agent 报的本轮用量。缺项不补 0，没报就是没有 */
 export type TurnUsage = {
   total: number
   input: number
@@ -18,7 +20,7 @@ export type TurnUsage = {
   thought?: number
 }
 
-/** 一轮的实时附加信息：本轮用量、上下文占用（含 cost）、stop reason、以及 ACP 原样元数据。
+/** 一轮的实时附加信息：本轮用量、上下文占用（含 cost）、stop reason、以及 agent 原样元数据。
  *  acp 按 sessionUpdate / 命名键存最近一份（promptResponse / notice ...；plan 有自己的原语，不在这里），未知字段也留着可查 */
 export type RunInfo = {
   usage?: TurnUsage
@@ -30,8 +32,10 @@ export type RunInfo = {
 }
 /** detail = 首个 location 路径；note = 失败时工具输出的首行（都截断过，不带 diff/原始输出）。
  *  parentId = 这一步属于哪次子代理调用；activity = 这一步现在在做什么（快照，不进正文）。
- *  acp = 原始 tool_call/tool_call_update 字段（除 sessionUpdate/toolCallId）：rawInput/rawOutput/
- *  content/locations/_meta 等，增量合并；acp 里的键显式 null/[] 覆盖，缺省保持。
+ *  acp = 原样载荷，增量合并（键显式 null/[] 覆盖，缺省保持）：老记录与老 connector 的 ACP tool_call 字段
+ *  （rawInput/rawOutput/content/locations/_meta…），以及 Ramet 自己记的 permission / subRun。原生驱动的工具详情不放这里，在 view。
+ *  view = 与协议无关的步骤视图（命令 / 路径 / diff / 结果 / 退出状态），按字段增量合并；读一律经 viewOf
+ *  （老记录只有 acp，由它推出同一份视图）。
  *  output/thought = 子代理自己的正文/思考，与限长的 activity 分开保留。
  *  truncated = acp/output/thought 命中体积上限被截断（可见标记，不静默裁） */
 export type Step = {
@@ -44,12 +48,13 @@ export type Step = {
   parentId?: string
   activity?: string
   acp?: Record<string, unknown>
+  view?: ToolView
   output?: string
   thought?: string
   truncated?: boolean
 }
 
-/** agent 的计划清单（ACP `plan` 会话更新的条目：content / priority / status，三个字段就是协议的全部）。
+/** agent 的计划清单（content / priority / status，各家驱动都归一成这三个字段）。
  *  agent 每次都发整份，客户端整份替换，所以它是 RunState 上的当前值，不是时间线条目 */
 export type PlanStatus = 'pending' | 'in_progress' | 'completed'
 export type PlanPriority = 'high' | 'medium' | 'low'
@@ -62,8 +67,8 @@ export const MAX_PLAN_TEXT = 500
 const PLAN_STATUSES: ReadonlySet<string> = new Set(['pending', 'in_progress', 'completed'])
 const PLAN_PRIORITIES: ReadonlySet<string> = new Set(['high', 'medium', 'low'])
 
-/** ACP / 持久化边界转成 PlanEntry[]：对端可能给任何形状，未知 status 落 pending、未知 priority 丢掉、
- *  空内容的条目跳过。服务端（acp.ts 收 plan 更新）与前端（读回复块上的 plan 属性）共用这一个，口径不会漂 */
+/** 驱动 / 持久化边界转成 PlanEntry[]：对端可能给任何形状，未知 status 落 pending、未知 priority 丢掉、
+ *  空内容的条目跳过。服务端（驱动收到计划清单）与前端（读回复块上的 plan 属性）共用这一个，口径不会漂 */
 export function normalizePlan(raw: unknown): { entries: PlanEntry[]; truncated: boolean } {
   const list = Array.isArray(raw) ? raw : []
   const entries: PlanEntry[] = []
@@ -120,6 +125,7 @@ export function mergeStep(prev: Step | undefined, delta: StepDelta): Step {
   const base: Step = prev ?? { id: delta.id, kind: 'other', title: '', status: 'pending' }
   const merged: Step = { ...base, ...delta }
   if (delta.acp !== undefined) merged.acp = mergeAcp(base.acp, delta.acp)
+  if (delta.view !== undefined) merged.view = mergeView(base.view, delta.view)
   return merged
 }
 
@@ -168,9 +174,9 @@ export type RunState = {
   textSlot: number | null
   /** 整轮已记录的思考字数（上限判定用） */
   thoughtChars: number
-  /** 实时附加信息（用量 / 上下文 / stop reason / ACP 元数据）；无则缺省 */
+  /** 实时附加信息（用量 / 上下文 / stop reason / agent 原样元数据）；无则缺省 */
   info?: RunInfo
-  /** agent 当前的计划清单（ACP plan，整份替换）；没报过 = 缺省，报过空清单 = [] */
+  /** agent 当前的计划清单（整份替换）；没报过 = 缺省，报过空清单 = [] */
   plan?: PlanEntry[]
   /** 带队（/带队）的团队计划与执行进度；不是带队的一轮缺省。见下面「带队」一节 */
   team?: TeamState
@@ -185,7 +191,7 @@ export type RunEvent =
   /** step 只带变化字段（StepDelta）；合并语义见 mergeStep */
   | { type: 'step'; step: StepDelta; t: number }
   /** 子代理正文/思考的增量：追加到 id 那一步的 output/thought（不重发累计全文）。
-   *  kind 'terminal' 是这一步（ACP 终端里跑的命令）的实时输出：同样追加到 output，但不改 activity。
+   *  kind 'terminal' 是这一步（agent 跑的命令）的实时输出：同样追加到 output，但不改 activity。
    *  activity 会顶替这一步的一行文字（stepLabel），命令的标签始终是命令本身，不能被输出的最后一行顶掉 */
   | { type: 'child'; id: string; d: string; kind: 'output' | 'thought' | 'terminal'; t: number }
   /** info 快照：按字段合并，acp 按命名键合并 */
@@ -244,7 +250,7 @@ export function stepLabel(e: RunEntry): string {
 }
 
 /** 步骤标识：块与 record 里那一条的唯一连接。record 不可变，所以下标永远稳定：
- *  工具用 ACP toolCallId，思考 / 说明没有 id，用 `${k}:${下标}`（下标是在 record.entries 里的位置） */
+ *  工具用 toolCallId，思考 / 说明没有 id，用 `${k}:${下标}`（下标是在 record.entries 里的位置） */
 export function entrySid(e: RunEntry, index: number): string {
   return e.k === 'tool' ? e.id : `${e.k}:${index}`
 }
@@ -613,4 +619,5 @@ export function chainRest(chain: MentionChain | null): number {
 
 // ---------- 转出行级 diff 与一轮的统计口径（同样不新增 shared 子路径） ----------
 export { DIFF_CONTEXT, foldDiff, lineDiff, type DiffLine } from './line-diff.js'
+export { acpToolView, isPlanApproval, mergeView, stepEdits, subRunOf, viewOf, type ToolDiff, type ToolExit, type ToolView } from './tool-view.js'
 export { runTally, SPEND_KEYS, type RunTally, type SpendKey, type TallyAgent, type TallyFile } from './run-tally.js'

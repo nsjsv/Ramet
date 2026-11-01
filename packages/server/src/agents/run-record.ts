@@ -48,15 +48,34 @@ export type RunRecordV1 = {
   outcome: RunOutcome
   usage?: TurnUsage
   context?: { used: number; size: number }
-  /** 实时附加信息：完整 usage（含 cache/thought）、上下文（含 cost）、stopReason、ACP 元数据。 */
+  /** 实时附加信息：完整 usage（含 cache/thought）、上下文（含 cost）、stopReason、agent 原样元数据。 */
   info?: RunInfo
-  /** agent 最后一份计划清单（ACP plan）；没报过就没有这一项 */
+  /** agent 最后一份计划清单；没报过就没有这一项 */
   plan?: PlanEntry[]
   /** 带队（/带队）的团队计划与每个任务的状态 / 时段（甘特的数据源）；不是带队的一轮没有这一项 */
   team?: TeamState
   /** 最终 AI 回复正文（state.text）；纯文本回合也要能进过程页，不重复成 say 条目 */
   output?: string
   entries: RunEntry[]
+  /** 跑这一轮的会话与目录：续跑据此接着同一个会话（老档案没有 = 只能新建会话续） */
+  sessionId?: string
+  cwd?: string
+  /** 失败收尾时的原因（续跑说明里告诉 agent 断在哪） */
+  error?: string
+}
+
+/** 两段用量相加（续跑接着算）：任一侧缺的可选项按另一侧，两侧都没有就不写 */
+function addUsage(a: TurnUsage | undefined, b: TurnUsage | undefined): TurnUsage | undefined {
+  if (!a || !b) return a ?? b
+  const opt = (x?: number, y?: number): number | undefined => (x === undefined && y === undefined ? undefined : (x ?? 0) + (y ?? 0))
+  const sum: TurnUsage = { total: a.total + b.total, input: a.input + b.input, output: a.output + b.output }
+  const cacheRead = opt(a.cacheRead, b.cacheRead)
+  const cacheWrite = opt(a.cacheWrite, b.cacheWrite)
+  const thought = opt(a.thought, b.thought)
+  if (cacheRead !== undefined) sum.cacheRead = cacheRead
+  if (cacheWrite !== undefined) sum.cacheWrite = cacheWrite
+  if (thought !== undefined) sum.thought = thought
+  return sum
 }
 
 type ToolInput = Extract<AgentEvent, { type: 'tool' }>
@@ -74,6 +93,7 @@ function toolDelta(ev: ToolInput): StepDelta {
     ...(ev.parentId !== undefined ? { parentId: ev.parentId } : {}),
     ...(ev.activity !== undefined ? { activity: ev.activity } : {}),
     ...(ev.acp !== undefined ? { acp: ev.acp } : {}),
+    ...(ev.view !== undefined ? { view: ev.view } : {}),
     ...(ev.truncated !== undefined ? { truncated: ev.truncated } : {}),
   }
 }
@@ -93,6 +113,10 @@ export class RunRecord {
   private childBuf = new Map<string, ChildBuf>()
   /** 上限类信息只标一次（思考截断、步数超限），避免每个被丢的增量都发一条 */
   private capped: { thought: boolean; steps: boolean } = { thought: false, steps: false }
+  /** 续跑：从旧档案接过来的条目数（之后的条目才是这一轮新增的，收尾只把它们补进过程页）；普通回合为 0 */
+  base = 0
+  /** 续跑：中断前那一段的用量，收尾与这一轮的相加 */
+  private baseUsage: TurnUsage | undefined
 
   constructor(
     readonly replyId: string,
@@ -100,6 +124,29 @@ export class RunRecord {
     /** RunRecord 只发成品 RunEvent（run 快照与 AgentEvent 原料由调用方各自处理） */
     private emit: (ev: RunEvent) => void,
   ) {}
+
+  /** 续跑：接着中断前的档案记。条目 / 计划 / 附加信息原样接过来，中断时写到一半的正文仍是「当前那段话」；
+   *  gap 置位：续跑后第一段正文到来时，它按换段规则收成一条说明（半截回复不当答案，但留在过程里），回复正文只留新的回答。
+   *  startedAt 由调用方给成「现在 − 中断前用时」，计时接着走 */
+  static resumeFrom(replyId: string, archived: RunRecordV1, startedAt: number, emit: (ev: RunEvent) => void): RunRecord {
+    const r = new RunRecord(replyId, startedAt, emit)
+    const s = r.state
+    s.entries = structuredClone(archived.entries)
+    for (const e of s.entries) if (e.k === 'thought') s.thoughtChars += e.text.length
+    if (archived.output) {
+      // 半截正文的位置与时刻：接在旧条目之后、中断那一刻（档案不记它开口的位置）
+      s.text = archived.output
+      s.textAt = s.textEnd = archived.ms ?? 0
+      s.textSlot = s.entries.length
+    }
+    if (archived.info) s.info = structuredClone(archived.info)
+    if (archived.plan) s.plan = structuredClone(archived.plan)
+    if (archived.context) r.context = { ...archived.context }
+    r.gap = true
+    r.base = s.entries.length
+    r.baseUsage = archived.usage
+    return r
+  }
 
   elapsed(): number {
     return Date.now() - this.startedAt
@@ -165,7 +212,7 @@ export class RunRecord {
     this.send({ type: 'step', step: delta, t: this.elapsed() })
   }
 
-  /** 审批请求里的工具数据并入同一个工具步骤（同一个详情归属）：有 ACP toolCallId 就用它，与真实
+  /** 审批请求里的工具数据并入同一个工具步骤（同一个详情归属）：有 toolCallId 就用它，与真实
    *  tool_call/update 合并成同一步；没有才退化到 requestId（fs/write_text_file 之类的纯闸门请求）。
    *  status/kind 原样留在 acp，不臆造完成。审批弹出前冲刷合批缓冲：前端看到的顺序 = 发生的顺序。
    *  由会话镜像在审批到达时调用（审批归会话、不归某一轮，不在轮次事件流里） */
@@ -177,6 +224,7 @@ export class RunRecord {
         id: typeof toolCallId === 'string' && toolCallId ? toolCallId : ev.requestId,
         ...(typeof ev.toolCall.title === 'string' ? { title: ev.toolCall.title } : {}),
         acp: { ...ev.toolCall, permission: { options: ev.options } },
+        ...(ev.view ? { view: ev.view } : {}),
       })
     }
     this.flush()
@@ -209,7 +257,7 @@ export class RunRecord {
     this.send({ type: 'step', step: delta, t: this.elapsed() })
   }
 
-  /** ACP 终端里跑的命令的实时输出：追加到这一步的 output（不改 activity，见 run-model 的 child）。
+  /** agent 跑的命令的实时输出：追加到这一步的 output（不改 activity，见 run-model 的 child）。
    *  步骤不在（超出步数上限没建出来）就丢，不像子代理正文那样攒着，攒了也没有步骤可贴 */
   terminalOutput(id: string, delta: string): void {
     if (!delta || !this.state.entries.some((e) => e.k === 'tool' && e.id === id)) return
@@ -286,7 +334,7 @@ export class RunRecord {
     return this.state.text.trim().length > 0
   }
 
-  /** 有附加信息（用量/上下文/ACP 元数据/截断）：纯元数据回合也要归档，不谎称没有过程 */
+  /** 有附加信息（用量/上下文/agent 原样元数据/截断）：纯元数据回合也要归档，不谎称没有过程 */
   hasInfo(): boolean {
     return this.state.info !== undefined
   }
@@ -302,7 +350,8 @@ export class RunRecord {
   }
 
   /** 回复块 stats 属性（编码见 @ramet/shared/reply-stats） */
-  stats(outcome: RunOutcome, ms: number, usage: TurnUsage | undefined): string {
+  stats(outcome: RunOutcome, ms: number, turnUsage: TurnUsage | undefined): string {
+    const usage = addUsage(this.baseUsage, turnUsage)
     // 改动 / 协作的数：回复抬头停靠的岛直接读（同一个 runTally，前端对在飞的一轮现算）
     const tally = runTally(this.state, ms)
     return encodeStats({
@@ -326,11 +375,12 @@ export class RunRecord {
   }
 
   record(
-    meta: { agent: string; parentId: string },
+    meta: { agent: string; parentId: string; sessionId?: string; cwd?: string; error?: string },
     outcome: RunOutcome,
     ms: number,
-    usage: TurnUsage | undefined,
+    turnUsage: TurnUsage | undefined,
   ): RunRecordV1 {
+    const usage = addUsage(this.baseUsage, turnUsage)
     const output = this.state.text
     // reducer 标了逐条截断（思考/说明命中上限）而 info 里还没标 → 归档时带上，别让归档页看不见
     let info = this.state.info
@@ -350,6 +400,9 @@ export class RunRecord {
       ...(this.state.team ? { team: this.state.team } : {}),
       ...(output ? { output } : {}),
       entries: this.state.entries,
+      ...(meta.sessionId ? { sessionId: meta.sessionId } : {}),
+      ...(meta.cwd ? { cwd: meta.cwd } : {}),
+      ...(meta.error ? { error: meta.error } : {}),
     }
   }
 

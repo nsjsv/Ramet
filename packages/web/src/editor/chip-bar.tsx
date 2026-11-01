@@ -13,9 +13,8 @@ import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } fro
 import { AgentBadgeView } from '../agent-marks'
 import type { AgentInfo, ConfigOption, ToolProfile } from '../api'
 import { COPY } from '../copy'
-import { useAgents } from '../default-agent'
 import { Icon } from '../icons'
-import { agentOptionsFor, subscribeAgentOptions } from './agent-bar'
+import { agentOptionsFor, subscribeAgentOptions, usePageAgents } from './agent-bar'
 import { defaultModeValue, modeText } from './agent-mode'
 import { agentBadge } from './ai-block'
 import { ChipMenu } from './chip-menu'
@@ -74,7 +73,8 @@ function optionTitle(option: ConfigOption): string {
 }
 
 export function ChipBar({ pageId, agent, cwd, opts, size = 'card', onAgent, onCwd, onOpt, onMode, tools }: ChipBarProps) {
-  const { agents, loaded } = useAgents()
+  // 来源只列这一页能用的：锁定了工具（第一块回复用的）就只剩它在各台机器上的 agent
+  const { agents, loaded, lock } = usePageAgents(pageId)
   const options = useSyncExternalStore(subscribeAgentOptions, () => agentOptionsFor(pageId, agent))
   const [open, setOpen] = useState<string | null>(null)
   const anchors = useRef<Record<string, HTMLButtonElement | null>>({})
@@ -85,7 +85,7 @@ export function ChipBar({ pageId, agent, cwd, opts, size = 'card', onAgent, onCw
   }, [pageId, agent])
 
   if (agents.length === 0) {
-    return <span className="chip-empty">{loaded ? T.noAgents : T.loadingAgents}</span>
+    return <span className="chip-empty">{!loaded ? T.loadingAgents : lock ? T.lockedEmpty(lock) : T.noAgents}</span>
   }
 
   const info = agents.find((a) => a.id === agent)
@@ -240,7 +240,7 @@ function AgentMenu({
   onClose,
 }: {
   anchor: HTMLElement
-  agents: AgentInfo[]
+  agents: readonly AgentInfo[]
   current: string
   onPick: (id: string) => void
   onClose: () => void
@@ -257,11 +257,14 @@ function AgentMenu({
             className="menu-item"
             role="menuitemradio"
             aria-checked={a.id === current}
-            onClick={() => onPick(a.id)}
+            aria-disabled={a.unavailable ? true : undefined}
+            title={a.unavailable}
+            onClick={() => !a.unavailable && onPick(a.id)}
           >
             <AgentBadgeView badge={badge} className="chip-mark" />
             <span className="menu-text">
               <span className="t">{a.label}</span>
+              {a.unavailable && <span className="d">{a.unavailable}</span>}
             </span>
             {a.id === current && <Icon name="check" size={14} className="tick" />}
           </button>

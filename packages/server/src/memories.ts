@@ -1,8 +1,8 @@
 // ---------- 空间公共记忆 ----------
 // 空间级，这个空间里所有 agent 共享。写入只有两条路：成员手动（记忆面板 / 输入卡 `/记住`，走 REST），
 // 或 agent 经 propose_memory 提议、成员点「记住」（走 ramet-tools.ts 的审批）。两条路都落到 addMemory，上限与去空白只在这一处。
-// 注入：每轮开跑时把这个空间的全部记忆原样带上（不筛选、不检索、不额外调模型），由 memoryBlock 渲染，
-// 与会话复用的 hash 同口径（agents/prompt-env.ts 的 promptHash）：记忆变了即上下文变了，新建会话全文重放。
+// 注入：新建会话的全文重放把这个空间的全部记忆原样带在最前面（不筛选、不检索、不额外调模型），由 memoryBlock 渲染。
+// 已有会话不因记忆变化重置，下一次新建会话才带上新记忆（agents/prompt-env.ts 文件头）。
 
 import { randomUUID } from 'node:crypto'
 import type { Pool } from 'pg'

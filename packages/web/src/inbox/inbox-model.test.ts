@@ -34,6 +34,7 @@ describe('分组', () => {
     expect(groupOf('done')).toBe('news')
     expect(groupOf('first_use')).toBe('news')
     expect(groupOf('running')).toBe('running')
+    expect(groupOf('comment')).toBe('news')
   })
 
   test('需要处理：审批在前，其次机器类；同类旧的在前。新消息 / 在跑：新的在前', () => {
@@ -62,6 +63,19 @@ describe('等你批计划（带队）', () => {
     const items = [plan('x', 't'), plan('y', 't')]
     expect(dropByKey(items, 'plan:x').map((i) => i.key)).toEqual(['plan:y'])
     expect(attentionCount([plan('x', 't'), done('d', 'p', 't')])).toBe(1)
+  })
+})
+
+const comment = (tid: string, at: string): InboxItem => ({
+  type: 'comment', key: `comment:${tid}`, at, pageId: 'p1', pageTitle: 't', threadId: tid, author: { id: 'u', name: 'bob' }, excerpt: '看看这里', reason: 'reply',
+})
+
+describe('评论', () => {
+  test('进「新消息」与做完的回合按时间混排（新的在前），不算进角标；乐观摘除按 comment:<串>', () => {
+    const groups = splitInbox([done('d1', 'p1', '2026-10-18T07:00:00Z'), comment('t1', '2026-10-18T08:00:00Z'), comment('t2', '2026-10-18T06:00:00Z')])
+    expect(groups.news.map((i) => i.key)).toEqual(['comment:t1', 'd1', 'comment:t2'])
+    expect(attentionCount([comment('t1', 't'), approval('a')])).toBe(1)
+    expect(dropByKey([comment('t1', 't'), comment('t2', 't')], 'comment:t1').map((i) => i.key)).toEqual(['comment:t2'])
   })
 })
 

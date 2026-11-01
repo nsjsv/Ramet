@@ -34,13 +34,15 @@ if (!process.env.DATABASE_URL) {
 }
 
 const READ_PAGE_MCP = fileURLToPath(new URL('./mcp/ramet.mjs', import.meta.url))
-const FAKE_AGENT = fileURLToPath(new URL('./agents/fake-agent.mjs', import.meta.url))
+const FAKE_CODEX = fileURLToPath(new URL('./agents/fake/codex.mjs', import.meta.url))
 // 图片用例要落盘上传，指向独立临时目录（uploads.ts 惰性读 UPLOAD_DIR）
 const uploadDir = mkdtempSync(join(tmpdir(), 'ramet-page-read-uploads-'))
 process.env.UPLOAD_DIR = uploadDir
 // startServer 里 loadAgents 读 env，必须在起服前设好。中心默认不跑本机 agent（index.ts），本文件的本机用例要显式打开
 process.env.RAMET_LOCAL_AGENTS = '1'
-process.env.RAMET_AGENTS = JSON.stringify([{ id: 'fake', label: 'Fake', command: process.execPath, args: [FAKE_AGENT] }])
+process.env.RAMET_AGENTS = JSON.stringify([
+  { id: 'fake', label: 'Fake', driver: 'codex', command: FAKE_CODEX, env: { CODEX_HOME: mkdtempSync(join(tmpdir(), 'ramet-codex-')) } },
+])
 
 const pool = getPool()
 await initDb(pool)

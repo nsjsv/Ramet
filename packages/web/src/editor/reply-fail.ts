@@ -2,11 +2,13 @@
 // 两处共用同一个外观（CSS 的 .pill.is-failed），所以运行中失败、块收尾、刷新前后看起来一致：
 //   - 运行中失败：run-strip.ts 把自己的胶囊切成 is-failed（带原因）
 //   - 已收尾的 o:error 块（含刷新后）：本文件的 buildFailStrip，挂在没有实时视图接管的 o:error 块里
-// 重试与「重新生成」是同一个动作（agent-bar.tsx 的 regenerateReply）；@ 点名链停在这里时多一个「继续剩下的」。
+// 按钮一律叫「重试」：页面上最后一块回复是续跑（接着原会话、同一块里接着写，agent-bar.tsx 的 resumeReply），
+// 别的是从头重新生成（regenerateReply）；@ 点名链停在这里时多一个「继续剩下的」。
+// 手动停止的最后一块挂中性色的「已停止 · 继续」条（buildStoppedStrip），位置同失败条，继续也是续跑。
 import { decodeStats } from '@ramet/shared/reply-stats'
 import { COPY } from '../copy'
 import { iconSvg } from '../icons'
-import { continueRest, regenerateReply } from './agent-bar'
+import { continueRest, regenerateReply, resumeReply } from './agent-bar'
 import { failReasonOf } from './fail-reason'
 
 /** 失败胶囊上的文案：固定句 +（有则）原因（原因暂存见 fail-reason.ts；刷新后没有，只显示固定文案） */
@@ -15,8 +17,8 @@ export function failText(replyId: string): string {
   return reason ? `${COPY.run.failed} · ${reason}` : COPY.run.failed
 }
 
-/** 重试按钮（运行条与失败条共用） */
-export function buildRetryButton(pageId: string, replyId: string): HTMLButtonElement {
+/** 重试按钮（运行条与失败条共用）。resume 在点击时才问：运行条的按钮建好之后，后面可能又来了消息 */
+export function buildRetryButton(pageId: string, replyId: string, resume: () => boolean): HTMLButtonElement {
   const btn = document.createElement('button')
   btn.type = 'button'
   btn.className = 'retry'
@@ -25,7 +27,8 @@ export function buildRetryButton(pageId: string, replyId: string): HTMLButtonEle
   btn.addEventListener('mousedown', (event) => event.preventDefault()) // 不抢编辑器焦点
   btn.addEventListener('click', (event) => {
     event.stopPropagation()
-    regenerateReply(pageId, replyId)
+    if (resume()) resumeReply(pageId, replyId, true)
+    else regenerateReply(pageId, replyId)
   })
   return btn
 }
@@ -57,8 +60,14 @@ export function isFailedReply(stats: unknown): boolean {
   return decodeStats(stats).o === 'error'
 }
 
-/** 已收尾的失败块里的失败条；viewer（canRetry = false）只显示不带按钮。rest = @ 点名链还剩几个（>0 才出「继续剩下的」） */
-export function buildFailStrip(opts: { pageId: string; replyId: string; canRetry: boolean; rest: number }): HTMLElement {
+/** 这块回复是不是手动停止收尾的（stats 的结果位 = cancelled） */
+export function isStoppedReply(stats: unknown): boolean {
+  return decodeStats(stats).o === 'cancelled'
+}
+
+/** 已收尾的失败块里的失败条；viewer（canRetry = false）只显示不带按钮。rest = @ 点名链还剩几个（>0 才出「继续剩下的」）；
+ *  resume = 重试走续跑（reply-target.ts 的 resumes：最后一块且不是带队轮） */
+export function buildFailStrip(opts: { pageId: string; replyId: string; canRetry: boolean; rest: number; resume: boolean }): HTMLElement {
   const strip = document.createElement('div')
   strip.className = 'run-strip is-failed'
   strip.contentEditable = 'false'
@@ -78,9 +87,42 @@ export function buildFailStrip(opts: { pageId: string; replyId: string; canRetry
   main.append(dot, now)
   pill.append(main)
   if (opts.canRetry) {
-    pill.append(buildRetryButton(opts.pageId, opts.replyId))
+    pill.append(buildRetryButton(opts.pageId, opts.replyId, () => opts.resume))
     if (opts.rest > 0) pill.append(buildContinueButton(opts.pageId, opts.rest))
   }
+  strip.append(pill)
+  return strip
+}
+
+/** 停止的最后一块回复上的「已停止 · 继续」条（只给能写的人、只给能续跑的块，调用方判）。外观同失败条，换中性色 */
+export function buildStoppedStrip(pageId: string, replyId: string): HTMLElement {
+  const strip = document.createElement('div')
+  strip.className = 'run-strip is-stopped'
+  strip.contentEditable = 'false'
+  const pill = document.createElement('div')
+  pill.className = 'pill is-stopped'
+  const main = document.createElement('div')
+  main.className = 'pill-main'
+  const dot = document.createElement('span')
+  dot.className = 'spin'
+  const now = document.createElement('span')
+  now.className = 'now'
+  const text = document.createElement('span')
+  text.className = 'now-text'
+  text.textContent = COPY.run.stopped
+  now.append(text)
+  main.append(dot, now)
+  const btn = document.createElement('button')
+  btn.type = 'button'
+  btn.className = 'retry'
+  btn.innerHTML = `${iconSvg('play', 13)}<span>${COPY.run.resume}</span>`
+  btn.setAttribute('aria-label', COPY.run.resume)
+  btn.addEventListener('mousedown', (event) => event.preventDefault()) // 不抢编辑器焦点
+  btn.addEventListener('click', (event) => {
+    event.stopPropagation()
+    resumeReply(pageId, replyId)
+  })
+  pill.append(main, btn)
   strip.append(pill)
   return strip
 }

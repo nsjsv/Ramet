@@ -1,6 +1,6 @@
 /* ---------- RemoteAgent 会话级副本 + hub 路由（桩 socket，不起服务、不碰库）----------
- * 不变量：connector 上的 AcpAgent 是会话级状态的事实源，中心的 RemoteAgent 只是副本，
- * 由 session 帧 / new|load 应答 / hello 后的 sessions 快照维护；接口与 AcpAgent 一致（sessionState / busy / 事件）。
+ * 不变量：connector 上的驱动是会话级状态的事实源，中心的 RemoteAgent 只是副本，
+ * 由 session 帧 / new|load 应答 / hello 后的 sessions 快照维护；接口与本机驱动一致（sessionState / busy / 事件）。
  * 实例归 hub：中心刚重启、还没有人绑定时 session 帧也有地方落。 */
 import { expect, test } from 'vitest'
 import type { Pool } from 'pg'
@@ -235,4 +235,28 @@ test('prompt 帧里的图片块：声明了 prompt-image 的 connector 原样发
     expect(frame?.blocks.map((b) => b.type)).toEqual(kinds)
     hub.detach('c1', '测试结束')
   }
+})
+
+test('closeSession：发 machine 范围的 session-close 帧（agent 范围的凭据发不出去）；老 connector 没有 session 能力不发帧', async () => {
+  const hub = new ConnectorHub(stubPool)
+  const sent = attach(hub, 'c1', ['session'])
+  const agent = hub.remote('c1', 'claude')
+  await expect(agent.as(await passFor()).closeSession('s1')).rejects.toThrow(/范围/)
+  expect(sent).toEqual([])
+
+  const machine = await assertCanUse(allowPool, { id: 'u1' }, 'c1', 'machine')
+  const closing = agent.as(machine).closeSession('s1')
+  expect(sent).toEqual([{ t: 'session-close', rid: expect.any(String), actor: 'u1', agent: 'claude', sessionId: 's1' }])
+  const rid = (sent[0] as Extract<CenterMsg, { t: 'session-close' }>).rid
+  hub.handle('c1', { t: 'res', rid, session: { op: 'session-close' } })
+  await closing
+
+  const failing = agent.as(machine).closeSession('s2')
+  hub.handle('c1', { t: 'err', rid: (sent[1] as Extract<CenterMsg, { t: 'session-close' }>).rid, message: '这个会话正在运行' })
+  await expect(failing).rejects.toThrow(/正在运行/)
+
+  const oldSent = attach(hub, 'c2')
+  const old = hub.remote('c2', 'claude')
+  await expect(old.as(await assertCanUse(allowPool, { id: 'u1' }, 'c2', 'machine')).closeSession('s1')).rejects.toThrow(/太旧/)
+  expect(oldSent).toEqual([])
 })

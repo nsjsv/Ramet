@@ -232,7 +232,7 @@ test('上限:步数超限后不再新增条目,同样如实标记一次截断', 
   expect(capped.rec.state.info?.truncated).toBe(true)
 })
 
-// agent 的计划清单（ACP plan）：整份替换的当前值，不是时间线条目
+// agent 的计划清单：整份替换的当前值，不是时间线条目
 
 const planOf = (...items: Array<[string, PlanEntry['status']]>): PlanEntry[] =>
   items.map(([content, status]) => ({ content, status }))

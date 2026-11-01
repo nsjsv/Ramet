@@ -115,7 +115,7 @@ export async function setSessionConfig(
       }
       entry.loaded.add(sessionId)
       // 会话的 MCP 现在拿的是这个人的凭证：记录跟着改，原来的人下一轮就不会接着用它（SavedSession.userId）
-      await persistSession(host.pool, pageId, agent.id, sessionId, saved.cwd, saved.lastSyncedHash, user.id, toolProfileOf(saved.tools))
+      await persistSession(host.pool, pageId, agent.id, sessionId, saved.cwd, saved.seen ?? null, user.id, toolProfileOf(saved.tools), saved.lastSyncedHash)
     }
   }
   // 绑进会话镜像（在跑的会话 runTurn 早绑过，重复 bind 只是用同一份执行端快照再播种一次）：
@@ -139,7 +139,7 @@ export async function setSessionConfig(
 }
 
 /** 选 agent 时预备会话（POST /agent-prepare）：只建 / 加载会话，不发起生成，好让前端立刻拿到
- *  模型 / 思考程度等配置项。新建的会话以 lastSyncedHash=null 落库，下一次生成会复用它
+ *  模型 / 思考程度等配置项。新建的会话以 seen=null 落库（准备会话），下一次生成会复用它
  *  并发全文重放（见 runTurn 的 adopt 分支），所以不会留下无用会话。 */
 export async function prepareSession(
   host: ManagerHost,

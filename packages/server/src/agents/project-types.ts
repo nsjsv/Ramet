@@ -6,6 +6,7 @@
 
 import { PREVIEW_CAP } from './preview-types.js'
 import { TERMINAL_CAP, type PtyReply } from './pty-types.js'
+import { SESSION_CAP } from './session-types.js'
 
 /** hello 里的能力标记：带 'project' 的 connector 认识下面的五种只读帧（写文件是另一个能力 'write'）。老 connector 没有这个标记，
  *  中心不发新帧（发了它也只会在 switch 里掉进 default 不应答，等到超时），接口回 409 */
@@ -14,11 +15,11 @@ export const PROJECT_CAP = 'project'
 export const QUICK_CAP = 'quick'
 /** 写文件（write 帧：代码查看器里收下随手 AI 的改写）。带 'project' 但没有 'write' 的老 connector，中心回 409 connector outdated，不发帧 */
 export const WRITE_CAP = 'write'
-/** prompt 帧里的图片块（这一轮那条用户消息里的截图，PromptBlock 的 image 变体）。老 connector 的 AcpAgent 不认它
+/** prompt 帧里的图片块（这一轮那条用户消息里的截图，PromptBlock 的 image 变体）。老 connector 不认它
  *  （会当成 resource 块发出去），中心发帧前把图片块剥掉，只发文本 */
 export const PROMPT_IMAGE_CAP = 'prompt-image'
-/** 新 connector 一定有的能力（不含 terminal：它依赖 node-pty，装不上就没有，见 connectorCaps）。preview 是端口预览 */
-export const CONNECTOR_CAPS: string[] = [PROJECT_CAP, PREVIEW_CAP, QUICK_CAP, WRITE_CAP, PROMPT_IMAGE_CAP]
+/** 新 connector 一定有的能力（不含 terminal：它依赖 node-pty，装不上就没有，见 connectorCaps）。preview 是端口预览，session 是搬会话 */
+export const CONNECTOR_CAPS: string[] = [PROJECT_CAP, PREVIEW_CAP, QUICK_CAP, WRITE_CAP, PROMPT_IMAGE_CAP, SESSION_CAP]
 
 /** connector 的 hello 里上报的能力：node-pty 加载成功才多一个 terminal */
 export function connectorCaps(terminal: boolean): string[] {

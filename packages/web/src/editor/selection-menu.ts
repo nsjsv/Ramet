@@ -28,6 +28,7 @@ import { quoteWithFly } from './doc-send'
 import { openQuickAi } from './quick-ai'
 import { QUICK_KEY_LABEL } from './quick-keys'
 import { anchorOfRange, textLinkHref } from './text-anchor'
+import { commentEntry } from '../comments/comment-entry'
 
 export const selectionTooltip = tooltipFactory('ramet-selection')
 
@@ -47,6 +48,8 @@ interface MenuButton {
   run: (view: EditorView, btn: HTMLButtonElement) => void
   /** viewer（只读）也显示 */
   readOnlyOk?: boolean
+  /** 额外的显示条件（缺省 = 总显示） */
+  visible?: () => boolean
 }
 
 /** 只读视图的选区：从 DOM 选区换算（PM 不可编辑时不维护 state 选区）。没有 / 折叠 / 不全在正文里 → null */
@@ -142,6 +145,7 @@ export function openLinkEditor(view: EditorView): boolean {
 function buildSelectionMenu(
   view: EditorView,
   pageId: string,
+  hide: () => void,
 ): { content: HTMLElement; refresh: (v: EditorView) => void; linkEditor: ReturnType<typeof createLinkEditor> } {
   const menu = document.createElement('div')
   menu.className = 'pop-card selection-menu'
@@ -209,6 +213,20 @@ function buildSelectionMenu(
           if (!anchor) return
           const text = anchor.text.replace(/\s+/g, ' ').trim().slice(0, QUOTE_MAX)
           quoteWithFly(v, { pageId, blockId: anchor.blockId, text }, btn.getBoundingClientRect())
+        },
+      },
+      // 评论：viewer 也能评论（评论不写文档）。入口由页面登记（comments/comment-entry.ts），没登记的视图不摆
+      {
+        title: COPY.comments.add,
+        render: (el) => (el.innerHTML = iconSvg('comment', 16)),
+        readOnlyOk: true,
+        visible: () => !!commentEntry(pageId),
+        run: (v) => {
+          const r = selectedRange(v)
+          const entry = commentEntry(pageId)
+          if (!r || !entry) return
+          hide()
+          entry(v, r)
         },
       },
     ],
@@ -307,8 +325,9 @@ function buildSelectionMenu(
     const editable = v.editable
     colorMenu.button.hidden = !editable
     menu.classList.toggle('is-readonly', !editable)
+    const shown = (item: MenuButton): boolean => (editable || !!item.readOnlyOk) && (item.visible?.() ?? true)
     for (const { item, btn } of buttons) {
-      btn.hidden = !editable && !item.readOnlyOk
+      btn.hidden = !shown(item)
       btn.classList.toggle('on', editable && !!item.check?.(v))
     }
     const target = editable ? targetBlocks(v) : null
@@ -317,7 +336,7 @@ function buildSelectionMenu(
     // 分隔线：前面有可见按钮、自己这组也有可见按钮才画
     let before = !turn.hidden
     seps.forEach((sep, i) => {
-      const visible = groups[i]!.some((item) => editable || item.readOnlyOk)
+      const visible = groups[i]!.some(shown)
       sep.hidden = !(before && visible)
       before = before || visible
     })
@@ -332,7 +351,7 @@ export function configSelectionMenu(ctx: Ctx, pageId: string) {
   ctx.update(selectionTooltip.key, (prev) => ({
     ...prev,
     view: (view: EditorView) => {
-      const { content, refresh, linkEditor } = buildSelectionMenu(view, pageId)
+      const { content, refresh, linkEditor } = buildSelectionMenu(view, pageId, () => provider.hide())
       // 「松手后才显示」+ 防抖：拖拽选字过程中（左键按住）不弹；松手后延迟再弹，误选/双击
       // 瞬时选区不会闪菜单。松手本身不产生新事务，必须主动补 show（update 的 isSame 短路）；
       // 延迟期内再按下/销毁要取消，弹出前重验选区（延迟期间可能已收起）。

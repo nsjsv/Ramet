@@ -1,22 +1,22 @@
-/* ---------- 随手 AI 本地通道：connector 侧的受限会话（QuickRunner + 真 AcpAgent + 假 agent）----------
- * 红线：随手 AI 在别人（或自己）的机器上跑 agent，只做一次文本改写，不许借它读文件 / 写文件 / 跑命令 / 免审批执行。
- * 假 agent 的触发词会真的向客户端发 ACP 请求（fs/read_text_file、fs/write_text_file、terminal/create、session/request_permission）：
- *   - 受限会话里这些请求一律被拒绝（断言：回显 *-denied、文件没被读到 / 没被写出、没有命令被起）；
- *   - 同样的请求在普通会话里是通的（对照组：证明陷阱是活的，不是假 agent 根本没发）。 */
-import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+/* ---------- 随手 AI 本地通道：connector 侧的受限会话（QuickRunner + 真 Claude 驱动 + 假 claude）----------
+ * 红线：随手 AI 在别人（或自己）的机器上跑 agent，只做一次文本改写，不许借它读写页面 / 跑工具 / 免审批执行。
+ * 受限会话由驱动起（不给工具、不给 MCP、固定在不提权的模式，审批一律拒绝且不发事件，见 drivers/claude/session.ts）；
+ * 这里验 QuickRunner 这一层：临时 cwd 与清理、受限会话不对中心露面、一调工具就中止、名额与超时。 */
+import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, test } from 'vitest'
-import { AcpAgent } from '../agents/acp.js'
+import type { DriverBase } from '../agents/drivers/base.js'
+import { createAdapter } from '../agents/drivers/create.js'
 import type { ConnMsg } from '../agents/protocol.js'
 import { QUICK_MAX_TOTAL, QuickRunner } from './quick.js'
 
-const FAKE_AGENT = fileURLToPath(new URL('../agents/fake-agent.mjs', import.meta.url))
+const FAKE_CLAUDE = fileURLToPath(new URL('../agents/fake/claude.mjs', import.meta.url))
 
 type Fixture = {
   root: string
-  agent: AcpAgent
+  agent: DriverBase
   frames: ConnMsg[]
   logs: string[]
   runner: QuickRunner
@@ -35,7 +35,12 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
 
 function setup(opts: { id?: string; env?: Record<string, string>; timeoutMs?: number } = {}): Fixture {
   const root = mkdtempSync(join(tmpdir(), 'ramet-quick-test-'))
-  const agent = new AcpAgent({ id: opts.id ?? 'claude', label: 'Claude', command: process.execPath, args: [FAKE_AGENT], ...(opts.env ? { env: opts.env } : {}) }, root)
+  // 假 claude 的会话记录放 root 之外：root 里只该有 quick 的临时 cwd（收尾后要空）
+  const home = mkdtempSync(join(tmpdir(), 'ramet-quick-claude-'))
+  const agent = createAdapter(
+    { id: opts.id ?? 'claude', label: 'Claude', driver: 'claude', command: FAKE_CLAUDE, env: { CLAUDE_CONFIG_DIR: home, ...opts.env } },
+    root,
+  )
   const frames: ConnMsg[] = []
   const logs: string[] = []
   const runner = new QuickRunner({
@@ -77,6 +82,7 @@ function setup(opts: { id?: string; env?: Record<string, string>; timeoutMs?: nu
     runner.dispose()
     agent.kill()
     rmSync(root, { recursive: true, force: true })
+    rmSync(home, { recursive: true, force: true })
   })
   return fixture
 }
@@ -119,60 +125,23 @@ describe('一次正常的调用', () => {
   })
 })
 
-describe('受限会话：读文件 / 写文件 / 终端 / 审批全部被拒绝', () => {
-  test('读文件：被拒，机器上的文件内容不会出现在输出里；对照组（普通会话）读得到', async () => {
+// 审批一律拒绝且不发事件由驱动保证（drivers/claude/claude-driver.test.ts）：原生协议里审批总跟着一次工具调用，
+// 在 QuickRunner 这一层先撞上「一调工具就中止」
+describe('受限会话：不给 MCP、一调工具就中止', () => {
+  test('没有 MCP：页面工具不进受限会话；对照组（普通会话）带着 MCP 配置', async () => {
     const f = setup()
-    const secret = join(f.root, 'secret.txt')
-    writeFileSync(secret, 'TOP-SECRET-CONTENT')
-    const { text } = await f.ask(`随手读文件:${secret}`)
-    expect(text).toContain('read-denied:')
-    expect(text).not.toContain('TOP-SECRET-CONTENT')
+    const { text } = await f.ask('报 MCP')
+    expect(text).toContain('mcp:none')
 
-    // 对照：同一个触发词在普通会话里读得到（证明陷阱是活的）
-    const normal = await f.agent.newSession(f.root)
+    // 对照：普通会话给了页面工具就收得到（证明回显是活的）
+    const normal = await f.agent.newSession(f.root, [{ mcp: { url: 'http://127.0.0.1:9', token: 'tok' } }])
     let seen = ''
     const off = f.agent.on((ev) => {
       if (ev.type === 'text' && ev.sessionId === normal.sessionId) seen += ev.delta
     })
-    await f.agent.prompt(normal.sessionId, [{ type: 'text', text: `随手读文件:${secret}` }])
+    await f.agent.prompt(normal.sessionId, [{ type: 'text', text: '报 MCP' }])
     off()
-    expect(seen).toContain('read-ok:TOP-SECRET-CONTENT')
-  })
-
-  test('写文件：被拒，文件没有被写出', async () => {
-    const f = setup()
-    const target = join(f.root, 'planted.txt')
-    const { text } = await f.ask(`随手写文件:${target}`)
-    expect(text).toContain('write-denied:')
-    expect(existsSync(target)).toBe(false)
-  })
-
-  test('终端：被拒（terminal/create 回错误，没有命令被起）；对照组（普通会话）起得来', async () => {
-    const f = setup()
-    const { text } = await f.ask('随手终端')
-    expect(text).toContain('term-denied:')
-    expect(text).not.toContain('term-ok')
-
-    const normal = await f.agent.newSession(f.root)
-    let seen = ''
-    const off = f.agent.on((ev) => {
-      if (ev.type === 'text' && ev.sessionId === normal.sessionId) seen += ev.delta
-    })
-    await f.agent.prompt(normal.sessionId, [{ type: 'text', text: '随手终端' }])
-    off()
-    expect(seen).toContain('term-ok')
-  })
-
-  test('审批：自动拒绝（agent 收到的是「拒绝」选项），不进待批、不发会话级事件，适配器不会因此一直忙', async () => {
-    const f = setup()
-    const events: string[] = []
-    const off = f.agent.on((ev) => events.push(ev.type))
-    const { text } = await f.ask('随手审批')
-    off()
-    expect(text).toContain('perm:reject_once')
-    expect(events).not.toContain('permission')
-    expect(events).not.toContain('permission_resolved')
-    expect(f.agent.busy).toBe(false)
+    expect(seen).toContain('mcp:ramet')
   })
 
   test('agent 一调用工具就中止本次：不会等它把工具跑完', async () => {
@@ -187,34 +156,18 @@ describe('受限会话：读文件 / 写文件 / 终端 / 审批全部被拒绝'
 })
 
 describe('「跳过全部确认」档', () => {
-  test('会话此刻在免确认档（claude 的 bypassPermissions）→ 先切到 default 再跑', async () => {
+  test('用户的缺省模式是免确认档（claude 的 bypassPermissions）：受限会话照样固定在 default', async () => {
     const f = setup({ env: { FAKE_MODE: 'bypassPermissions' } })
-    // 对照：普通新会话确实在免确认档（证明环境变量生效、不是默认值）
-    const normal = await f.agent.newSession(f.root)
-    expect(normal.configOptions.find((o) => o.category === 'mode')?.currentValue).toBe('bypassPermissions')
-
-    const { text, end } = await f.ask('把这句话改好')
+    const { text, end } = await f.ask('审批模式')
     expect(end.t).toBe('res')
-    expect(text).toContain('mode=default')
-    expect(text).not.toContain('bypassPermissions')
+    expect(text).toContain('perm-mode:default')
   })
 
-  test('切不走（agent 忽略了切换）→ 拒绝运行：prompt 根本没发，没有任何输出', async () => {
-    const f = setup({ env: { FAKE_MODE: 'bypassPermissions', FAKE_MODE_LOCKED: '1' } })
-    const { text, end } = await f.ask('把这句话改好')
-    expect(end).toMatchObject({ t: 'err', message: expect.stringContaining('拒绝运行') })
-    expect(text).toBe('')
-    expect(f.agent.busy).toBe(false)
-    expect(leftovers(f)).toEqual([])
-  })
-
-  test('表外 agent（posture 表里没有）不猜：mode 不动。这是已知余量（见 posture.ts），审批和 fs / 终端仍被拒', async () => {
+  test('表外 agent（posture 表里没有这个 id）也一样：模式由驱动固定，不靠 posture 表', async () => {
     const f = setup({ id: 'mystery', env: { FAKE_MODE: 'bypassPermissions' } })
-    const { text, end } = await f.ask('把这句话改好')
+    const { text, end } = await f.ask('审批模式')
     expect(end.t).toBe('res')
-    expect(text).toContain('mode=bypassPermissions')
-    const denied = await f.ask('随手终端')
-    expect(denied.text).toContain('term-denied:')
+    expect(text).toContain('perm-mode:default')
   })
 })
 

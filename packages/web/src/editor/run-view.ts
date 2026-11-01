@@ -1,18 +1,15 @@
 // ---------- 步骤展开后的常规展示：一步做了什么 ----------
 // 执行命令 = `$ 命令` + 输出；读文件 = 路径 + 内容；修改 = 路径 + 逐行着色 diff；搜索 / 抓取 = 关键词或网址 + 结果；
 // 子代理 = 任务 / 步骤 / 回答；其余 = 结果文字。认不出的形状一律退回结果文字，不猜；什么都没有就说没有。
-// 原始调用信息（rawInput / rawOutput / _meta …）收在每一步的「高级」里（run-detail.ts 的 toolDetailHtml）。
+// 数据只经 viewOf 读（与协议无关的步骤视图，老记录由它从原始载荷推出）；原样载荷收在「高级」里（run-detail.ts 的 toolDetailHtml）。
 // 过程页步骤块（run-step-view.ts）与回复里运行中的托盘（run-tray.ts）共用。全部内容经 escapeHtml。
 
-import type { RunEntry, ToolEntry } from '@ramet/shared/run-model'
+import { subRunOf, viewOf, type RunEntry, type ToolEntry, type ToolView } from '@ramet/shared/run-model'
 import { COPY } from '../copy'
 import { iconSvg } from '../icons'
 import { foldDiff, lineDiff } from './line-diff'
-import { commandOf, rec, subRunHtml } from './run-detail'
+import { subRunHtml } from './run-detail'
 import { entryObject, escapeHtml } from './run-format'
-import { stepExit } from './step-terminal'
-
-const str = (v: unknown): string => (typeof v === 'string' ? v : '')
 
 /** 去掉整段包着的 ``` 围栏（agent 常把文件内容 / 命令输出包成代码块） */
 function unfence(text: string): string {
@@ -20,41 +17,14 @@ function unfence(text: string): string {
   return m ? (m[1] ?? '') : text
 }
 
-/** 结果文字：content 里的文字块 → rawOutput 是字符串 → rawOutput 里常见的输出字段 → 子代理输出 */
-function resultText(e: ToolEntry): string {
-  const acp = rec(e.acp)
-  const texts: string[] = []
-  if (Array.isArray(acp.content)) {
-    for (const raw of acp.content) {
-      const c = rec(raw)
-      const inner = rec(c.content)
-      if (c.type === 'content' && typeof inner.text === 'string') texts.push(inner.text)
-    }
-  }
-  if (texts.length) return unfence(texts.join('\n'))
-  const out = acp.rawOutput
-  if (typeof out === 'string') return unfence(out)
-  const o = rec(out)
-  const fields = ['output', 'formatted_output', 'aggregated_output', 'stdout', 'stderr', 'result', 'content', 'text']
-    .map((k) => str(o[k]))
-    .filter(Boolean)
-  if (fields.length) return unfence(fields.join('\n'))
-  return e.output ?? ''
+/** 结果文字：视图里的结果 → 子代理 / 终端的实时输出 */
+function resultText(e: ToolEntry, v: ToolView): string {
+  return v.result !== undefined ? unfence(v.result) : (e.output ?? '')
 }
 
-/** 文件路径：locations 第一条 → rawInput 里常见的路径字段 → 列表行上的 detail */
-function pathOf(e: ToolEntry): string {
-  const acp = rec(e.acp)
-  if (Array.isArray(acp.locations)) {
-    const first = rec(acp.locations[0])
-    if (typeof first.path === 'string' && first.path) return first.path
-  }
-  const input = rec(acp.rawInput)
-  for (const k of ['file_path', 'path', 'filePath', 'abs_path', 'notebook_path']) {
-    const v = str(input[k])
-    if (v) return v
-  }
-  return e.detail ?? ''
+/** 文件路径：视图里的主路径 → 列表行上的 detail */
+function pathOf(e: ToolEntry, v: ToolView): string {
+  return v.path || e.detail || ''
 }
 
 const pathRow = (path: string): string =>
@@ -72,59 +42,48 @@ function diffBlock(path: string, oldText: string, newText: string): string {
   return `<div class="rv-diff">${pathRow(path)}<div class="rv-lines">${lines.join('')}</div></div>`
 }
 
-/** 修改类：content 里的 diff → rawInput 的 old_string / new_string → rawInput.content（整份写入）→ 结果文字 */
-function editView(e: ToolEntry): string {
-  const acp = rec(e.acp)
-  const diffs = (Array.isArray(acp.content) ? acp.content : []).map(rec).filter((c) => c.type === 'diff')
-  if (diffs.length) return diffs.map((d) => diffBlock(str(d.path) || pathOf(e), str(d.oldText), str(d.newText))).join('')
-  const input = rec(acp.rawInput)
-  if (typeof input.old_string === 'string' || typeof input.new_string === 'string') {
-    return diffBlock(pathOf(e), str(input.old_string), str(input.new_string))
-  }
-  if (typeof input.content === 'string') return diffBlock(pathOf(e), '', input.content)
-  return pathRow(pathOf(e)) + outBlock(resultText(e))
+/** 修改类：视图里的 diff（逐个）→ 路径 + 结果文字 */
+function editView(e: ToolEntry, v: ToolView): string {
+  if (v.diffs?.length) return v.diffs.map((d) => diffBlock(d.path || e.detail || '', d.old, d.new)).join('')
+  return pathRow(pathOf(e, v)) + outBlock(resultText(e, v))
 }
 
-function commandView(e: ToolEntry): string {
-  const input = rec(rec(e.acp).rawInput)
-  const command = commandOf(input) || entryObject(e)
-  const desc = str(input.description).trim()
-  const raw = rec(rec(e.acp).rawOutput)
-  // ACP 终端里的命令：退出状态是服务端补的 acp.terminalExit；别的 agent 的命令看 rawOutput 里常见的退出码字段
-  const term = stepExit(e)
-  const code = term ? term.exitCode : typeof raw.exit_code === 'number' ? raw.exit_code : typeof raw.exitCode === 'number' ? raw.exitCode : null
-  const ended = code ? COPY.run.exitCode(code) : term?.signal ? COPY.run.killedBy(term.signal) : ''
+function commandView(e: ToolEntry, v: ToolView): string {
+  const command = v.command || entryObject(e)
+  const desc = v.description ?? ''
+  const code = v.exit?.code ?? null
+  const ended = code ? COPY.run.exitCode(code) : v.exit?.signal ? COPY.run.killedBy(v.exit.signal) : ''
   return (
     `<pre class="rv-cmd"><span class="rv-prompt">$</span> ${escapeHtml(command)}</pre>` +
     (desc ? `<div class="rv-note">${escapeHtml(desc)}</div>` : '') +
-    outBlock(resultText(e)) +
+    outBlock(resultText(e, v)) +
     (ended ? `<div class="rv-note is-bad">${escapeHtml(ended)}</div>` : '')
   )
 }
 
-/** 搜索 / 抓取：查询词或网址一行 + 结果 */
-function queryView(e: ToolEntry): string {
-  const input = rec(rec(e.acp).rawInput)
-  const q = ['pattern', 'query', 'url', 'glob', 'search'].map((k) => str(input[k])).find(Boolean) || entryObject(e)
-  const where = str(input.path)
+/** 搜索 / 抓取：查询词或网址一行（+ 搜索范围）+ 结果 */
+function queryView(e: ToolEntry, v: ToolView): string {
+  const q = v.query || entryObject(e)
+  const where = v.cwd ?? ''
   return (
     `<div class="rv-query">${iconSvg(e.kind === 'fetch' ? 'globe' : 'search', 13)}<span>${escapeHtml(q)}</span>` +
     (where ? `<span class="rv-where">${escapeHtml(where)}</span>` : '') +
     `</div>` +
-    outBlock(resultText(e))
+    outBlock(resultText(e, v))
   )
 }
 
 /** 工具步骤的常规展示 */
 export function toolViewHtml(e: ToolEntry): string {
-  const acp = rec(e.acp)
+  const v = viewOf(e)
+  const sub = subRunOf(e)
   let body: string
-  if (acp.subRun !== undefined) body = subRunHtml(acp.subRun)
-  else if (e.kind === 'execute') body = commandView(e)
-  else if (e.kind === 'read') body = pathRow(pathOf(e)) + outBlock(resultText(e))
-  else if (e.kind === 'edit' || e.kind === 'delete' || e.kind === 'move') body = editView(e)
-  else if (e.kind === 'search' || e.kind === 'fetch') body = queryView(e)
-  else body = outBlock(resultText(e))
+  if (sub !== undefined) body = subRunHtml(sub)
+  else if (e.kind === 'execute') body = commandView(e, v)
+  else if (e.kind === 'read') body = pathRow(pathOf(e, v)) + outBlock(resultText(e, v))
+  else if (e.kind === 'edit' || e.kind === 'delete' || e.kind === 'move') body = editView(e, v)
+  else if (e.kind === 'search' || e.kind === 'fetch') body = queryView(e, v)
+  else body = outBlock(resultText(e, v))
   const fail = e.status === 'failed' ? `<div class="rv-fail">${escapeHtml(e.note ? `${COPY.run.stepFailed}：${e.note}` : COPY.run.stepFailed)}</div>` : ''
   const empty = body.replace(/<[^>]*>/g, '').trim() === '' ? `<div class="rv-empty">${escapeHtml(COPY.run.noResult)}</div>` : ''
   const trunc = e.truncated ? `<div class="rd-trunc">${escapeHtml(COPY.run.truncated)}</div>` : ''

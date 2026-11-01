@@ -5,7 +5,7 @@
 //
 // 条目类型与「谁看得到」：
 //   approval          等你批准。看得到 = 这个页面 + agent 上在飞那一轮的发起人；没有对得上的在飞回合时退回「能回答它的人」。
-//                     无论哪种最后都要再过一遍回答判定（与 POST …/permission 同一套：页面可写；ACP 审批再加对这台机器 agent 的使用权，
+//                     无论哪种最后都要再过一遍回答判定（与 POST …/permission 同一套：页面可写；agent 会话的审批再加对这台机器 agent 的使用权，
 //                     本机 agent 是全局 admin）。看得到回答不了的审批一条都不给
 //   connector_pending 待批准的 agent 接入：只给该空间 space_members.role='owner' 的人（不含全局 admin，与 routes/connectors.ts 的批准门槛同）
 //   access_request    有人申请用你的机器：机器主人看得到；只展示，授权必须去设置里走完整流程
@@ -14,8 +14,9 @@
 //   running           你发起的、此刻在飞的回合
 //   plan              等你批计划：你发起的、还是草稿的计划；页面必须仍对你可写（owner / member），
 //                     viewer / 被移出空间 / 页面进回收站的不给。按钮走 POST …/continue {team} 与 …/team/:id/cancel
-//   question          等你回答：agent 的提问（带 form 的审批 = ACP elicitation）。数据源、可见性、回答判定都与 approval 同一套，
+//   question          等你回答：agent 的提问（带 form 的审批）。数据源、可见性、回答判定都与 approval 同一套，
 //                     只是表单要在页面里答，条目只给入口
+//   comment           评论：有人回复了我参与的串 / @了我 / 在我建的页面上新开了串，一个串一条（规则与 SQL 在 comments/inbox.ts）
 // 列举类读路径一律只含自己是成员的空间，全局 admin 也一样。
 import type { Pool } from 'pg'
 import { pageAccess } from './collab.js'
@@ -24,6 +25,7 @@ import { canUse, inConnectorSpace, type MachineScope } from './agents/machine-ac
 import { parseRemoteId, type ActiveRun, type PendingApproval } from './agents/manager-types.js'
 import type { ConnectorAgentInfo } from './agents/protocol.js'
 import type { PermissionOption } from './agents/types.js'
+import { commentItems, type CommentInboxItem } from './comments/inbox.js'
 
 export type InboxUser = { id: string; role: string }
 
@@ -102,6 +104,8 @@ export type InboxItem =
   | { type: 'plan'; key: string; at: string; pageId: string; pageTitle: string; title: string; planId: string }
   /** 等你回答：agent 的提问（带 form 的审批）。表单在页面里答，这里只给入口 */
   | { type: 'question'; key: string; at: null; pageId: string; pageTitle: string; agentId: string; agentName: string; requestId: string; text: string }
+  /** 评论：有人回复了我参与的串 / @了我 / 在我建的页面上新开了串（规则见 comments/inbox.ts） */
+  | CommentInboxItem
 
 const DONE_WINDOW_DAYS = 7
 const LIST_MAX = 30
@@ -171,7 +175,7 @@ async function approvalItems(pool: Pool, user: InboxUser, host: InboxHost): Prom
     const page = pages.get(a.pageId)
     // 回答判定的前一半：页面可写（viewer 答不了，路由 403 / 404）
     if (!page || (page.role !== 'owner' && page.role !== 'member')) continue
-    // 后一半：ACP 审批要对那台机器有 agent 使用权；Ramet 自己的审批不碰任何人的机器，只看页面可写
+    // 后一半：agent 会话的审批要对那台机器有 agent 使用权；Ramet 自己的审批不碰任何人的机器，只看页面可写
     if (!a.own && !(await mayUseAgent(pool, host, user, a.agentId))) continue
     if (a.event.form) {
       out.push({
@@ -198,7 +202,7 @@ async function approvalItems(pool: Pool, user: InboxUser, host: InboxHost): Prom
       requestId: a.event.requestId,
       title: a.event.title,
       options: a.event.options,
-      detail: approvalPreview(a.event.toolCall),
+      detail: approvalPreview(a.event.toolCall, a.event.view),
     })
   }
   return out
@@ -416,7 +420,7 @@ async function agentNames(pool: Pool, host: InboxHost, ids: Set<string>): Promis
 
 /** 当前用户的收件箱。顺序只是同类挨着，分组与排序是前端的事 */
 export async function collectInbox(pool: Pool, user: InboxUser, host: InboxHost): Promise<InboxItem[]> {
-  const [approvals, pending, requests, firstUse, plans, done, running] = await Promise.all([
+  const [approvals, pending, requests, firstUse, plans, done, running, comments] = await Promise.all([
     approvalItems(pool, user, host),
     pendingConnectorItems(pool, user, host),
     accessRequestItems(pool, user),
@@ -424,8 +428,9 @@ export async function collectInbox(pool: Pool, user: InboxUser, host: InboxHost)
     planItems(pool, user),
     doneItems(pool, user),
     runningItems(pool, user, host),
+    commentItems(pool, user),
   ])
-  const items = [...approvals, ...pending, ...requests, ...firstUse, ...plans, ...done, ...running]
+  const items = [...approvals, ...pending, ...requests, ...firstUse, ...plans, ...done, ...running, ...comments]
   const ids = new Set<string>()
   for (const item of items) if ('agentId' in item && item.agentId) ids.add(item.agentId)
   const names = await agentNames(pool, host, ids)

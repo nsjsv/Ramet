@@ -1,8 +1,8 @@
 // ---------- 随手 AI 本地通道（connector 侧）：在这台机器上用 agent 做一次受限的文本改写 ----------
 // 中心发来 quick 帧（agent 范围的驱动帧：已过 connector 的第二道闸 checkActor）。这里起一个受限会话：
 //   - 临时空目录当 cwd，不给 MCP 工具（agent 摸不到页面，也摸不到工作区）；
-//   - agent 经 ACP 向客户端要读文件 / 写文件 / 开终端，一律拒绝；request_permission 自动拒绝（见 acp.ts 的 restricted）；
-//   - 会话此刻在「跳过全部确认」档（posture.ts 的表）就先切到非危险档，切不了就拒绝运行；
+//   - 不给工具、固定在不提权的模式、审批 / 提问一律拒绝且不发事件，都由驱动的 newRestrictedSession 保证
+//     （用户自己配置的免确认档不带进来，所以这里不用再切模式）；
 //   - agent 一开始调用工具（tool 事件）就中止本次：改写用不着工具，调了说明它在做别的；
 //   - 每人同时一个、整台机器同时 MAX_TOTAL 个、60 秒超时、输出上限；
 //   - 结束（含失败 / 取消 / 超时）一律清理临时目录和适配器里的会话记录。
@@ -10,10 +10,9 @@
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { errorText, type AcpAgent } from '../agents/acp.js'
-import { unrestrictedModesOf } from '../agents/posture.js'
+import type { DriverBase } from '../agents/drivers/base.js'
+import { errorText } from '../agents/drivers/error-text.js'
 import type { CenterMsg, ConnMsg } from '../agents/protocol.js'
-import type { ConfigOption } from '../agents/types.js'
 
 /** 一次调用的墙钟上限 */
 export const QUICK_TIMEOUT_MS = 60_000
@@ -28,7 +27,7 @@ const CANCEL_GRACE_MS = 5_000
 
 export type QuickDeps = {
   /** 取（必要时起）这个 agent 的适配器；本机没有这个 agent 会抛 */
-  adapter: (agentId: string) => AcpAgent
+  adapter: (agentId: string) => DriverBase
   send: (msg: ConnMsg) => void
   log: (line: string) => void
   /** 测试注入：超时（缺省 QUICK_TIMEOUT_MS）与临时目录的父目录（缺省系统临时目录） */
@@ -39,25 +38,6 @@ export type QuickDeps = {
 type Run = { actor: string; abort: (reason: string) => void }
 
 type QuickFrame = Extract<CenterMsg, { t: 'quick' }>
-
-/** 受限会话的 mode：在「跳过全部确认」档就切到非危险档。agent 没把 mode 暴露成配置项 / 不在 posture 表里 = 无从判断，放行 */
-async function ensureSafeMode(adapter: AcpAgent, agentId: string, sessionId: string, options: ConfigOption[]): Promise<void> {
-  const unrestricted = unrestrictedModesOf(agentId)
-  const mode = options.find((o) => o.category === 'mode')
-  if (!mode || !unrestricted.includes(mode.currentValue)) return
-  const target = mode.options.find((o) => o.value === 'default') ?? mode.options.find((o) => !unrestricted.includes(o.value))
-  if (!target) throw new Error('这个 agent 当前处于「跳过全部确认」，又没有可切换的安全模式，随手 AI 拒绝运行')
-  let next: ConfigOption[]
-  try {
-    next = await adapter.setConfigOption(sessionId, mode.id, target.value)
-  } catch (err) {
-    throw new Error(`这个 agent 当前处于「跳过全部确认」，切换到安全模式失败，随手 AI 拒绝运行：${errorText(err)}`)
-  }
-  const now = next.find((o) => o.id === mode.id)
-  if (!now || unrestricted.includes(now.currentValue)) {
-    throw new Error('这个 agent 当前处于「跳过全部确认」，没能切到安全模式，随手 AI 拒绝运行')
-  }
-}
 
 export class QuickRunner {
   private runs = new Map<string, Run>()
@@ -105,7 +85,7 @@ export class QuickRunner {
 
     let reason: string | null = null
     let sessionId: string | null = null
-    let adapter: AcpAgent | null = null
+    let adapter: DriverBase | null = null
     let graceTimer: NodeJS.Timeout | null = null
     let wakeGrace: () => void = () => undefined
     const grace = new Promise<void>((resolve) => {
@@ -134,7 +114,6 @@ export class QuickRunner {
       sessionId = session.sessionId
       if (reason !== null) throw new Error(reason)
       log(`quick agent=${msg.agent} session=${sessionId}`)
-      await ensureSafeMode(adapter, msg.agent, sessionId, session.configOptions)
       let total = 0
       const sid = sessionId
       off = adapter.on((ev) => {
@@ -144,7 +123,7 @@ export class QuickRunner {
           if (total > QUICK_OUTPUT_MAX) abort('随手 AI 输出太长，已中止')
           else if (reason === null) send({ t: 'quick-delta', rid: msg.rid, text: ev.delta })
         } else if (ev.type === 'tool') {
-          // 改写用不着工具：agent 要调就中止（读写文件 / 终端 / 审批本来也都被拒绝了，这里是再收紧一道）
+          // 改写用不着工具：agent 要调就中止（受限会话本来就不给工具、审批一律拒绝，这里是再收紧一道）
           abort('这个 agent 想在随手 AI 里调用工具，已中止；换一个 agent 或到设置里换成「本站」通道')
         }
       })

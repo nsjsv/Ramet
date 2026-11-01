@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { EditorView } from '@milkdown/kit/prose/view'
-import { api, ApiError, isToolProfile, type AskForm, type ConfigOption, type QueueItem, type ToolProfile } from '../api'
+import { api, ApiError, isToolProfile, type AgentInfo, type AskForm, type ConfigOption, type QueueItem, type ToolProfile } from '../api'
 import { mountAsk } from './ask-form'
 import { COPY } from '../copy'
-import { agentList, getDefaultAgent, pickAgent, useAgents, useDefaultAgent } from '../default-agent'
-import { applyRunEvent, type RunEvent, type RunState, type TeamPlanView } from '@ramet/shared/run-model'
+import { agentList, agentsForPage, getDefaultAgent, pickAgent, useAgents, useDefaultAgent } from '../default-agent'
+import { applyRunEvent, type RunEvent, type RunState, type TeamPlanView, type ToolView } from '@ramet/shared/run-model'
 import { planStore } from '../team/team-api'
 import { isRunEventType } from './run-event-types'
 import { forgetFailReason, rememberFailReason } from './fail-reason'
@@ -21,7 +21,7 @@ export interface PermissionOption {
   name: string
 }
 
-// ---------- 会话配置项（ACP session config options） ----------
+// ---------- 会话配置项 ----------
 // 类型与 REST / SSE 契约同在 api.ts；事实源是 agent 的会话：新建 / 加载会话、setConfigOption
 // 应答、config_option_update 三处推来。AgentState.configs 按 agentId 分存这批选项，
 // 换 agent 后旧选项不能当新 agent 的用。
@@ -32,10 +32,11 @@ export interface PermissionReq {
   requestId: string
   title: string
   options: PermissionOption[]
-  /** ACP request_permission 的 toolCall（kind / title / rawInput / content / locations，服务端已限长）：
-   *  审批卡的命令 / diff 预览只读它，没有就不画预览 */
+  /** 要批的工具调用的中性视图：审批卡的命令 / diff 预览优先读它（run-detail 的 permissionView） */
+  view?: ToolView
+  /** 原始请求载荷（服务端已限长）：没有 view 或 view 缺字段时由共享包的兼容函数从它推，前端不直接读 */
   toolCall?: Record<string, unknown>
-  /** 有值表示这是 agent 的提问（ACP elicitation）：画表单而不是选项按钮（ask-form.ts） */
+  /** 有值表示这是 agent 的提问：画表单而不是选项按钮（ask-form.ts） */
   form?: AskForm
 }
 
@@ -79,6 +80,9 @@ export interface AgentState {
   /** 本页给 agent 的 Ramet 工具档位（服务端 agent_session.tools，SSE 首帧给；没设过是 full）。
    *  none 只当 UI、minimal 读写当前页、full 全部；非 full 时斜杠菜单不给带队与 skill 点名（slash.ts） */
   tools: ToolProfile
+  /** 本页锁定的工具（服务端按第一块回复定，SSE 首帧 + 第一块回复建好时给）：'' = 还没有回复、不锁。
+   *  锁定后选来源、消息 chip、@ 候选、命令面板都只列这个工具（agentsForPage），不从文档里自己推 */
+  lock: string
   message?: string
   /** 各 agent 的生效工作区（用户指定值或执行端默认；cwd 按 agent 分存，不同 agent 可能在不
    *  同机器上）。来源是 prepare 与改绑端点的 cwd 事件，未问过就没有该键 */
@@ -99,7 +103,7 @@ export interface AgentState {
   queue: { items: QueueItem[]; paused: boolean }
 }
 
-const IDLE: AgentState = { status: 'idle', choice: null, tools: 'full', permissions: [], commands: {}, configs: {}, cwds: {}, run: null, queue: { items: [], paused: false } }
+const IDLE: AgentState = { status: 'idle', choice: null, tools: 'full', lock: '', permissions: [], commands: {}, configs: {}, cwds: {}, run: null, queue: { items: [], paused: false } }
 
 // ---------- SSE 状态（模块级共享 store） ----------
 // 同一页面不止一个消费者：React 侧（Editor 的 useAgentEvents）和非 React 的过程列表
@@ -166,6 +170,7 @@ function openAgentEvents(pageId: string): AgentEventStore {
         title?: string
         options?: unknown
         toolCall?: unknown
+        view?: unknown
         form?: unknown
         list?: AgentCommand[]
         agentId?: string
@@ -205,6 +210,11 @@ function openAgentEvents(pageId: string): AgentEventStore {
         case 'choice':
           update((s) => (s.choice === (ev.agentId ?? '') ? s : { ...s, choice: ev.agentId ?? '' }))
           break
+        case 'tool_lock': {
+          const lock = typeof raw.tool === 'string' ? raw.tool : ''
+          update((s) => (s.lock === lock ? s : { ...s, lock }))
+          break
+        }
         case 'tool_profile': {
           const profile = isToolProfile(ev.profile) ? ev.profile : 'full'
           update((s) => (s.tools === profile ? s : { ...s, tools: profile }))
@@ -299,6 +309,7 @@ function openAgentEvents(pageId: string): AgentEventStore {
                       title: ev.title ?? '',
                       options: (ev.options as PermissionOption[] | undefined) ?? [],
                       ...(ev.toolCall && typeof ev.toolCall === 'object' ? { toolCall: ev.toolCall as Record<string, unknown> } : {}),
+                      ...(ev.view && typeof ev.view === 'object' ? { view: ev.view as ToolView } : {}),
                       ...(ev.form && typeof ev.form === 'object' ? { form: ev.form as AskForm } : {}),
                     },
                   ],
@@ -409,7 +420,8 @@ export function useAgentRunError(): string | null {
 
 /** 触发一次生成；失败原因写到运行错误单源（不吞） */
 export function runAgent(pageId: string, agent: string): void {
-  if (!agent) {
+  // 锁定的工具一台都不在线时照样交给服务端：消息里显式 @ 了别的 agent 就照常跑（@ 不受锁定），没有 @ 服务端回「现在没有可用的 …」
+  if (!agent && !agentStateFor(pageId).lock) {
     setAgentRunError('没有可用的 agent：还没连 connector（设置 → 连接器），或别人接入的机器还没授权给你（设置 → 机器）')
     return
   }
@@ -428,16 +440,34 @@ export function continueRest(pageId: string): void {
 // ---------- 这一页发给谁（来源按页记住） ----------
 // 唯一解析规则：指定值（消息 attrs）、本页记住的（choice）、全局默认（localStorage）、目录第一个，依次回落，
 // 只取仍在目录里的（被撤销的 connector 等失效 id 跳过）。输入卡、文档发送、斜杠命令、消息 chip 都走这里。
+// 目录先按本页锁定的工具过滤：锁定的工具一台在线的都没有时解析成 ''，不回落到别的工具。
+
+/** 这一页能选的 agent（目录按本页锁定的工具过滤）：非 React 消费方用（文档 @ 候选） */
+export function pageAgents(pageId: string): readonly AgentInfo[] {
+  return agentsForPage(agentList(), agentStateFor(pageId).lock)
+}
 
 /** 非 React 消费方用（发送 / 斜杠命令 / 重新回复） */
 export function pageAgent(pageId: string, preferred = ''): string {
-  return pickAgent(agentList(), preferred, agentStateFor(pageId).choice ?? '', getDefaultAgent())
+  return pickAgent(pageAgents(pageId), preferred, agentStateFor(pageId).choice ?? '', getDefaultAgent())
+}
+
+/** React 侧的 pageAgents：目录与锁定任一变化都重算。loaded 同 useAgents（拉过目录没有），lock 给空列表时的提示用 */
+export function usePageAgents(pageId: string | undefined): { agents: readonly AgentInfo[]; loaded: boolean; lock: string } {
+  const { agents, loaded } = useAgents()
+  const subscribe = useCallback(
+    (cb: () => void) => (pageId ? subscribeAgentEvents(pageId, () => cb()) : () => undefined),
+    [pageId],
+  )
+  const lock = useSyncExternalStore(subscribe, () => (pageId ? agentStateFor(pageId).lock : ''))
+  const filtered = useMemo(() => agentsForPage(agents, lock), [agents, lock])
+  return { agents: filtered, loaded, lock }
 }
 
 /** React 侧：目录、全局默认、本页记住的任一变化都重算；只订 choice，流式事件不触发重画。
  *  ready 表示本页记住的已经知道了（首帧到了），这之前别预备会话 */
 export function usePageAgent(pageId: string | undefined, preferred = ''): { agent: string; ready: boolean } {
-  const { agents } = useAgents()
+  const { agents } = usePageAgents(pageId)
   const stored = useDefaultAgent()
   const subscribe = useCallback(
     (cb: () => void) => (pageId ? subscribeAgentEvents(pageId, () => cb()) : () => undefined),
@@ -468,12 +498,24 @@ export function setPageTools(pageId: string, profile: ToolProfile): void {
   })
 }
 
-/** 重新生成 / 重试（同一个动作）：对一块已有的回复再跑一轮，块 id 不变。
+/** 重新生成（不是最后一块的失败回复的「重试」也是它）：对一块已有的回复从头再跑一轮，块 id 不变。
  *  409（页面忙）/ 400（agent 不可用）等失败原因写到运行错误单源，不吞 */
 export function regenerateReply(pageId: string, replyId: string): void {
   setAgentRunError(null)
   void api.regenerate(pageId, replyId).catch((err: unknown) => {
     setAgentRunError(err instanceof Error ? `${COPY.run.regenerateFailed}：${err.message}` : COPY.run.regenerateFailed)
+  })
+}
+
+/** 续跑（最后一块失败回复的「重试」、停止回复的「继续」）：接着原会话、在同一块回复里接着写。
+ *  服务端的人话原因（页面忙、换了工具、这块已经不是最后一块）同样进运行错误单源。
+ *  orRegenerate：服务端判定不能续（点之前后面来了新消息、出计划前就断了的带队轮，前端看不出来）时改为从头重新生成——
+ *  失败块的「重试」本来就是这两种之一；停止块的「继续」不传，不能替用户把已有的回答换掉 */
+export function resumeReply(pageId: string, replyId: string, orRegenerate = false): void {
+  setAgentRunError(null)
+  void api.resume(pageId, replyId).catch((err: unknown) => {
+    if (orRegenerate && err instanceof ApiError && err.code === 'not-resumable') return regenerateReply(pageId, replyId)
+    setAgentRunError(err instanceof Error ? `${COPY.run.resumeFailed}：${err.message}` : COPY.run.resumeFailed)
   })
 }
 

@@ -220,6 +220,34 @@
   display: inline-flex;
 }
 
+/* ---------- 手动停止的最后一块：「已停止 · 继续」（reply-fail.ts 的 buildStoppedStrip），失败条的中性色版 ---------- */
+
+.pill.is-stopped {
+  background: var(--bg-sunk);
+}
+
+.pill.is-stopped .now {
+  color: var(--ink-2);
+}
+
+/* 停止不是出错：灰点，尺寸与位置同失败的红点 */
+.pill.is-stopped .spin {
+  width: 8px;
+  height: 8px;
+  margin: 3px;
+  border: 0;
+  background: var(--ink-3);
+  animation: none;
+}
+
+.run-strip.is-stopped .pill-main {
+  cursor: default;
+}
+
+.pill.is-stopped .retry {
+  display: inline-flex;
+}
+
 /* 「继续剩下的」没有后面的人时藏起来（hidden 属性压不过上面的 display，这里显式压） */
 .pill .retry[hidden] {
   display: none;

@@ -13,9 +13,13 @@ import type { MachineScope } from './machine-access.js'
 import { PROJECT_CAP, QUICK_CAP, WRITE_CAP, type ProjectReply } from './project-types.js'
 import { PREVIEW_CAP, type HeaderPairs } from './preview-types.js'
 import { TERMINAL_CAP, type PtyExitReason } from './pty-types.js'
+import { SESSION_CAP, type SessionReply } from './session-types.js'
 
 /** connector 上报的可用 agent（前端下拉项；id 在本机内唯一） */
-export type ConnectorAgentInfo = { id: string; label: string; logo?: string | null }
+/** driver / version：这个 agent 走哪个驱动、本机 CLI 是哪一版（取不到就没有）。老 connector 两项都不带，
+ *  中心不能依赖它们；值来自对端，只当信息展示，不据此做权限判断。
+ *  unavailable：connector 判定这个 agent 在这台机器上用不了（比如 CLI 版本低于驱动要求）的原因，目录里置灰、不可选 */
+export type ConnectorAgentInfo = { id: string; label: string; logo?: string | null; driver?: string; version?: string; unavailable?: string }
 
 /** connector → 中心 */
 export type ConnMsg =
@@ -45,6 +49,8 @@ export type ConnMsg =
       project?: ProjectReply
       /** quick 帧的应答：本次单次调用的结束原因（文本增量走 quick-delta） */
       quick?: { stopReason: string }
+      /** 会话文件帧（session-stat / session-read / session-write / session-close）的应答 */
+      session?: SessionReply
     }
   /** 请求失败（含 prompt 中途失败；prompt 的失败带 runId/seq）。code = 'forbidden'：被 connector 拒绝（第二道闸：本机授权名单，
    *  或终端不是你的）；'not_found'：终端不存在；'conflict'：写文件时文件已不是用户读到的那一版 */
@@ -152,10 +158,37 @@ export type CenterMsg =
    *  读写文件 / 开终端一律拒绝、审批自动拒绝、免确认档先切走（切不了就拒绝运行）、60 秒超时、每人同时一个；prompt 是中心拼好的整段文本。
    *  文本增量走 quick-delta，结束走 res { quick }，失败走 err */
   | { t: 'quick'; rid: string; actor: string; agent: string; prompt: string }
+  /** 搬会话（machine 范围，只认机器主人）：会话记录文件的路径只由 connector 上这个 agent 的驱动按工具规则算（会话端口），
+   *  中心只给 agent / sessionId / cwd / 端口定义的不透明文件名 name；name 不是端口认的形状、带 .. 或绝对路径一律拒绝。
+   *  stat = 列出这个会话在本机的全部文件，known 是中心已有的每个文件的长度（tailHash 按它算）；
+   *  read = 从 offset 读一块（≤ SESSION_CHUNK_BYTES）；
+   *  write = 把中心那份写到本机（按目标 cwd 算位置）：offset 0 开一个同目录临时文件，后续块必须接着写，last 的那块核对总长 = size
+   *  后原子换入，任一步失败删掉临时文件、不留半截；会话正在跑一轮时拒绝；
+   *  close = 让驱动彻底放掉这个会话（之后 load 一定重读磁盘），写入之前先关 */
+  | { t: 'session-stat'; rid: string; actor: string; agent: string; sessionId: string; known: Array<{ name: string; size: number }> }
+  | { t: 'session-read'; rid: string; actor: string; agent: string; sessionId: string; name: string; offset: number }
+  | {
+      t: 'session-write'
+      rid: string
+      actor: string
+      agent: string
+      sessionId: string
+      cwd: string
+      name: string
+      offset: number
+      /** 这一块（base64） */
+      data: string
+      /** 这个文件的最后一块 */
+      last: boolean
+      /** 整个文件的字节数 */
+      size: number
+    }
+  | { t: 'session-close'; rid: string; actor: string; agent: string; sessionId: string }
   /** 停掉一次 quick（按 rid）。非驱动帧：只会让机器停下来，不带 actor、connector 不判（同 cancel）；谁能停由发起这次调用的 HTTP 请求决定 */
   | { t: 'quick-cancel'; rid: string }
-  /** 停止 agent 在 ACP 终端里跑的一条命令（terminal/kill）。非驱动帧：只会让机器停下来，不带 actor、connector 不判，
-   *  谁能停由页面写权限决定（同 cancel）；connector 只认这个 agent 这个会话自己的终端，对不上就忽略 */
+  /** 停止一个可停的东西（步骤 view.handle：子代理；老 connector 上是 ACP 终端的 id，字段名因此叫 terminalId）。
+   *  非驱动帧：只会让机器停下来，不带 actor、connector 不判，谁能停由页面写权限决定（同 cancel）；
+   *  connector 只认这个 agent 这个会话自己的句柄，对不上就忽略 */
   | { t: 'kill-cmd'; agent: string; sessionId: string; terminalId: string }
   /** 此人在这台机器上的授权收窄了（换成了范围更小的新授权）：machine 范围没了，connector 关掉他的全部终端。
    *  非驱动帧，只会减少权限；与 grant-revoked 不同，它不动本地名单（新授权的本地条目是刚写进去的，不能删） */
@@ -175,6 +208,7 @@ export type DrivenMsg = Extract<
       | 'tree' | 'read' | 'files' | 'git-status' | 'git-diff' | 'write'
       | 'pty-open' | 'pty-input' | 'pty-resize' | 'pty-close' | 'pty-attach' | 'pty-detach' | 'pty-list'
       | 'port-share' | 'port-unshare' | 'http-req' | 'http-body' | 'ws-open' | 'ws-msg' | 'ws-close'
+      | 'session-stat' | 'session-read' | 'session-write' | 'session-close'
   }
 >
 
@@ -192,6 +226,9 @@ export type PreviewMsg = Extract<
   CenterMsg,
   { t: 'port-share' | 'port-unshare' | 'http-req' | 'http-body' | 'ws-open' | 'ws-msg' | 'ws-close' }
 >
+
+/** 会话文件的帧（DrivenMsg 的子集；connector 据此分派到 connector/session-files.ts） */
+export type SessionMsg = Extract<CenterMsg, { t: 'session-stat' | 'session-read' | 'session-write' | 'session-close' }>
 
 /** 每种驱动帧需要的 scope：中心发帧前（hub）与 connector 收帧后用同一张表，新增驱动帧漏登记编译不过。
  *  文件树 / 读文件 / git 状态与 diff 也是 machine：别人机器上的文件不是公开的，读也算，只有 agent 授权的人用不了 */
@@ -226,6 +263,11 @@ export const DRIVEN_SCOPE: Record<DrivenMsg['t'], MachineScope> = {
   'ws-open': 'machine',
   'ws-msg': 'machine',
   'ws-close': 'machine',
+  // 会话记录里有工具结果、读过的文件内容，读写的又是这台机器的磁盘：machine 范围（connector 另外只认主人）
+  'session-stat': 'machine',
+  'session-read': 'machine',
+  'session-write': 'machine',
+  'session-close': 'machine',
 }
 
 /** 某些帧要求 connector 在 hello 里声明过的能力（老 connector 不认这些帧）。hub 发帧前查 conn.caps，不满足就不发 */
@@ -251,6 +293,10 @@ export const FRAME_CAP: Partial<Record<DrivenMsg['t'], string>> = {
   'ws-open': PREVIEW_CAP,
   'ws-msg': PREVIEW_CAP,
   'ws-close': PREVIEW_CAP,
+  'session-stat': SESSION_CAP,
+  'session-read': SESSION_CAP,
+  'session-write': SESSION_CAP,
+  'session-close': SESSION_CAP,
 }
 
 /** 帧是不是驱动帧（connector 据此决定要不要过第二道闸；未知 t 不在表里，既不是驱动帧也不会被执行） */

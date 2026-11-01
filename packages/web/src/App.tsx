@@ -698,6 +698,7 @@ function PageRoute({
       username={user.username}
       readOnly={readOnly}
       canPublish={canPublish}
+      spaceOwner={space?.my_role === 'owner'}
     />
   )
 }

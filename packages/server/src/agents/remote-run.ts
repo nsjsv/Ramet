@@ -4,26 +4,30 @@
 // hello 证明这个进程已经不跑它、4403 撤销（hub 会 reject 那次 prompt）。
 //
 // 收尾只有 closeRun → finalizeRun 这一条。认领回来的回合走同一条，不许再写一份。
+// 续跑的回合（base_run = 接着记的过程页）认领 / 收尸时先接上旧档案再折事件，收尾写回同一页：
+// 不接的话收尾会用只有续跑部分的正文盖掉回复，中断前的内容就没了。
 import type { Pool } from 'pg'
 import type { HocuspocusProvider } from '@hocuspocus/provider'
 import type * as Y from 'yjs'
+import type { DocWriter } from '../collab.js'
 import { agentReplyPhase, ReplyWriter } from './doc.js'
 import type { InflightPrompt, ResumePlan } from './hub.js'
 import type { MachinePass } from './machine-access.js'
 import { drainBot, openBotAsUser, type Bot } from './open-bot.js'
-import { finalizeRun } from './run-finalize.js'
-import { RunRecord } from './run-record.js'
+import { finalizeRun, type RunExtension } from './run-finalize.js'
+import { RunRecord, type RunRecordV1 } from './run-record.js'
+import { readRunArchive, type RunArchiveRow } from './runs.js'
 import { createRunState, type RunState } from './run-state.js'
 import { isSessionEvent, type AgentEvent, type PromptResult, type TurnUsage } from './types.js'
-import type { ToolProfile } from './tool-profile.js'
+import type { RunEvent } from '@ramet/shared/run-model'
 
 const GONE = 'agent 进程已不在（重连时没有这个回合）'
 
 const INSERT_OPEN_RUN = `INSERT INTO open_runs (
-  run_id, page_id, reply_id, session_id, agent_id, connector_id, user_id, cwd, started_at, msg_opts, msg_before
-) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11::jsonb)`
+  run_id, page_id, reply_id, session_id, agent_id, connector_id, user_id, cwd, started_at, msg_opts, msg_before, base_run
+) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11::jsonb,$12)`
 const LIST_OPEN_RUNS = `SELECT run_id, page_id, reply_id, session_id, agent_id, connector_id, user_id, cwd,
-  started_at, msg_opts, msg_before, cancel_requested FROM open_runs WHERE connector_id = $1`
+  started_at, msg_opts, msg_before, cancel_requested, base_run FROM open_runs WHERE connector_id = $1`
 const DELETE_OPEN_RUN = `DELETE FROM open_runs WHERE run_id = $1`
 const CANCEL_OPEN_RUN = `UPDATE open_runs SET cancel_requested = true WHERE run_id = $1`
 const CANCEL_OPEN_PAGE = `UPDATE open_runs SET cancel_requested = true WHERE page_id = $1`
@@ -41,6 +45,7 @@ type OpenRunRow = {
   msg_opts: unknown
   msg_before: unknown
   cancel_requested: boolean
+  base_run: string | null
 }
 
 type BotSession = Bot & { revoke?: () => Promise<void> }
@@ -50,6 +55,8 @@ export type RemoteRunHost = {
   wsPort: () => number
   botSecret: string
   notifyPagesChanged?: () => void
+  /** 续跑的回合收尾时往原过程页补步骤块（collab.ts 的 createDocWriter）；测试桩可以不给 */
+  writeDoc?: DocWriter
   broadcast(pageId: string, ev: AgentEvent): void
   notifyRunError(pageId: string, message: string, replyId?: string): void
   findRun(runId: string): RunState | undefined
@@ -65,8 +72,6 @@ export type RemoteRunHost = {
   /** 这个 session 在 connector 进程里本来就加载着：标上已加载，并绑进会话镜像（页面 + agent）。
    *  重启后的待批审批与命令靠这一步回到前端 */
   attach(pageId: string, catalogId: string, pass: MachinePass, sessionId: string, cwd: string): void
-  /** userId = 发起这一轮的人（会话的 MCP 凭证是他的，见 SavedSession.userId） */
-  persistFinalHash(pageId: string, catalogId: string, sessionId: string, cwd: string, hash: string, userId: string, tools: ToolProfile): Promise<void>
   restoreBefore(catalogId: string, pass: MachinePass, sessionId: string, before: Record<string, string>): Promise<void>
   bind(runId: string, handlers: {
     onEvent: (ev: AgentEvent, seq: number) => void
@@ -116,10 +121,12 @@ export async function insertOpenRun(pool: Pool, row: {
   startedAt: number
   msgOpts: Record<string, string>
   msgBefore: Record<string, string>
+  /** 续跑：接着记的过程页 id */
+  baseRun?: string
 }): Promise<void> {
   await pool.query(INSERT_OPEN_RUN, [
     row.runId, row.pageId, row.replyId, row.sessionId, row.agentId, row.connectorId, row.userId,
-    row.cwd, row.startedAt, JSON.stringify(row.msgOpts), JSON.stringify(row.msgBefore),
+    row.cwd, row.startedAt, JSON.stringify(row.msgOpts), JSON.stringify(row.msgBefore), row.baseRun ?? null,
   ])
 }
 
@@ -136,12 +143,29 @@ export function requestCancelByPage(pool: Pool, pageId: string): Promise<void> {
   return pool.query(CANCEL_OPEN_PAGE, [pageId]).then(() => undefined)
 }
 
-/** 重放时 emit 直接丢掉：折进 state，但不往 SSE 推。onResumed 再发一份完整快照。 */
-export function openRecord(run: RunState, replyId: string, broadcast: (ev: AgentEvent) => void): RunRecord {
-  return new RunRecord(replyId, run.startedAt, (ev) => {
+/** 重放时 emit 直接丢掉：折进 state，但不往 SSE 推。onResumed 再发一份完整快照。
+ *  base = 续跑接着记的旧档案（RunRecord.resumeFrom）；run.startedAt 已是「续跑开始 − 中断前用时」 */
+export function openRecord(run: RunState, replyId: string, broadcast: (ev: AgentEvent) => void, base?: RunRecordV1): RunRecord {
+  const emit = (ev: RunEvent): void => {
     if (run.replay) return
     broadcast(ev)
-  })
+  }
+  return base ? RunRecord.resumeFrom(replyId, base, run.startedAt, emit) : new RunRecord(replyId, run.startedAt, emit)
+}
+
+/** 续跑回合的旧档案：读不到（过程页被删了）就当普通回合收尾（新建过程页） */
+async function baseOf(row: OpenRunRow, host: RemoteRunHost): Promise<RunArchiveRow | null> {
+  if (!row.base_run) return null
+  try {
+    return await readRunArchive(host.pool, row.base_run)
+  } catch (err) {
+    console.error(`[agent] 读取续跑档案 ${row.base_run} 失败: ${errText(err)}`)
+    return null
+  }
+}
+
+function extensionOf(row: OpenRunRow, base: RunArchiveRow | null, host: RemoteRunHost): RunExtension | undefined {
+  return base ? { runPageId: base.id, user: { id: row.user_id, role: 'user' }, write: host.writeDoc } : undefined
 }
 
 export function terminalStatus(run: RunState): AgentEvent {
@@ -173,12 +197,12 @@ export function projectAgentEvent(
   else if (ev.type === 'info') record.info(ev.info)
   else if (ev.type === 'plan') record.plan(ev.entries, ev.truncated)
   else if (ev.type === 'terminal') {
-    // ACP 终端里跑的命令：实时输出追加到绑定的那一步，退出状态 / 输出被截断并进同一步的 acp（缺省键保持，不抹别的字段）
+    // agent 跑的命令：实时输出追加到那一步。退出状态 / 被截断只有老 connector 的 ACP 终端会发，并进同一步的 acp 与 view（缺省键保持，不抹别的字段）
     if (ev.delta) record.terminalOutput(ev.id, ev.delta)
     if (ev.exit || ev.truncated) {
       record.patchStep({
         id: ev.id,
-        ...(ev.exit ? { acp: { terminalExit: ev.exit } } : {}),
+        ...(ev.exit ? { acp: { terminalExit: ev.exit }, view: { exit: { code: ev.exit.exitCode, signal: ev.exit.signal } } } : {}),
         ...(ev.truncated ? { truncated: true } : {}),
       })
     }
@@ -197,8 +221,9 @@ export async function closeRun(opts: {
   usage: TurnUsage | undefined
   park: boolean
   restore: () => Promise<void>
-  persistFinalHash: (hash: string, tools: ToolProfile) => Promise<void>
   notifyPagesChanged?: () => void
+  /** 续跑：接着记原过程页，不新建 */
+  extend?: RunExtension
 }): Promise<void> {
   if (opts.run.closed) return
   opts.run.closed = true
@@ -227,7 +252,7 @@ export async function closeRun(opts: {
       ownerId: opts.ownerId,
       usage: opts.usage,
       notifyPagesChanged: opts.notifyPagesChanged,
-      persistFinalHash: opts.persistFinalHash,
+      extend: opts.extend,
     })
     if (opts.run.bound) {
       await deleteOpenRun(opts.pool, opts.run.runId).catch((err: unknown) => {
@@ -308,8 +333,11 @@ async function bury(row: OpenRunRow, host: RemoteRunHost, outcome: 'error' | 'ca
   })
   run.bound = true
   run.sessionId = row.session_id
+  run.cwd = row.cwd
   if (outcome === 'cancelled') run.cancelled = true
-  const record = openRecord(run, opened.writer.id, () => undefined)
+  else run.error = message
+  const base = await baseOf(row, host)
+  const record = openRecord(run, opened.writer.id, () => undefined, base?.record)
   run.record = record
   if (outcome === 'error') host.notifyRunError(row.page_id, message, record.replyId)
   await closeRun({
@@ -323,8 +351,8 @@ async function bury(row: OpenRunRow, host: RemoteRunHost, outcome: 'error' | 'ca
     usage: undefined,
     park: false,
     restore: async () => undefined,
-    persistFinalHash: async () => undefined,
     notifyPagesChanged: host.notifyPagesChanged,
+    extend: extensionOf(row, base, host),
   })
   host.broadcast(row.page_id, terminalStatus(run))
 }
@@ -355,14 +383,16 @@ async function adopt(row: OpenRunRow, host: RemoteRunHost): Promise<boolean> {
   })
   run.bound = true
   run.sessionId = row.session_id
+  run.cwd = row.cwd
   run.msgOpts = asRecord(row.msg_opts)
   run.msgBefore = asRecord(row.msg_before)
   const occupied = host.watch(row.page_id, run)
   const slot: { writer: ReplyWriter | null; bot: BotSession | null } =
     opened.kind === 'ready' ? { writer: opened.writer, bot: opened.bot } : { writer: null, bot: null }
+  const base = await baseOf(row, host)
   const record = openRecord(run, row.reply_id, (ev) => {
     if (occupied) host.broadcast(row.page_id, ev)
-  })
+  }, base?.record)
   run.record = record
   // 这个 session 在 connector 进程里本来就加载着。标上，收尾还原配置时不要再 session/load 出新会话；
   // 同时绑进会话镜像，重启后的待批审批与命令靠这一步回到前端。
@@ -387,11 +417,11 @@ async function adopt(row: OpenRunRow, host: RemoteRunHost): Promise<boolean> {
             usage: undefined,
             park: true,
             restore: async () => undefined,
-            persistFinalHash: async () => undefined,
-            notifyPagesChanged: host.notifyPagesChanged,
+                    notifyPagesChanged: host.notifyPagesChanged,
           })
           return
         }
+        if (error) run.error = error
         if (error && !run.cancelled && !run.hold) host.notifyRunError(row.page_id, error, run.record?.replyId)
         if (result) {
           if (result.stopReason === 'cancelled' || run.cancelled) run.cancelled = true
@@ -419,8 +449,8 @@ async function adopt(row: OpenRunRow, host: RemoteRunHost): Promise<boolean> {
           usage: result?.usage,
           park: false,
           restore: () => host.restoreBefore(row.agent_id, pass, row.session_id, run.msgBefore),
-          persistFinalHash: (hash, tools) => host.persistFinalHash(row.page_id, row.agent_id, row.session_id, row.cwd, hash, row.user_id, tools),
           notifyPagesChanged: host.notifyPagesChanged,
+          extend: extensionOf(row, base, host),
         })
       } catch (err) {
         console.error(`[agent] 认领回合 ${row.run_id} 收尾失败: ${errText(err)}`)

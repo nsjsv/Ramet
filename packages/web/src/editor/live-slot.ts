@@ -19,7 +19,17 @@ export class LiveSlot {
   private finished = new Set<string>()
   private off: () => void
 
-  constructor(private opts: { pageId: string; canStop: boolean; visible: () => boolean; onChange: () => void; rest: (replyId: string) => number }) {
+  constructor(
+    private opts: {
+      pageId: string
+      canStop: boolean
+      visible: () => boolean
+      onChange: () => void
+      rest: (replyId: string) => number
+      /** 失败时运行条上的「重试」是不是续跑（宿主按当下文档现算） */
+      resume: (replyId: string) => boolean
+    },
+  ) {
     this.run = agentStateFor(opts.pageId).run
     this.off = subscribeAgentEvents(opts.pageId, (state) => {
       const next = state.run
@@ -60,6 +70,7 @@ export class LiveSlot {
       schema: node.type.schema,
       canStop: this.opts.canStop,
       rest: () => this.opts.rest(id),
+      resume: () => this.opts.resume(id),
     })
     this.cur = { replyId: id, startedAt: run.startedAt, ctrl, phase: 'live', flying: false }
     return { ctrl, phase: 'live' }

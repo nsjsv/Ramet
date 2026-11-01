@@ -151,7 +151,7 @@ test('发起成功：一次性确认码只返回这一次（库里只有哈希�
   const w = await world()
   const issued = await issueOk(w, 'alice', { scopes: ['agent', 'machine'], days: 3 })
   expect(issued.code).toMatch(/^[A-Z2-9]{4}(-[A-Z2-9]{4}){3}$/)
-  expect(issued.command).toBe(`ramet-connector grant confirm ${issued.code}`)
+  expect(issued.command).toBe(`ramet grant confirm ${issued.code}`)
   expect(Date.parse(issued.expiresAt) - Date.now()).toBeGreaterThan(2.9 * 86_400_000)
   expect(Date.parse(issued.expiresAt) - Date.now()).toBeLessThan(3.1 * 86_400_000)
   const confirmWindow = Date.parse(issued.confirmExpiresAt) - Date.now()

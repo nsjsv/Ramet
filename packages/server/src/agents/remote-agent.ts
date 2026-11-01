@@ -1,13 +1,13 @@
 // ---------- RemoteAgent：把 AgentAdapter 的调用翻成 WSS 上的指令 ----------
-// 中心侧对 connector 的适配器接口实现：本地 ACP 进程在 connector 机器上，
+// 中心侧对 connector 的适配器接口实现：agent 进程（各家原生驱动）在 connector 机器上，
 // 这里只负责 rid 关联、事件转发，以及会话级状态的副本。turn.ts 的 runTurn 完全不知道差别。
 //
 // 会话 / 审批的路由事实：
 //   - 会话 id 由 connector 侧的适配器生成，中心只存不复用；
 //   - prompt 的流式事件（轮次事件）按 rid 回来；
-//   - 会话级状态（命令 / config options / 待批审批）的事实源是 connector 上的 AcpAgent。这里的副本由
+//   - 会话级状态（命令 / config options / 待批审批）的事实源是 connector 上的驱动。这里的副本由
 //     `session` 帧（增量）、new/load 应答（播种）、hello 后的 `sessions` 快照（重连对账）维护，
-//     接口与 AcpAgent 一致：sessionState() / busy / 同一个 emitter 发会话级事件；
+//     接口与本机驱动一致：sessionState() / busy / 同一个 emitter 发会话级事件；
 //   - 审批应答按 agent + requestId 回 connector（requestId 只在单个 agent 进程内唯一）。
 //
 // 实例归 hub 所有（hub.remote()）：中心刚重启、还没有人绑定时 session 帧也要有地方落，
@@ -33,6 +33,7 @@ import type {
 import type { PageTool } from '../page-read.js'
 import { MachinePass } from './machine-access.js'
 import { PROMPT_IMAGE_CAP } from './project-types.js'
+import { SESSION_FRAME_TIMEOUT_MS } from './session-types.js'
 
 /** 没见过的会话：副本里的值都按不可变处理（只替换、不原地改），共用一份空状态没有别名风险 */
 const EMPTY_STATE: SessionState = { commands: [], configs: [], approvals: [] }
@@ -106,7 +107,7 @@ export class RemoteAgent {
     return { configOptions: msg.t === 'res' ? (msg.state?.configs ?? []) : [] }
   }
 
-  /** 副本由随后的 session 帧（connector 的 AcpAgent 在缓存变化时发 config 事件，帧先于本应答到）更新 */
+  /** 副本由随后的 session 帧（connector 的驱动在缓存变化时发 config 事件，帧先于本应答到）更新 */
   async setConfigOption(pass: MachinePass, sessionId: string, configId: string, value: string): Promise<ConfigOption[]> {
     this.check(pass)
     const msg = await this.hub.request(pass, (rid, actor) => ({
@@ -126,7 +127,7 @@ export class RemoteAgent {
     return this.replica.get(sessionId) ?? EMPTY_STATE
   }
 
-  /** hub 把 connector 的 session 帧交进来：先更新副本、再发事件（同 AcpAgent 先缓存再发事件） */
+  /** hub 把 connector 的 session 帧交进来：先更新副本、再发事件（同本机驱动先缓存再发事件） */
   ingest(sessionId: string, ev: SessionEvent): void {
     const prev = this.sessionState(sessionId)
     const next: SessionState =
@@ -190,9 +191,22 @@ export class RemoteAgent {
     this.hub.cancel(this.connectorId, { t: 'cancel', agent: this.agentId, sessionId })
   }
 
-  /** 停止一条 ACP 终端命令：发 kill-cmd 帧（非驱动帧，connector 只认这个 agent 这个会话自己的终端）。返回是否送出 */
-  killCommand(sessionId: string, terminalId: string): boolean {
-    return this.hub.killCommand(this.connectorId, { t: 'kill-cmd', agent: this.agentId, sessionId, terminalId })
+  /** 停止这个会话里一个可停的东西（子代理句柄；老 connector 上是 ACP 终端）：发 kill-cmd 帧（非驱动帧，connector 只认
+   *  这个 agent 这个会话自己的句柄）。帧字段仍叫 terminalId：老 connector 认这个名字。返回是否送出 */
+  killCommand(sessionId: string, handle: string): boolean {
+    return this.hub.killCommand(this.connectorId, { t: 'kill-cmd', agent: this.agentId, sessionId, terminalId: handle })
+  }
+
+  /** 让 connector 上的驱动彻底放掉这个会话（session-close 帧，machine 范围：凭据必须是 machine 范围的）。
+   *  副本不在这里动：connector 那边收掉的待批会经 session 帧发 permission_resolved，之后的 load 应答重新播种 */
+  async closeSession(pass: MachinePass, sessionId: string): Promise<void> {
+    this.check(pass)
+    const msg = await this.hub.request(
+      pass,
+      (rid, actor) => ({ t: 'session-close', rid, actor, agent: this.agentId, sessionId }),
+      SESSION_FRAME_TIMEOUT_MS,
+    )
+    if (msg.t === 'err') throw new Error(msg.message)
   }
 
   /** false = connector 不在线、没送出去：审批还在 connector 上等着，以后可以再答 */
@@ -215,6 +229,7 @@ export class RemoteAgent {
       cancel: (sessionId) => self.cancel(sessionId),
       killCommand: (sessionId, terminalId) => self.killCommand(sessionId, terminalId),
       respondPermission: (requestId, optionId, content) => self.respondPermission(pass, requestId, optionId, content),
+      closeSession: (sessionId) => self.closeSession(pass, sessionId),
       sessionState: (sessionId) => self.sessionState(sessionId),
       on: (listener) => self.on(listener),
       get busy() {

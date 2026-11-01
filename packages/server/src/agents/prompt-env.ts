@@ -1,19 +1,16 @@
 // ---------- 提示词环境：agent 这一轮实际看到的「引用 + 各回复的过程摘要」----------
-// 下一轮 AI 看到的是父页正文加每条 AI 回复所属过程页里还留着的步骤摘要（一步一行）。过程页删 / 改步骤，
-// 提示词文字就变，基线 hash 跟着变，原生续聊失效、新会话全文重放（hash 本来就是对提示词文字算的，不另加判断）。
-// 完整工具输出不进上下文（它只在 runs.record）；摘要里带过程页的定位，agent 要看全部自己 read_page。
+// 全文重放（新建会话）时 AI 看到的是父页正文加每条 AI 回复所属过程页里还留着的步骤摘要（一步一行）；接着用已有会话时
+// 补发的块也是同一种写法（catch-up.ts）。完整工具输出不进上下文（它只在 runs.record）；摘要里带过程页的定位，
+// agent 要看全部自己 read_page。过程页事后删 / 改步骤不影响已有会话（上下文归 agent 自己的会话），新建会话时才按新的来。
 //
 // 解析是异步的（跨页读文档、按发起人判权限），文字拼装是同步的：resolvePromptEnv 先全部读好，serializeDoc 拿它渲染。
-// 起止同口径：本轮开头解析出的环境就是 agent 看到的那份，收尾 hash 用它算（run.seen）；新回复的过程页是本轮才归档的，
-// 收尾时由刚建好的文档算出摘要补进来（ReplyWriter.viewText 的 newProcess），与下一轮开头从库里读出的是同一份文字，口径不漂。
 //
-// 空间公共记忆（memories.ts）也在这里：本轮开头读好全部记忆渲染成一段（memory），全文重放时放在文档前面（withMemory），
-// 会话复用的基线 hash 把它算进去（promptHash）。记忆变了说明 agent 会话里的上下文过期，hash 不等，新建会话全文重放；
-// 记忆没变就是 load + 只发新消息。收尾 hash 用 run.seen.memory（开头那份）。
-// 没有记忆时什么都不加，hash 与不带记忆的算法逐字节一致（老会话不因此全部重放）。
+// 空间公共记忆（memories.ts）也在这里：本轮开头读好全部记忆渲染成一段（memory），全文重放时放在文档前面（withMemory）。
+// 记忆只在新建会话时带上：老会话不因记忆变化重置，下一次新建会话才带上新记忆（同说明文件只在会话开始读一次）。
+// promptHash 只剩老会话记录（只有 hash、没有 seen）的兼容判定在用。
 //
-// 工具档位（tool-profile.ts）为 none 时 Ramet 只当 UI：环境里只剩文档正文，不读记忆、不带过程摘要（收尾也不补，
-// ReplyWriter.viewText 认 env.tools）、块引用不跨页读原块（nestedAtoms：定位 + 提及自带的快照）。起止同口径照旧靠 run.seen。
+// 工具档位（tool-profile.ts）为 none 时 Ramet 只当 UI：环境里只剩文档正文，不读记忆、不带过程摘要、
+// 块引用不跨页读原块（nestedAtoms：定位 + 提及自带的快照）。
 
 import { createHash } from 'node:crypto'
 import * as Y from 'yjs'
@@ -41,8 +38,8 @@ export function withMemory(memory: string, docText: string): string {
   return memory ? `${memory}\n\n${docText}` : docText
 }
 
-/** 会话复用的基线 hash：对「文档视图」算；有记忆时把记忆一并算进去（带长度前缀 + NUL 前导，与无记忆的文档文字不会撞）。
- *  没有记忆时就是 sha256(text)。起始（turn.ts）与收尾（run-finalize.ts）都走这一个函数 */
+/** 老会话记录的基线 hash：对「文档视图」算；有记忆时把记忆一并算进去（带长度前缀 + NUL 前导，与无记忆的文档文字不会撞）。
+ *  没有记忆时就是 sha256(text)。只给没有 seen 的老记录判一次能不能增量（catch-up.ts 的 deltaPrompt） */
 export function promptHash(memory: string, text: string): string {
   const hash = createHash('sha256')
   if (memory) hash.update(`\u0000memory:${memory.length}:${memory}`)

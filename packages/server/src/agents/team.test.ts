@@ -1,5 +1,5 @@
 /* ---------- 带队（/带队）全栈：本机假 agent（fake / claude，主人 = 全局 admin alice）+ 真 MCP ----------
- * 假 agent 会按 session/new 收到的 mcpServers 拉起 Ramet 的 MCP 进程，真调中心的 submit_plan / send_back（fake-agent.mjs 文件头有触发词清单）。
+ * 假 CLI 会按建会话时收到的 MCP 配置拉起 Ramet 的 MCP 进程，真调中心的 submit_plan / send_back（fake/scenario.mjs 文件头有触发词清单）。
  *
  * 一、计划轮：`/带队 目标` → 组长 submit_plan → team_plans 草稿 + 本轮 team 原语 + 回复块 team 属性 + 页面 SSE team_plan；
  *    组长给的 cwd 被忽略、校验不过的计划回告组长；带队不写会话记录（hash 口径）；submit_plan / send_back 只在对应阶段的组长凭证里
@@ -22,6 +22,7 @@ import {
   base,
   connectDoc,
   continuePage,
+  errorCode,
   insertUser,
   joinPageSpace,
   login,
@@ -216,7 +217,7 @@ test('工具只在对应阶段的组长凭证里：普通对话没有 submit_pla
   stop(w)
 })
 
-test('hash 口径：带队的两种轮都不改写会话记录；带队之后的下一轮普通对话全文重放一次，之后恢复原生续聊；没有带队时路径不变', async () => {
+test('会话口径：带队的两种轮都不改写会话记录；带队之后的下一轮普通对话接着原来的会话，带队那几轮带署名补发；没有带队时路径不变', async () => {
   const w = await startWorld()
   // 先来一轮普通对话：建会话、落记录
   userMessage(w.doc.document, '你好', { agent: 'fake' })
@@ -226,27 +227,31 @@ test('hash 口径：带队的两种轮都不改写会话记录；带队之后的
   expect(lastReplyText(w)).toContain('turn:full')
   const before = (await agentSession(w.pageId))!.fake!
 
-  // 计划轮 + 执行轮之后，记录原样（sessionId 与 hash 都没被带队改写）
+  // 计划轮 + 执行轮之后，记录原样（sessionId 与 seen 都没被带队改写）
   const planId = (await planRound(w, { title: 'p', tasks: [task('t1')] }))!
   expect((await agentSession(w.pageId))!.fake).toEqual(before)
   await execRound(w, planId)
   expect((await agentSession(w.pageId))!.fake).toEqual(before)
 
-  // 文档变长了：下一轮普通对话的基线 hash 对不上旧记录，新建会话全文重放（turn:full），并写回新记录
-  userMessage(w.doc.document, '带队之后再问', { agent: 'fake' })
+  // 下一轮普通对话：接着带队之前的会话，带队那几轮的消息与回复作为补发内容带署名发给它
+  userMessage(w.doc.document, '回显提示词 带队之后再问', { agent: 'fake' })
   expect(await continuePage(w.pageId, w.cookie, { agent: 'fake' })).toBe(202)
   await settled(w.sse, ++w.rounds)
   await replyDone(w)
-  expect(lastReplyText(w)).toContain('turn:full')
+  const prompt = lastReplyText(w)
+  expect(prompt.startsWith('<ramet-catch-up>\n')).toBe(true)
+  expect(prompt).toContain('>> /带队 做个站')
+  expect(prompt).toContain('>> 开工：计划')
+  expect(prompt.endsWith('</ramet-catch-up>\n\n回显提示词 带队之后再问')).toBe(true)
   const after = (await agentSession(w.pageId))!.fake!
-  expect(after.sessionId).not.toBe(before.sessionId)
-  // 再下一轮：原生续聊恢复（同一个会话，只发新消息）
+  expect(after.sessionId).toBe(before.sessionId)
+  // 再下一轮：只发新消息
   userMessage(w.doc.document, '接着问', { agent: 'fake' })
   expect(await continuePage(w.pageId, w.cookie, { agent: 'fake' })).toBe(202)
   await settled(w.sse, ++w.rounds)
   await replyDone(w)
   expect(lastReplyText(w)).toContain('turn:delta')
-  expect((await agentSession(w.pageId))!.fake!.sessionId).toBe(after.sessionId)
+  expect((await agentSession(w.pageId))!.fake!.sessionId).toBe(before.sessionId)
   stop(w)
 })
 
@@ -321,7 +326,11 @@ test('开工预检：组长必须是出计划的那个 agent；非发起人不�
   const w = await startWorld()
   const planId = (await planRound(w, { title: 'p', tasks: [task('t1')] }))!
   const bob = await joinPageSpace(w.pageId, 'bob', { role: 'member' })
-  expect(await startExec(w, planId, 'claude')).toBe(409) // 计划是 fake 出的
+  // 换成别的工具开工：先被「一页一种工具」拦下（计划轮的回复已经把这页锁成 fake）。同一工具在别的机器上才轮到预检判「出计划的那个 agent」
+  userMessage(w.doc.document, '开工：计划', { agent: 'claude' })
+  const other = await postJson(`/api/pages/${w.pageId}/continue`, w.cookie, { agent: 'claude', team: planId })
+  expect(other.status).toBe(409)
+  expect(await errorCode(other)).toBe('tool-locked')
   expect(await startExec(w, planId, 'fake', bob)).toBe(403) // bob 不是发起人（也没法用本机 agent）
   expect((await rows(planId)).status).toBe('draft')
   stop(w)
@@ -567,7 +576,7 @@ test('组员等审批：审批照常进页面审批条（带组员的 agentId、
   const inbox = ((await (await api('GET', '/api/inbox', w.cookie)).json()) as { items: InboxItem[] }).items
   expect(inbox.some((i) => i.type === 'approval' && i.requestId === ask.requestId && i.pageId === w.pageId)).toBe(true)
 
-  expect((await answerPermission(w.pageId, w.cookie, ask, 'allow_once')).status).toBe(200)
+  expect((await answerPermission(w.pageId, w.cookie, ask, 'allow')).status).toBe(200)
   await settled(w.sse, ++w.rounds)
   await replyDone(w)
   const t1 = taskOf(await planView(w, planId), 't1')

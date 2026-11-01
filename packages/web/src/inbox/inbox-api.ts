@@ -50,8 +50,20 @@ export type InboxItem =
   | { type: 'running'; key: string; at: string; pageId: string; pageTitle: string; runId: string; agentId: string; agentName: string }
   // 等你批计划（带队 /带队）：你发起的、还是草稿的计划；planId = 计划卡的身份（key 是 `plan:<planId>`）
   | { type: 'plan'; key: string; at: string; pageId: string; pageTitle: string; title: string; planId: string }
-  // 等你回答：agent 的提问（ACP elicitation）。表单在页面里答，这里只给入口
+  // 等你回答：agent 的提问。表单在页面里答，这里只给入口
   | { type: 'question'; key: string; at: null; pageId: string; pageTitle: string; agentId: string; agentName: string; requestId: string; text: string }
+  // 评论：一个讨论串一条（有人回复了你发过言的串 / @了你 / 在你建的页面上开了新串），excerpt = 首条内容摘要（@ 记号已降成纯文字）
+  | {
+      type: 'comment'
+      key: string
+      at: string
+      pageId: string
+      pageTitle: string
+      threadId: string
+      author: { id: string; name: string } | null
+      excerpt: string
+      reason: 'reply' | 'mention' | 'new_thread'
+    }
 
 export const inboxApi = {
   list: () => request<{ items: InboxItem[] }>('/api/inbox').then((r) => r.items),

@@ -1,9 +1,8 @@
 /* ---------- 重新生成 / 重试（全栈：本机 fake agent）----------
  *   - 块 id 不变、内容原地换掉（引用 / 收藏跟着新回答走）；动手前写一张快照，旧回答在历史里
- *   - 每一轮只看它自己的视图，起始 hash 与收尾 hash 按同一视图算。重做的视图是目标回复之前的全部内容，
- *     一律新建会话全文重放（ACP 会话不能分叉）；回复在页中间时下一轮 hash 必然不等，自动全文重放，
- *     在页尾则下一轮照常增量
- *   - 重试是对失败的回复调同一个端点 */
+ *   - 重做的视图是目标回复之前的全部内容，一律新建会话全文重放（会话不能分叉）；新会话看到的是目标回复为止。
+ *     下一轮接着这个新会话：回复在页尾只发新消息，在页中间则把它之后的内容带署名补发 + 新消息
+ *   - 失败 / 停止的最后一块回复的「重试 / 继续」是续跑（resume.test.ts），不走这里 */
 import { expect, test } from 'vitest'
 import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -64,7 +63,7 @@ test('重新生成（页尾）：块 id 不变、内容原地换掉、新会话�
   expect(after[0]).toMatchObject({ id: first!.id, outcome: 'end' })
   expect(after[0]!.text).toContain('model=m2')
   expect(after[0]!.text).not.toContain('model=m1')
-  // ACP 会话不能分叉，旧会话已经看过旧回答：重做一律新会话、全文重放
+  // 会话不能分叉，旧会话已经看过旧回答：重做一律新会话、全文重放
   expect(after[0]!.text).toContain('turn:full')
   expect((await agentSession(pageId))!.fake!.sessionId).not.toBe(firstSession)
   // 旧回答在历史里：动手前写的那张快照（不靠 5 分钟去重窗口或 agent 写入的时机）
@@ -82,7 +81,7 @@ test('重新生成（页尾）：块 id 不变、内容原地换掉、新会话�
   a.destroy()
 })
 
-test('重新生成（页中间）：agent 只看到目标回复之前的内容；下一轮 hash 必然不等 → 自动全文重放', async () => {
+test('重新生成（页中间）：agent 只看到目标回复之前的内容；下一轮接着重做建的会话，补发它之后的内容', async () => {
   const { cookie, pageId } = await setupPage()
   const a = await connectDoc(pageId, cookie)
   const sse = new SSECollector()
@@ -108,41 +107,22 @@ test('重新生成（页中间）：agent 只看到目标回复之前的内容�
   expect(mid[0]!.text).toMatch(/^view:1:0@/)
   expect(mid[0]!.text).not.toBe(r1!.text) // 会话 id 变了，即新会话
   expect(mid[1]).toEqual(r2) // 它之后的回复不动
+  const redoSession = (await agentSession(pageId))!.fake!
+  expect(redoSession.seen).toBe(r1!.id) // 新会话看到的是被重做的那一块为止
 
-  // 下一轮：收尾 hash 只到被重做的那一块，页里还有之后的内容，hash 必然不等，自动全文重放。
-  // 收尾 hash 若按整页算，会被误判成同一份文档走增量，agent 收不到前面的内容。
+  // 下一轮：接着重做建的会话，目标回复之后的内容（第二问与它的回复）带署名补发，再加新消息。
+  // 只发新消息就漏了第二问；全文重放就白丢了会话
   await waitFor(() => replyBlocks(a)[0]?.text === mid[0]!.text)
-  userMessage(a.document, '第三问')
+  userMessage(a.document, '回显提示词 第三问')
   expect(await continuePage(pageId, cookie, { agent: 'fake' })).toBe(202)
   await settled(sse, 4)
-  const last = (await serverReplies(pageId, cookie)).at(-1)
-  expect(last?.text).toMatch(/^view:3:2@/)
-  sse.stop()
-  a.destroy()
-})
-
-test('重试：失败的一轮对同一块再跑一遍 —— 块 id 不变，结果从出错变成功', async () => {
-  const { cookie, pageId } = await setupPage()
-  const a = await connectDoc(pageId, cookie)
-  const sse = new SSECollector()
-  await sse.start(pageId, cookie)
-
-  userMessage(a.document, '失败一次 重试用例') // fake：同一段提示词只失败第一次
-  expect(await continuePage(pageId, cookie, { agent: 'fake' })).toBe(202)
-  const failure = await sse.wait((e) => e.type === 'error')
-  await settled(sse, 1)
-  const [failed] = await serverReplies(pageId, cookie)
-  expect(failed?.outcome).toBe('error')
-  // 失败原因只有一个落点：带上失败的那块回复的 id，前端把原因放进它的失败条
-  if (failure.type !== 'error') throw new Error('不是错误事件')
-  expect(failure.replyId).toBe(failed!.id)
-
-  expect((await regenerate(pageId, cookie, failed!.id)).status).toBe(202)
-  await settled(sse, 2)
-  const after = await serverReplies(pageId, cookie)
-  expect(after).toHaveLength(1)
-  expect(after[0]).toMatchObject({ id: failed!.id, outcome: 'end' })
-  expect(after[0]!.text).toContain('turn:full')
+  const prompt = (await serverReplies(pageId, cookie)).at(-1)!.text
+  expect((await agentSession(pageId))!.fake!.sessionId).toBe(redoSession.sessionId)
+  expect(prompt.startsWith('<ramet-catch-up>\n')).toBe(true)
+  expect(prompt).toContain('[用户的消息]\n>> 第二问')
+  expect(prompt).toContain(`[Fake 的回复]\n> ${r2!.text.split('\n')[0]}`)
+  expect(prompt.endsWith('</ramet-catch-up>\n\n回显提示词 第三问')).toBe(true)
+  expect(prompt).not.toContain('第一问')
   sse.stop()
   a.destroy()
 })

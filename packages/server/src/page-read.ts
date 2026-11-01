@@ -181,9 +181,9 @@ export async function pageReadUser(
 /** 中心交给 AI 的一个能力：跨 WSS 只传 grant，命令由执行端自己拼（见文件头） */
 export type PageTool = { mcp: PageToolGrant }
 
-/** ACP 的 MCP stdio 配置（schema 的 McpServerStdio，没有 type 字段：stdio 是 union 的默认项）。
+/** MCP stdio 服务的中性描述（各驱动再翻成自家的配置形状）。
  *  含绝对路径，只在拉起 AI 的那台机器上生成（pageToolServer），不可跨机搬运。 */
-export type AcpMcpServer = {
+export type McpStdioServer = {
   name: string
   command: string
   args: string[]
@@ -194,7 +194,7 @@ const MCP_SCRIPT = fileURLToPath(new URL('./mcp/ramet.mjs', import.meta.url))
 
 /** 本机拉起 AI 时的 stdio 配置：node 直跑这份代码旁边的 MCP 脚本（纯 JS，不依赖 tsx / 工作目录）。
  *  中心本机 agent 与 connector 各自调这一份，command/args 永远是执行端自己的路径。 */
-export function pageToolServer(tool: PageTool): AcpMcpServer {
+export function pageToolServer(tool: PageTool): McpStdioServer {
   return {
     name: 'ramet',
     command: process.execPath,

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMatch, useNavigate } from 'react-router-dom'
 import { api } from '../api'
-import { useAgents } from '../default-agent'
+import { agentsForPage, useAgents } from '../default-agent'
 import { Icon } from '../icons'
 import { agentName } from '../editor/agent-badge'
 import { agentCommandsFor, pageAgent, setAgentRunError, setPageChoice, useAgentEvents } from '../editor/agent-bar'
@@ -56,7 +56,8 @@ export default function PaletteLayer({ pages, spaceId, canWritePage, onCreated }
         hud: { available: live !== null || hud.open, open: hud.open },
         project: { available: target !== null, open: shell.open },
         chatMode: pageId ? readViewMode(pageId) : null,
-        agents: agents.map((a) => ({ id: a.id, label: a.label })),
+        // 切换 agent 只列这一页能用的（锁定了工具就只剩它在各台机器上的）
+        agents: agentsForPage(agents, agent.lock).map((a) => ({ id: a.id, label: a.label })),
         currentAgent: current,
         canCompact: pageId ? agentCommandsFor(pageId, current).some((c) => c.name === 'compact') : false,
         pages: pages.filter((p) => isMentionablePage(p) && p.space_id === spaceId && p.in_page_tree !== false).map((p) => ({ id: p.id, title: p.title })),

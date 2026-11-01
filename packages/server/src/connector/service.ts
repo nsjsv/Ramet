@@ -14,6 +14,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, tr
 import { homedir, userInfo } from 'node:os'
 import { join } from 'node:path'
 
+// 服务 / 启动项的名字刻意不跟命令名走：改了名，已经装着后台服务的机器升级后会留下两个各连一份的服务
 const UNIT = 'ramet-connector.service'
 const LABEL = 'com.ramet.connector'
 const LOG_MAX_BYTES = 10 * 1024 * 1024
@@ -180,7 +181,7 @@ export function windowsStartupVbs(launch: Launch, args: string[], dir: string): 
   const cmdline = [launch.node, ...launch.prefix, launch.script, ...args].map(winQuote).join(' ')
   const lit = (s: string) => `"${s.replace(/"/g, '""')}"`
   return [
-    "' Ramet connector：登录后在后台启动（隐藏窗口）。取消自启：ramet-connector stop，或删掉本文件",
+    "' Ramet connector：登录后在后台启动（隐藏窗口）。取消自启：ramet stop，或删掉本文件",
     'Set sh = CreateObject("WScript.Shell")',
     `sh.CurrentDirectory = ${lit(dir)}`,
     `sh.Run ${lit(cmdline)}, 0, False`,

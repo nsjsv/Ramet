@@ -130,7 +130,7 @@ export function QuickAiPane() {
                 <option value={settings.localAgent}>{C.localAgentGone(settings.localAgent.replace(/^c:[^:]+:/, ''))}</option>
               )}
               {agents.map((a) => (
-                <option key={a.id} value={a.id}>
+                <option key={a.id} value={a.id} disabled={Boolean(a.unavailable)} title={a.unavailable}>
                   {a.label}
                 </option>
               ))}

@@ -3,7 +3,7 @@
  * 旧标签页按需加载的 chunk 还拉得到。
  * 版本号是构建时 index.html 的内容哈希（vite.config.ts 的 buildVersion）：本页的在 <meta name="ramet-build">，
  * 线上最新的在 /version.json。dev 没有 meta，整个组件不工作。
- * 什么时候查：control 通道（重）连上（部署会重建 web 容器，连接必断一次）、标签页回到前台、前台时每 5 分钟。 */
+ * 什么时候查：control 通道（重）连上（部署重启 server 时连接会断一次；只改前端的部署不重启，靠后两条）、标签页回到前台、前台时每 5 分钟。 */
 
 import { useEffect, useState } from 'react'
 import { listenControl } from './control'

@@ -63,8 +63,8 @@ export interface User {
   avatar?: string | null
 }
 
-// ---------- agent 会话配置项（ACP session config options）----------
-// 服务端把 ACP 的 select 变体归一成这个形状（boolean 变体在适配层丢弃）。
+// ---------- agent 会话配置项（模型 / 思考档 / 模式…）----------
+// 服务端各驱动归一成这个形状（只有单选）。
 // category 决定 UI 摆哪个选择器：'model' = 模型，'thought_level' = 思考程度，其余忽略。
 
 export type ConfigOptionValue = { value: string; name: string; description?: string | null }
@@ -80,7 +80,7 @@ export interface ConfigOption {
 /** 运行中排队发送的一条（服务端 agents/send-queue.ts 的 QueueView）：文字只是摘要，图片只给张数 */
 export type QueueItem = { id: string; userId: string; username: string; agent: string; kind: 'message' | 'continue'; text: string; images: number; jump: boolean; at: string }
 
-/** agent 的提问（ACP elicitation，form 模式），与服务端 agents/types.ts 的 AskForm 同口径。
+/** agent 的提问（表单），与服务端 agents/types.ts 的 AskForm 同口径。
  *  带 form 的审批 = 提问：选项固定是 accept（提交，带答案）/ decline（跳过） */
 export type AskOption = { value: string; label: string; description?: string }
 export type AskField = { key: string; title?: string; description?: string } & (
@@ -209,9 +209,9 @@ export interface RunRecord {
   usage?: TurnUsage
   context?: { used: number; size: number }
   entries: RunEntry[]
-  /** 运行期完整用量/上下文/停止原因/ACP 元数据（老记录没有）；顶层 usage/context 优先于它 */
+  /** 运行期完整用量/上下文/停止原因/agent 原样元数据（老记录没有）；顶层 usage/context 优先于它 */
   info?: RunInfo
-  /** agent 最后一份计划清单（ACP plan）；没报过计划的轮次没有。回复里的计划卡读回复块的 plan 属性，不读这里 */
+  /** agent 最后一份计划清单；没报过计划的轮次没有。回复里的计划卡读回复块的 plan 属性，不读这里 */
   plan?: PlanEntry[]
   /** 带队（/带队）的团队计划与每个任务的状态 / 时段 / 结果摘要；不是带队的轮次没有。过程页的「带队」一节读它 */
   team?: TeamState
@@ -387,6 +387,8 @@ export interface AgentInfo {
   /** 我对这台机器有 machine 范围的使用权（接入人或有效授权）：项目面板入口的依据；本机 agent 恒为 false。
    *  缺省 = 未提供（ConnectorSummary.agents 不带） */
   machine?: boolean
+  /** 有值 = 这个 agent 现在用不了（比如本机 CLI 版本太旧），值是给人看的原因：选择器里置灰、不可选 */
+  unavailable?: string
 }
 
 /** 本地 connector（托管云拓扑）：出站连中心的 agent 宿主机；online 来自中心进程内状态 */
@@ -627,13 +629,18 @@ export const api = {
   /** 中止 agent 运行（SSE status 切 running 时可用） */
   stopPage: (id: string) => request<unknown>(`/api/pages/${id}/stop`, { method: 'POST' }),
 
-  /** 停止 agent 在 ACP 终端里跑的一条命令（只停这条，不停整轮）。{ ok: false } = 没有这条在跑的命令 */
+  /** 停止这一轮里一个可停的东西（步骤 view.handle：子代理；只停它，不停整轮）。{ ok: false } = 没有这个在跑的东西 */
   stopCommand: (id: string, terminalId: string) =>
     request<{ ok: boolean }>(`/api/pages/${id}/stop-command`, { method: 'POST', body: JSON.stringify({ terminalId }) }),
 
   /** 重新生成/重试：原地重跑该回复。404 回复不存在、400 无前置用户消息/agent 不可用、409 页面忙 */
   regenerate: (pageId: string, replyId: string) =>
     request<unknown>(`/api/pages/${pageId}/replies/${replyId}/regenerate`, { method: 'POST' }),
+
+  /** 续跑：失败 / 停止的最后一块回复接着原会话、在同一块里接着写。409 not-resumable（不是最后一块 / 没中断 / 带队轮）、
+   *  409 busy / tool-locked，其余同 regenerate */
+  resume: (pageId: string, replyId: string) =>
+    request<unknown>(`/api/pages/${pageId}/replies/${replyId}/resume`, { method: 'POST' }),
 
   /** 回答 agent 权限审批。requestId 只在单个 agent 进程内唯一（两个 agent 都有 perm-0），
    *  身份是 agentId + requestId；optionId = null 表示拒绝/取消。

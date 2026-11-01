@@ -12,6 +12,7 @@ const GROUP: Record<InboxItem['type'], InboxGroup> = {
   plan: 'attention',
   first_use: 'news',
   done: 'news',
+  comment: 'news',
   running: 'running',
 }
 

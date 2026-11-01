@@ -6,7 +6,7 @@ import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 
 /** 页面图标的 emoji 统一渲染成 Twemoji SVG（src/emoji.ts），文件取自 @twemoji/svg：
- * 构建时整包拷到 dist/twemoji/（nginx 永久缓存，见 nginx.conf），dev 由中间件直接从 node_modules 出。
+ * 构建时整包拷到 dist/twemoji/（server 托管时永久缓存，见 server/src/web-static.ts），dev 由中间件直接从 node_modules 出。
  * 选择器能选到任何 emoji，所以包里的 SVG 要整包带上，不能只拷用得到的。 */
 function twemojiAssets(): Plugin {
   const dir = (): string => dirname(createRequire(import.meta.url).resolve('@twemoji/svg/package.json'))

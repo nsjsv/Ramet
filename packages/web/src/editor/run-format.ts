@@ -1,6 +1,6 @@
 // ---------- 一轮 run 的展示口径（状态条、回复标签、过程页共用） ----------
 // 数字格式、动作文案、条目类型对应的图标只在这里定义一次（图形本身在 icons.tsx）。
-import { stepLabel, stepVerb, type RunEntry, type StepKind } from '@ramet/shared/run-model'
+import { stepLabel, stepVerb, viewOf, type RunEntry, type StepKind } from '@ramet/shared/run-model'
 import type { ReplyStats } from '@ramet/shared/reply-stats'
 import { iconSvg, type IconName } from '../icons'
 
@@ -70,13 +70,12 @@ export function escapeHtml(value: unknown): string {
   return String(value).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
 }
 
-/** 详情是否变了的稳定指纹：acp 按引用身份 + 关键字段，避免只比预览长度而漏掉等长更新 */
-const acpRefs = new WeakMap<object, number>()
-let acpSeq = 0
-function acpRef(acp: unknown): number {
-  if (!acp || typeof acp !== 'object') return 0
-  let id = acpRefs.get(acp as object)
-  if (id === undefined) acpRefs.set(acp as object, (id = ++acpSeq))
+/** 详情是否变了的稳定指纹：步骤视图按引用身份（viewOf 对同一份数据返回同一个对象）+ 关键字段，避免只比预览长度而漏掉等长更新 */
+const viewRefs = new WeakMap<object, number>()
+let viewSeq = 0
+function viewRef(view: object): number {
+  let id = viewRefs.get(view)
+  if (id === undefined) viewRefs.set(view, (id = ++viewSeq))
   return id
 }
 
@@ -85,7 +84,7 @@ export function detailKey(e: RunEntry): string {
   return [
     e.status,
     e.parentId ?? '',
-    acpRef(e.acp),
+    viewRef(viewOf(e)),
     e.truncated ? 1 : 0,
     e.thought?.length ?? 0,
     e.output?.length ?? 0,

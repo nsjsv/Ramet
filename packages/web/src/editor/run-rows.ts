@@ -1,6 +1,6 @@
 // ---------- 过程页时间线的行渲染（纯 DOM，就地按 key 更新） ----------
 // 运行中的托盘用 run-tray.ts 的紧凑行，这里是过程页（run-board.tsx）用的完整行：
-// 时刻 · 图标 · 动词+对象 · 用时，点开看 ACP 详情。
+// 时刻 · 图标 · 动词+对象 · 用时，点开看详情。
 import { isTerminal, type RunEntry } from '@ramet/shared/run-model'
 import { toolDetailHtml } from './run-detail'
 import { detailKey, entryIcon, entryObject, entryVerb, escapeHtml, fmtClock, fmtDuration } from './run-format'
@@ -16,7 +16,7 @@ export function entryKeys(entries: RunEntry[]): string[] {
   })
 }
 
-/** 一行条目的内容（思考/说明一行省略、点开看全文；失败的工具标红带一行摘要；工具点开看完整 ACP 详情） */
+/** 一行条目的内容（思考/说明一行省略、点开看全文；失败的工具标红带一行摘要；工具点开看完整详情） */
 export function paintEntryRow(row: HTMLElement, e: RunEntry, full: boolean, running: boolean): void {
   const failed = e.k === 'tool' && e.status === 'failed'
   const live = e.k === 'tool' ? !isTerminal(e.status) && running : e.k === 'thought' && e.end === undefined && running
@@ -26,7 +26,7 @@ export function paintEntryRow(row: HTMLElement, e: RunEntry, full: boolean, runn
   // 正在这一行里选字时不动 DOM：重画会打断选区，下次再画
   const sel = window.getSelection()
   if (full && sel && !sel.isCollapsed && sel.anchorNode && row.contains(sel.anchorNode)) return
-  // 展开态用全文/ACP 指纹做 sig：等长更新、同长不同内容都不会漏画；思考/说明用长度+尾巴，避免逐帧比长文本
+  // 展开态用全文/详情指纹做 sig：等长更新、同长不同内容都不会漏画；思考/说明用长度+尾巴，避免逐帧比长文本
   const objSig = e.k === 'tool' ? obj : `${obj.length}|${obj.slice(-24)}`
   const sig = `${e.k}|${objSig}|${dur}|${failed}|${full}|${live}|${e.truncated ? 1 : 0}|${e.k === 'tool' ? detailKey(e) : ''}`
   if (row.dataset.sig === sig) return

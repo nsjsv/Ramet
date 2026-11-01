@@ -11,18 +11,25 @@
  * POST /api/pages/:id/agent-tools {profile}       本页的工具档位 none / minimal / full（agents/tool-profile.ts；只落意图，不驱动机器，下一轮生效）
  * GET  /api/pages/:id/agent-dirs?agent=&path=     列执行端目录（工作区选择器；path 省略 = 当前工作区）
  * POST /api/pages/:id/stop                        取消当前生成
- * POST /api/pages/:id/stop-command {terminalId}   停止 agent 在 ACP 终端里跑的一条命令（只作用于这页正在跑的这一轮；
- *                                     同 stop，不要机器使用凭据）→ { ok }（false = 没有这条在跑的命令）
+ * POST /api/pages/:id/stop-command {terminalId}   停止这一轮里一个可停的东西（步骤 view.handle：子代理；字段名沿用老的 terminalId）
+ *                                     （只作用于这页正在跑的这一轮；同 stop，不要机器使用凭据）→ { ok }（false = 没有这个在跑的东西）
  * GET/POST /api/pages/:id/queue、DELETE /api/pages/:id/queue/:itemId、POST …/queue/:itemId/now  运行中排队发送（send-queue.ts）
  * POST /api/pages/:id/permission {agentId, requestId, optionId, content?} 审批应答：未匹配 404；选项会让会话进入
  *                                     「跳过全部确认」而不是机器主人 403；agent 所在机器不在线 409（审批留着）。
  *                                     提问（带 form）：optionId = accept（带 content）/ decline；答案不合表单 400 {message}
- * POST /api/pages/:id/replies/:replyId/regenerate → 202 原地重新生成这块回复（旧回答先进快照），也是失败的重试
+ * POST /api/pages/:id/replies/:replyId/regenerate → 202 原地重新生成这块回复（旧回答先进快照）；不是最后一块的失败回复的重试也走它
+ * POST /api/pages/:id/replies/:replyId/resume    → 202 续跑：失败 / 停止的最后一块回复接着原会话、在同一块里接着写，
+ *                                     过程页还是那一页，不往文档里加用户消息。不是最后一块 / 没有失败或停止 / 带队的一轮 →
+ *                                     409 {error:'not-resumable', message}；其余错误码同 regenerate（404 / 400 / 403 / 409 busy、tool-locked）
  * GET  /api/agents                                可选 agent 列表，只含你能用的（你接入的机器 + 授权给你的机器；
  *                                     本机 agent 仅 admin 且需 RAMET_LOCAL_AGENTS=1）。每项带 machine：你对这台机器有
  *                                     machine 范围的使用权（项目面板入口的依据，见 routes/project.ts）
- * GET  /api/pages/:id/agent-events  SSE：choice、tool_profile（首帧）/ status / permission / commands / config / cwd / text / done / error
- * 机器所有权：凡是会让 connector 机器动起来的入口（continue / regenerate / permission / agent-config /
+ * 一页一种工具：页面第一块回复用的工具锁定这一页，continue / regenerate / resume / 排队派发选到别的工具（任何机器）→
+ *   409 `{error:'tool-locked', message:'这个对话用的是 <工具>，换工具请新开一页'}`；锁定的工具一台都没有、又没指定 agent →
+ *   409 tool-locked「现在没有可用的 <工具>」。显式 @ 点名（含链的下一家）与 @ 出来的回复的重新生成不受限
+ *   （判定在 manager 的 resolveRun 与 agents/reply-target.ts，授权之后）
+ * GET  /api/pages/:id/agent-events  SSE：tool_lock、choice、tool_profile（首帧）/ status / permission / commands / config / cwd / text / done / error
+ * 机器所有权：凡是会让 connector 机器动起来的入口（continue / regenerate / resume / permission / agent-config /
  *   agent-prepare / agent-dirs / agent-cwd / agent-choice，以及 @ 链、run_agent）都要求使用者是接入人或持有有效授权，
  *   否则 403 `{error:'forbidden', message:'这台机器属于 <主人>，需要他授权'}`；stop 只让机器停下来，不要求。
  * 权限：除 events 外要求页面写权限（owner / member）；events 任意可见角色可读。 */
@@ -38,7 +45,9 @@ import {
   BadAnswerError,
   NoSessionError,
   NoUserMessageError,
+  NotResumableError,
   ReplyNotFoundError,
+  ToolLockedError,
   UnknownAgentError,
   UnknownApprovalError,
   type RunTarget,
@@ -84,6 +93,7 @@ export function agentsRoutes(pool: Pool, manager: AgentManager) {
       target = await manager.resolveRun(c.req.param('id') ?? '', body, user)
     } catch (err) {
       if (err instanceof ForbiddenError) return c.json({ error: 'forbidden', message: err.message }, 403)
+      if (err instanceof ToolLockedError) return c.json({ error: 'tool-locked', message: err.message }, 409)
       if (err instanceof UnknownAgentError) {
         return c.json({ error: 'unknown agent', message: '这条消息指定的 agent 当前不可用' }, 400)
       }
@@ -108,17 +118,22 @@ export function agentsRoutes(pool: Pool, manager: AgentManager) {
 
   // 重新生成 / 重试：对一块已有的回复再跑一轮，块 id 不变、内容原地换掉。目标先解析成干净的 4xx
   // （fire-and-forget 之后错误到不了响应体）：找不到回复 404，之前没有用户消息或 agent 已不可用 400，页面忙 409
-  app.post('/api/pages/:id/replies/:replyId/regenerate', async (c) => {
+  // 对已有回复块再跑一轮：重新生成（从头来）与续跑（接着原会话、同一块回复）。先同步解析目标（错误变成干净的 4xx），再 fire-and-forget
+  const replyRun = (resolve: (pageId: string, replyId: string, user: AuthUser) => Promise<RunTarget>) => async (c: Context<AuthEnv>) => {
     const user = await writableUser(c)
     if (!user) return c.json({ error: 'page not found' }, 404)
     const pageId = c.req.param('id') ?? ''
+    // 先判忙：跑着的一轮要么在末尾加了新块、要么把这块改回了运行中，先解析目标只会得到 not-resumable 之类的误导性原因
+    if (manager.running(pageId)) return c.json({ error: 'busy', message: '该页面已有 agent 正在生成' }, 409)
     let target: RunTarget
     try {
-      target = await manager.resolveRedo(pageId, c.req.param('replyId') ?? '', user)
+      target = await resolve(pageId, c.req.param('replyId') ?? '', user)
     } catch (err) {
       if (err instanceof ReplyNotFoundError) return c.json({ error: 'reply not found', message: err.message }, 404)
       if (err instanceof ForbiddenError) return c.json({ error: 'forbidden', message: err.message }, 403)
       if (err instanceof NoUserMessageError) return c.json({ error: 'no user message', message: err.message }, 400)
+      if (err instanceof ToolLockedError) return c.json({ error: 'tool-locked', message: err.message }, 409)
+      if (err instanceof NotResumableError) return c.json({ error: 'not-resumable', message: err.message }, 409)
       if (err instanceof UnknownAgentError) {
         return c.json({ error: 'unknown agent', message: '这块回复对应的 agent 当前不可用' }, 400)
       }
@@ -127,7 +142,9 @@ export function agentsRoutes(pool: Pool, manager: AgentManager) {
     if (manager.running(pageId)) return c.json({ error: 'busy', message: '该页面已有 agent 正在生成' }, 409)
     void manager.continue(pageId, target, user, c.req.header('cookie') ?? '').catch(() => undefined)
     return c.json({ ok: true }, 202)
-  })
+  }
+  app.post('/api/pages/:id/replies/:replyId/regenerate', replyRun((pageId, replyId, user) => manager.resolveRedo(pageId, replyId, user)))
+  app.post('/api/pages/:id/replies/:replyId/resume', replyRun((pageId, replyId, user) => manager.resolveResume(pageId, replyId, user)))
 
   // 指定 / 清除该 agent 的工作区（cwd 空串 = 回到执行端默认）。只改用户指定这一层，
   // 旧会话是否作废由下一轮 / 下一次 prepare 的 cwd 一致性判定，端点不碰会话记录
@@ -332,9 +349,11 @@ export function agentsRoutes(pool: Pool, manager: AgentManager) {
     const user = await visibleUser(c)
     if (!user) return c.json({ error: 'page not found' }, 404)
     const pageId = c.req.param('id')
-    // 本页记住的来源要先于别的事件到：前端在知道它之前不预备会话，否则会先冷启动一个全局默认 agent
-    const [choice, profile] = await Promise.all([manager.choice(pageId), manager.toolProfile(pageId)])
+    // 本页记住的来源要先于别的事件到：前端在知道它之前不预备会话，否则会先冷启动一个全局默认 agent。
+    // 锁定的工具又在来源之前：前端按它过滤候选，来源一到就要按过滤后的目录解析
+    const [lock, choice, profile] = await Promise.all([manager.toolLock(pageId), manager.choice(pageId), manager.toolProfile(pageId)])
     return streamSSE(c, async (stream) => {
+      stream.writeSSE({ data: JSON.stringify({ type: 'tool_lock', tool: lock }) }).catch(() => undefined)
       stream.writeSSE({ data: JSON.stringify({ type: 'choice', agentId: choice }) }).catch(() => undefined)
       stream.writeSSE({ data: JSON.stringify({ type: 'tool_profile', profile }) }).catch(() => undefined)
       // 首帧（当前状态 + 已收集的步骤快照）由 manager.subscribe 在订阅瞬间发出，

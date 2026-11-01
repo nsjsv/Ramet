@@ -53,4 +53,10 @@ export const INBOX_COPY = {
   },
   question: { head: (page: string) => `「${page}」里有问题等你回答` },
   plan: { head: (page: string) => `「${page}」的计划等你确认`, go: '去确认' },
+  comment: {
+    reason: { reply: '回复了你', mention: '@了你', new_thread: '发了新评论' },
+    head: (who: string, what: string) => `${who} ${what}`,
+    where: (page: string) => `页面「${page}」`,
+    unknown: '已注销用户',
+  },
 }

@@ -255,10 +255,13 @@ export function AgentPane() {
           role="radio"
           aria-checked={a.id === current}
           className={'set-pick' + (a.id === current ? ' is-on' : '')}
+          disabled={Boolean(a.unavailable)}
+          title={a.unavailable}
           onClick={() => setDefaultAgent(a.id)}
         >
           <AgentBadgeView badge={agentBadge(a.id)} className="agent-mark-row" />
           <span className="set-pick-label">{a.label}</span>
+          {a.unavailable && <span className="set-pick-tag">{a.unavailable}</span>}
           {a.id.startsWith('c:') && <span className="set-pick-tag">connector</span>}
           <span className="set-pick-check">{a.id === current && <Icon name="check" size={14} />}</span>
         </button>

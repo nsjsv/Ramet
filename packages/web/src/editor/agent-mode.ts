@@ -1,5 +1,5 @@
 // ---------- agent 的权限模式：显示文字、默认档、⇧Tab 轮换（纯函数，无 React / DOM） ----------
-// 模式属于 agent：名称、说明、顺序都是它经 ACP 上报的（会话配置项里 category = mode 的那一项），只有 agent 没给名称 / 说明时才退回 COPY.modes.known 的兜底文案。
+// 模式属于 agent：名称、说明、顺序都是它上报的（会话配置项里 category = mode 的那一项），只有 agent 没给名称 / 说明时才退回 COPY.modes.known 的兜底文案。
 // ⇧Tab 的轮换顺序就是上报的选项顺序，跳过「跳过全部确认」档（posture.unrestricted）：危险档只能在菜单里明确选，不会被轮换途经。
 // 顺序与 agent 自己 CLI 里 Shift+Tab 的循环一致。
 

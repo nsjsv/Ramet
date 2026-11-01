@@ -1,6 +1,6 @@
-/* ---------- 会话事件归属 / 审批一直等 / 权限模式（全栈：本机 agent，假脚本）----------
- * agent 目录有两个本机 agent：`fake`（表外，mode 不可改）与 `claude`（同一份假脚本，id 命中真的 posture 表 ——
- * 生产代码不为 fake 开分支）。中心本机 agent 只有全局 admin 能用（它的主人就是 admin，不支持授权），
+/* ---------- 会话事件归属 / 审批一直等 / 权限模式（全栈：本机 agent，假 CLI）----------
+ * agent 目录有两个本机 agent：`fake`（假 codex，id 在 posture 表外，mode 不可改）与 `claude`（假 claude，id 命中真的 posture 表 ——
+ * 生产代码不为 fake 开分支）。两者跑同一份剧本，审批选项是各自驱动的（允许 `allow` / 拒绝 `reject`，回显的是剧本里的选项 id）。中心本机 agent 只有全局 admin 能用（它的主人就是 admin，不支持授权），
  * 页面创建人 alice 因此是 admin；非 admin 连看都看不到、用不了（machine-access.ts 的 assertLocalOwner）。
  * 「机器主人 vs 被授权的非主人」这对场景只在 connector agent 上存在，见 connector-session.test.ts。
  * 不变量：命令 / 配置 / 待批审批归会话（按页面 + agent），不归某一轮；审批只在有人答 / 停止该会话 / 进程退出时结束，
@@ -37,20 +37,21 @@ test('命令：不发消息就有；换 agent 跟着换、互不覆盖；晚到�
   // 选 claude、一条消息都不发：斜杠菜单的数据里就有它的命令
   await prepared(sse, pageId, cookie, 'claude')
   await sse.wait((e) => e.type === 'commands' && e.agentId === 'claude' && e.list.length > 0)
-  expect(commandNames(sse.events, 'claude')).toEqual(['claude-cmd'])
+  expect(commandNames(sse.events, 'claude')).toEqual(['claude-cmd', 'claude-cmd-arg'])
 
-  // 换 agent：各有各的命令，fake 的命令不会覆盖 claude 的
+  // 换 agent：各有各的命令（codex 没有斜杠命令，是一份空表），fake 的空表不会覆盖 claude 的
   await prepared(sse, pageId, cookie, 'fake')
-  await sse.wait((e) => e.type === 'commands' && e.agentId === 'fake' && e.list.length > 0)
-  expect(commandNames(sse.events, 'fake')).toEqual(['fake-cmd'])
-  expect(commandNames(sse.events, 'claude')).toEqual(['claude-cmd'])
+  await sse.wait((e) => e.type === 'commands' && e.agentId === 'fake')
+  expect(commandNames(sse.events, 'fake')).toEqual([])
+  expect(commandNames(sse.events, 'claude')).toEqual(['claude-cmd', 'claude-cmd-arg'])
 
   // 晚到的订阅者（刷新页面）：订阅即得全量，不用等 agent 再推
   const late = new SSECollector()
   await late.start(pageId, cookie)
-  await late.wait((e) => e.type === 'commands' && e.agentId === 'fake' && e.list.length > 0)
-  expect(commandNames(late.events, 'claude')).toEqual(['claude-cmd'])
-  expect(commandNames(late.events, 'fake')).toEqual(['fake-cmd'])
+  await late.wait((e) => e.type === 'commands' && e.agentId === 'fake')
+  await late.wait((e) => e.type === 'commands' && e.agentId === 'claude')
+  expect(commandNames(late.events, 'claude')).toEqual(['claude-cmd', 'claude-cmd-arg'])
+  expect(commandNames(late.events, 'fake')).toEqual([])
   sse.stop()
   late.stop()
 })
@@ -76,24 +77,24 @@ test('审批：两个 agent 同时待批，requestId 相同也不串，各答各
   // 两个进程各自从 perm-0 数起：撞号是常态（这是本文件里第一个产生审批的用例，所以两边都是 perm-0）
   expect(a1.requestId).toBe(a2.requestId)
   // 拿对方的 agentId 答：这一页没有那条审批
-  expect((await postJson(`/api/pages/${p1}/permission`, cookie, { agentId: 'claude', requestId: a1.requestId, optionId: 'allow_once' })).status).toBe(404)
+  expect((await postJson(`/api/pages/${p1}/permission`, cookie, { agentId: 'claude', requestId: a1.requestId, optionId: 'allow' })).status).toBe(404)
   // 旁观者没有写权限：不能替别人答
   const viewer = await joinPageSpace(p1, 'viewer1', { role: 'viewer' })
-  expect((await answerPermission(p1, viewer, a1, 'allow_once')).status).toBe(404)
+  expect((await answerPermission(p1, viewer, a1, 'allow')).status).toBe(404)
 
   // p1 的答复只落到 p1，p2 的审批还在等
-  expect((await answerPermission(p1, cookie, a1, 'allow_once')).status).toBe(200)
+  expect((await answerPermission(p1, cookie, a1, 'allow')).status).toBe(200)
   await waitFor(() => docText(d1).includes('granted:allow_once'))
   expect(docText(d2)).not.toContain('granted:')
   expect(s2.events.some((e) => e.type === 'permission_resolved')).toBe(false)
-  expect((await answerPermission(p2, cookie, a2, 'reject_once')).status).toBe(200)
+  expect((await answerPermission(p2, cookie, a2, 'reject')).status).toBe(200)
   await waitFor(() => docText(d2).includes('granted:reject_once'))
   for (const s of [s1, s2]) s.stop()
   d1.destroy()
   d2.destroy()
 })
 
-test('审批：晚到的订阅者回放得到待批；答了之后 agent 继续；已结束的审批再答 404', async () => {
+test('审批：晚到的订阅者回放得到待批；选项不在审批里 400；答了之后 agent 继续；已结束的审批再答 404', async () => {
   const { cookie, pageId } = await setupPage()
   const d = await connectDoc(pageId, cookie)
   userMessage(d.document, '需要权限')
@@ -106,12 +107,18 @@ test('审批：晚到的订阅者回放得到待批；答了之后 agent 继续�
   await late.start(pageId, cookie)
   expect(await waitPermission(late)).toMatchObject({ requestId: pending.requestId, agentId: 'fake' })
 
-  expect((await answerPermission(pageId, cookie, pending, 'allow_once')).status).toBe(200)
+  // 不是这条审批的选项 → 400，审批还挂着（驱动会把认不出的选项静默当拒绝，不能让它到执行端）
+  const bad = await answerPermission(pageId, cookie, pending, 'allow_once')
+  expect(bad.status).toBe(400)
+  expect(((await bad.json()) as { message: string }).message).toBe('这条审批没有这个选项')
+  expect(docText(d)).not.toContain('granted:')
+
+  expect((await answerPermission(pageId, cookie, pending, 'allow')).status).toBe(200)
   for (const s of [first, late]) {
     await s.wait((e) => e.type === 'permission_resolved' && e.requestId === pending.requestId && e.agentId === 'fake')
   }
   await waitFor(() => docText(d).includes('granted:allow_once'))
-  expect((await answerPermission(pageId, cookie, pending, 'allow_once')).status).toBe(404)
+  expect((await answerPermission(pageId, cookie, pending, 'allow')).status).toBe(404)
   first.stop()
   late.stop()
   d.destroy()
@@ -131,7 +138,7 @@ test('审批比这一轮活得久：轮次结束后仍待批、仍能答，答�
   await late.start(pageId, cookie)
   await waitPermission(late, (e) => e.requestId === pending.requestId)
 
-  expect((await answerPermission(pageId, cookie, pending, 'allow_once')).status).toBe(200)
+  expect((await answerPermission(pageId, cookie, pending, 'allow')).status).toBe(200)
   await sse.wait((e) => e.type === 'permission_resolved' && e.requestId === pending.requestId)
   // agent 收到的就是所选的选项（同一个进程记着）
   userMessage(d.document, '报后台审批')
@@ -162,7 +169,7 @@ test('审批没有超时（假时钟）：推进 11 分钟审批仍在、进程�
     await late.start(pageId, cookie)
     await waitPermission(late, (e) => e.requestId === pending.requestId)
     // 真能答才算还活着：进程被回收 / 审批被超时拒绝的话，这里是 404 / 409
-    expect((await answerPermission(pageId, cookie, pending, 'reject_once')).status).toBe(200)
+    expect((await answerPermission(pageId, cookie, pending, 'reject')).status).toBe(200)
     await late.wait((e) => e.type === 'permission_resolved' && e.requestId === pending.requestId)
     userMessage(d.document, '报后台审批')
     expect(await continuePage(pageId, cookie, { agent: 'fake' })).toBe(202)
@@ -194,10 +201,10 @@ test('停止：结束该会话的待批并广播 resolved；同一 agent 另一�
   expect((await postJson(`/api/pages/${p1}/stop`, cookie)).status).toBe(200)
   await s1.wait((e) => e.type === 'permission_resolved' && e.requestId === a1.requestId && e.agentId === 'fake')
   await s1.wait((e) => e.type === 'status' && e.state === 'done')
-  expect((await answerPermission(p1, cookie, a1, 'allow_once')).status).toBe(404) // 已经结束
+  expect((await answerPermission(p1, cookie, a1, 'allow')).status).toBe(404) // 已经结束
   // 停 A 页不能拒掉 B 页的审批（cancel 不能结束整个进程的全部待批）
   expect(s2.events.some((e) => e.type === 'permission_resolved')).toBe(false)
-  expect((await answerPermission(p2, cookie, a2, 'allow_once')).status).toBe(200)
+  expect((await answerPermission(p2, cookie, a2, 'allow')).status).toBe(200)
   await waitFor(() => docText(d2).includes('granted:allow_once'))
   for (const s of [s1, s2]) s.stop()
   d1.destroy()
@@ -208,7 +215,7 @@ test('主人：本机 agent 的主人是服务器 admin —— admin 看得到�
   const { cookie, pageId } = await setupPage()
   const bob = await joinPageSpace(pageId, 'bob', { role: 'member' })
   const asAdmin = await agentsList(cookie)
-  expect(asAdmin.find((a) => a.id === 'claude')?.posture).toEqual({ owner: true, modes: true, unrestricted: ['bypassPermissions'] })
+  expect(asAdmin.find((a) => a.id === 'claude')?.posture).toEqual({ owner: true, modes: true, unrestricted: ['bypassPermissions', 'auto'] })
   expect(asAdmin.find((a) => a.id === 'fake')?.posture).toEqual({ owner: true, modes: false, unrestricted: [] })
   expect((await agentsList(bob)).filter((a) => a.id === 'claude' || a.id === 'fake')).toEqual([])
 })
@@ -267,17 +274,17 @@ test('主人：本机 agent 的审批 —— 非 admin 答不了（403，审批�
   userMessage(a.document, '退出计划')
   expect(await continuePage(pageId, cookie, { agent: 'claude' })).toBe(202)
   const plan = await waitPermission(sse, (e) => e.agentId === 'claude')
-  expect(plan.options.map((o) => o.optionId)).toContain('exit-plan-bypass')
+  expect(plan.options.map((o) => o.optionId)).toContain('exit-plan:bypassPermissions')
 
-  expect((await answerPermission(pageId, bob, plan, 'exit-plan-bypass')).status).toBe(403)
-  expect((await answerPermission(pageId, bob, plan, 'exit-plan-default')).status).toBe(403)
+  expect((await answerPermission(pageId, bob, plan, 'exit-plan:bypassPermissions')).status).toBe(403)
+  expect((await answerPermission(pageId, bob, plan, 'exit-plan:default')).status).toBe(403)
   // 403 不吞审批：新订阅者还看得到它
   const late = new SSECollector()
   await late.start(pageId, cookie)
   await waitPermission(late, (e) => e.requestId === plan.requestId)
 
-  // admin 选了：会话切进 bypassPermissions（agent 只推了 current_mode_update），镜像据此广播并落成页面级意图
-  expect((await answerPermission(pageId, cookie, plan, 'exit-plan-bypass')).status).toBe(200)
+  // admin 选了：会话切进 bypassPermissions（CLI 只报了新的 permissionMode），镜像据此广播并落成页面级意图
+  expect((await answerPermission(pageId, cookie, plan, 'exit-plan:bypassPermissions')).status).toBe(200)
   await sse.wait((e) => e.type === 'config' && e.agentId === 'claude' && e.options.some((o) => o.category === 'mode' && o.currentValue === 'bypassPermissions'))
   await waitFor(async () => (await savedConfigs(pageId)).claude?.mode === 'bypassPermissions')
   await waitFor(() => docText(a).includes('plan-exit:exit-plan-bypass'))
@@ -298,7 +305,7 @@ test('主人：admin 选普通审批选项不受限', async () => {
   userMessage(a.document, '退出计划')
   expect(await continuePage(pageId, cookie, { agent: 'claude' })).toBe(202)
   const plan = await waitPermission(sse, (e) => e.agentId === 'claude')
-  expect((await answerPermission(pageId, cookie, plan, 'exit-plan-default')).status).toBe(200)
+  expect((await answerPermission(pageId, cookie, plan, 'exit-plan:default')).status).toBe(200)
   await waitFor(() => docText(a).includes('plan-exit:exit-plan-default'))
   sse.stop()
   a.destroy()

@@ -88,14 +88,14 @@
 
 ## 部署
 
-需要 **Docker**，以及用来构建前端的 **Node.js 22+**。
+只需要 **Docker**。镜像里带着前端和 server，旁边再跑一个 Postgres。
 
 ```bash
-git clone https://github.com/nsjsv/Ramet.git ramet && cd ramet
-cp .env.example .env                # 按需填写，见「配置」；至少改掉 POSTGRES_PASSWORD
-npm ci
-npm run build -w packages/web       # 构建前端
-docker compose -f docker-compose.prod.yml up -d --build
+mkdir ramet && cd ramet
+curl -fsSLO https://raw.githubusercontent.com/nsjsv/Ramet/main/docker-compose.prod.yml
+curl -fsSL https://raw.githubusercontent.com/nsjsv/Ramet/main/.env.example -o .env
+# 按需修改 .env，见「配置」；至少改掉 POSTGRES_PASSWORD
+docker compose -f docker-compose.prod.yml up -d
 ```
 
 然后：
@@ -103,18 +103,18 @@ docker compose -f docker-compose.prod.yml up -d --build
 1. 打开 `http://<服务器>:8080`。**第一次访问会进入初始化页，在这里创建管理员账号**，部署后请尽快完成。
 2. 管理员在后台创建其他账号（没有自助注册），然后在空间里邀请成员。
 
+一个端口同时提供页面、API 和 WebSocket。要挂域名、上 HTTPS，就让你的反向代理（nginx、Caddy……）把整站转到这个端口；`/collab`、`/term`、`/connector` 三条路径必须透传 `Upgrade` 头，并带上 `X-Forwarded-Proto`。
+
+想自己构建镜像：克隆仓库，在仓库里执行 `docker compose -f docker-compose.prod.yml up -d --build`。
+
 ### 升级
 
-拉代码、重新构建前端、重启：
-
 ```bash
-git pull && npm ci
-npm run build -w packages/web
-docker compose -f docker-compose.prod.yml up -d --build      # 依赖没变时镜像走缓存
-docker compose -f docker-compose.prod.yml restart server
+docker compose -f docker-compose.prod.yml pull
+docker compose -f docker-compose.prod.yml up -d --remove-orphans
 ```
 
-数据库结构启动时自动更新，不需要手动迁移。
+数据库结构启动时自动更新，不需要手动迁移。`--remove-orphans` 会停掉旧版本单独跑的那个 nginx 容器。
 
 ### 备份
 

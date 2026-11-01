@@ -1,11 +1,11 @@
-# 自托管编排：postgres + server + web 三个服务，数据全部 bind mount 在本目录（./postgres-data、./uploads）。
-# server 镜像只装依赖，源码从仓库只读挂载；web 用官方 nginx 镜像托管本地编译好的 dist。步骤（仓库根目录）：
-#   npm ci
-#   npm run build -w packages/web
-#   node scripts/pack-connector.mjs packages/web/dist/dl     # 可选：connector 安装包，供别的机器 npm i -g <地址>/dl/ramet-connector.tgz
-#   docker compose -f docker-compose.prod.yml up -d --build
-# 配置写在同目录的 .env 里（见下面各项注释）。对公网开放时在前面加一层终止 TLS 的反向代理，
-# 反代 / 时 /collab、/term、/connector 三条 WebSocket 路径必须透传 Upgrade 头。
+# 自托管编排：postgres + ramet 两个服务，数据全部 bind mount 在本目录（./postgres-data、./uploads）。
+# ramet 镜像自带前端产物与 server，一个端口（容器 3789 → 宿主机 WEB_PORT，缺省 8080）同时出页面、REST 与 WebSocket。
+# 用法：把这个文件放进一个空目录，按需写同目录的 .env（见下面各项注释），然后
+#   docker compose -f docker-compose.prod.yml up -d
+# 升级：docker compose -f docker-compose.prod.yml pull && docker compose -f docker-compose.prod.yml up -d
+# 想从源码自己构建：在仓库根目录 docker compose -f docker-compose.prod.yml up -d --build（用根目录的 Dockerfile）。
+# 对公网开放时在前面加一层终止 TLS 的反向代理，整站转到 WEB_PORT；/collab、/term、/connector 三条 WebSocket
+# 路径必须透传 Upgrade 头，并带上 X-Forwarded-Proto（server 靠它决定登录 cookie 的 Secure）。
 name: ramet
 
 services:
@@ -25,11 +25,10 @@ services:
       timeout: 3s
       retries: 10
 
-  server:
+  ramet:
+    image: ${RAMET_IMAGE:-nsjsv/ramet:latest}
     build:
       context: .
-      dockerfile: packages/server/Dockerfile
-    image: ramet-server:latest
     environment:
       DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/ramet
       # 进程时区：只影响 agent 过程归档页标题里的时间
@@ -55,26 +54,14 @@ services:
       RAMET_LINK_RELAY_URL: ${RAMET_LINK_RELAY_URL:-}
       RAMET_LINK_RELAY_SECRET: ${RAMET_LINK_RELAY_SECRET:-}
     ports:
+      # 页面 / REST / WebSocket（只给本机反代用就写成 127.0.0.1:8080）
+      - '${WEB_PORT:-8080}:3789'
       # 只给端口预览用（没开预览时这里不监听任何东西），不暴露任何 Ramet 路由
       - '${PREVIEW_PORT:-8790}:3790'
     volumes:
       # 上传文件永不删除（版本历史还引用着它们），这个目录必须长期保留
       - ./uploads:/app/packages/server/uploads
-      - ./packages/server/src:/app/packages/server/src:ro
-      - ./packages/server/tsconfig.json:/app/packages/server/tsconfig.json:ro
-      - ./packages/shared/src:/app/packages/shared/src:ro
     depends_on:
       postgres:
         condition: service_healthy
-    restart: unless-stopped
-
-  web:
-    image: nginx:alpine
-    ports:
-      - '${WEB_PORT:-8080}:80'
-    volumes:
-      - ./packages/web/dist:/usr/share/nginx/html:ro
-      - ./packages/web/nginx.conf:/etc/nginx/conf.d/default.conf:ro
-    depends_on:
-      - server
     restart: unless-stopped

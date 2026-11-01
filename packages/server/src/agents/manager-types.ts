@@ -2,12 +2,15 @@
 // 从 manager.ts 抽出：turn.ts / session-config.ts / session-store.ts 也要这些类型，
 // 而它们不该反过来依赖 manager（host 模式同 remote-run.ts 的 RemoteRunHost）。
 import type * as Y from 'yjs'
+import { toolOf } from '@ramet/shared/reply-stats'
 import type { Pool } from 'pg'
+import type { DocWriter } from '../collab.js'
 import type { PageTool } from '../page-read.js'
 import type { MachinePass } from './machine-access.js'
 import type { RunState } from './run-state.js'
 import type { AgentPosture } from './posture.js'
 import type { SessionMirror } from './session-mirror.js'
+import type { SessionSync } from './session-sync.js'
 import type { TeamRoundHost } from './team.js'
 import type { ToolProfile } from './tool-profile.js'
 import type { AgentAdapter, AgentConfig, AgentEvent, PermissionEvent } from './types.js'
@@ -42,6 +45,19 @@ export class NoUserMessageError extends Error {
   }
 }
 
+/** 这块回复不能续跑（不是最后一块 / 没有失败或停止 / 带队的一轮）：路由回 409 not-resumable，前端改走重新生成 */
+export class NotResumableError extends Error {
+  constructor(readonly reason: 'not-last' | 'not-interrupted' | 'team') {
+    super(
+      reason === 'not-last'
+        ? '只有最后一块回复能接着跑，这块请重新生成'
+        : reason === 'team'
+          ? '带队的一轮不能接着跑，请重新生成'
+          : '这块回复没有失败或停止，不能接着跑',
+    )
+  }
+}
+
 /** 审批已经不在（已被别人答了 / 已结束） */
 export class UnknownApprovalError extends Error {
   constructor() {
@@ -59,13 +75,33 @@ export class AgentOfflineError extends Error {
   }
 }
 
+/** 一页只用一种工具：页面第一块回复用的工具锁定这一页，接着对话的那一轮换成别的工具（任何机器）就拒绝（路由 409 tool-locked）。
+ *  不同工具之间的上下文接不上，同一工具换机器可以。显式 @ 点名、带队组员、run_agent 的被叫不受限：它们各用自己的会话，
+ *  对话内容靠补发（catch-up.ts，带署名）带过去，不是「接着对话的那个」 */
+export class ToolLockedError extends Error {
+  /** offline = 锁定的工具此刻一台能用的都没有（没指定 agent 时也不回落到别的工具） */
+  constructor(readonly tool: string, offline = false) {
+    super(offline ? `这个对话用的是 ${tool}，现在没有可用的 ${tool}` : `这个对话用的是 ${tool}，换工具请新开一页`)
+  }
+}
+
+/** 这个 agent 能不能接着这一页的对话：没锁（lock = ''）或是同一个工具（哪台机器都行） */
+export function fitsLock(lock: string, agentId: string): boolean {
+  return !lock || toolOf(agentId) === lock
+}
+
 /** 页面 + agent 的会话记录。
- *  `lastSyncedHash = null` 是准备会话：会话已建（选 agent 时预备，为了拿到模型/思考程度等配置项），
- *  但一次都没喂过文档，下一次生成必须「加载 + 全文重放」，不能走增量。 */
+ *  `seen` 与 `lastSyncedHash` 都为空是准备会话：会话已建（选 agent 时预备，为了拿到模型/思考程度等配置项；或刚新建、
+ *  提示词还没发出去），但一次都没喂过文档，下一次生成必须「加载 + 全文重放」，不能走增量。 */
 export type SavedSession = {
   sessionId: string
   cwd: string
-  lastSyncedHash: string | null
+  /** 这个会话看到的最后一个顶层块（发出提示词时就是那一轮的回复块 id）。下一轮只发它之后文档里新增的内容 + 新消息；
+   *  这块被删了就只发新消息。文档前面的改动、空间记忆的变化都不让会话作废（上下文归 agent 自己的会话） */
+  seen?: string | null
+  /** 老记录才有：对「去掉最后一条用户消息的视图」算的 hash。没有 seen 时按它判一次能不能增量（相等 = 只追加了新消息），
+   *  之后补记 seen；新写入不再带它 */
+  lastSyncedHash?: string | null
   /** 这个会话的 MCP 进程手里是谁的页面凭证（最后一次建 / 加载会话时交付的那份）。会话只给同一个人复用：
    *  换人接着用，agent 回打中心就会带着上一个人的页面权限（能读他能读、你读不到的页）。
    *  老记录没有这个字段 = 谁都不复用（各页全文重放一次） */
@@ -78,7 +114,8 @@ export type SavedSession = {
  *  posture 由当前请求的用户算出（owner 因人而异）。
  *  machine = 当前用户对这台机器有 machine 范围的使用权（接入人 ∨ 有效授权）：前端据此决定要不要给项目面板入口
  *  （不是 connector 上的 agent = false）；真正的判定在每个项目端点上再做一次，这个标记只管「要不要显示入口」 */
-export type CatalogAgent = { id: string; label: string; logo?: string | null; posture: AgentPosture; machine: boolean }
+/** unavailable：这个 agent 现在用不了的原因（CLI 版本太旧等），前端置灰、不可选 */
+export type CatalogAgent = { id: string; label: string; logo?: string | null; posture: AgentPosture; machine: boolean; unavailable?: string }
 
 /** 解析后的执行目标：runTurn/ensureAdapter 只看这个，不再关心 agent 在哪台机器。
  *  pass 是操作人对这台机器的使用凭据：ResolvedAgent 只能由 manager.resolve（过 assertCanUse）造出，
@@ -98,6 +135,8 @@ export type RunTarget = {
   cwd: string
   opts: Record<string, string>
   redo?: string
+  /** 要接着跑（续跑）的那块 agent_reply 的 id：同一个会话、同一块回复、同一个过程页接着来（resume-turn.ts） */
+  resume?: string
   /** 带队的执行轮（POST /continue {team: planId}）：这一轮要先由中心把计划里的组员跑完，组长最后交叉审查（team.ts） */
   team?: { planId: string }
 }
@@ -156,9 +195,17 @@ export type ManagerHost = {
   team: TeamRoundHost
   /** 页面 + agent 的会话镜像：会话级状态（命令 / 配置 / 待批）中心只在这里读 */
   mirror: SessionMirror
+  /** 会话记录在中心的副本：每轮收尾后的同步、换机器时的下发（session-sync.ts / session-move.ts） */
+  sessions: SessionSync
+  /** 这个人此刻能用的 agent 目录（续跑时原机器不在线，找同一工具的另一台） */
+  catalog(user: { id: string; role: string }): Promise<CatalogAgent[]>
+  /** 本机 agent 的显示名（补发内容里给别的 agent 的回复署名用）；不是本机 agent 返回 undefined */
+  agentLabel(agentId: string): string | undefined
+  /** 以某人身份写文档（collab.ts 的 createDocWriter）：续跑收尾往原过程页补步骤块。测试桩可以不给 */
+  writeDoc?: DocWriter
 }
 
-/** 收件箱用的只读快照：某页面上此刻待批的一条审批。own = Ramet 自己的审批（trash_page 等，不经 ACP 会话） */
+/** 收件箱用的只读快照：某页面上此刻待批的一条审批。own = Ramet 自己的审批（trash_page 等，不经 agent 会话） */
 export type PendingApproval = { pageId: string; agentId: string; event: PermissionEvent; own: boolean }
 
 /** 收件箱用的只读快照：一个在飞（未收尾）的回合 */

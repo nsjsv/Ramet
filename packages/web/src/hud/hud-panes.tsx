@@ -2,7 +2,7 @@
  * 尽量复用回复里已有的渲染器：步骤 = 运行条托盘（run-tray.ts，同一套行与展开）；任务 = 计划卡（plan-card.ts）；
  * 改动 = 每一处修改的常规展示（run-view.ts 的 toolViewHtml，自带 diff）。数据就是 HudRun + runTally，不另取。 */
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { RunEntry, RunState, RunTally, TallyFile, ToolEntry } from '@ramet/shared/run-model'
+import { viewOf, type RunEntry, type RunState, type RunTally, type TallyFile, type ToolEntry } from '@ramet/shared/run-model'
 import { agentName } from '../editor/agent-badge'
 import { createPlanCard, type PlanCard } from '../editor/plan-card'
 import { fmtDuration } from '../editor/run-format'
@@ -120,14 +120,13 @@ export function TasksPane({ run }: { run: HudRun }) {
   return <div ref={host} className="hp-tasks" />
 }
 
-/** 改了这个文件的每一步（diff 路径或 locations 对得上） */
+/** 改了这个文件的每一步（diff 路径或主路径对得上） */
 function stepsOf(entries: readonly RunEntry[], path: string): ToolEntry[] {
   return entries.filter((e): e is ToolEntry => {
     if (e.k !== 'tool' || e.status === 'failed') return false
-    const content = Array.isArray(e.acp?.content) ? (e.acp.content as Array<Record<string, unknown>>) : []
-    if (content.some((c) => c?.type === 'diff' && c.path === path)) return true
-    const loc = Array.isArray(e.acp?.locations) ? (e.acp.locations[0] as { path?: unknown } | undefined) : undefined
-    return (loc?.path ?? e.detail) === path && !content.some((c) => c?.type === 'diff')
+    const v = viewOf(e)
+    if (v.diffs?.some((d) => d.path === path)) return true
+    return (v.path || e.detail) === path && !v.diffs?.length
   })
 }
 

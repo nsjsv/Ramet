@@ -1,6 +1,6 @@
 // ---------- connector CLI 入口 ----------
 // 用法（agent 所在机器上跑）：
-//   ramet-connector start --cloud http://<中心地址>   # 安装包（scripts/pack-connector.mjs）：打印配对链接，浏览器确认后装成后台服务
+//   ramet start --cloud http://<中心地址>   # npm 包（npm i -g @nsjsv/ramet，scripts/pack-connector.mjs 打的）：打印配对链接，浏览器确认后装成后台服务
 //   npm run connector -w packages/server -- start --cloud ...   # 源码里同样可以
 //   npm run connector -w packages/server -- --cloud ...         # 不带子命令 = 前台运行（同 run）
 //
@@ -32,7 +32,7 @@ import { supervise } from './supervise.js'
 const SCRIPT = fileURLToPath(import.meta.url)
 /** 源码运行时入口是 cli.ts：服务里要带 tsx 加载器；安装包里是打好的 connector.mjs，直接 node 跑 */
 const FROM_SOURCE = SCRIPT.endsWith('.ts')
-const CMD = FROM_SOURCE ? 'npm run connector -w packages/server --' : 'ramet-connector'
+const CMD = FROM_SOURCE ? 'npm run connector -w packages/server --' : 'ramet'
 
 function launch(): Launch {
   return { node: process.execPath, prefix: FROM_SOURCE ? ['--import', import.meta.resolve('tsx')] : [], script: SCRIPT }
@@ -48,11 +48,11 @@ function version(): string {
   }
 }
 
-const HELP = `ramet connector —— 把本机 agent 接进中心 server（出站 WSS，无需公网端口）
+const HELP = `ramet —— Ramet 连接器，把本机 agent 接进中心 server（出站 WSS，无需公网端口）
 
 后台服务（开机 / 登录自启，崩了自动拉起，断线自动重连）:
   ${CMD} start --cloud <中心地址>   首次：终端打印配对链接，到浏览器选空间确认后在后台运行
-  ${CMD} start            重启后台服务（装了新 agent CLI、改了 PATH、升级安装包后执行一次）
+  ${CMD} start            重启后台服务（装了新 agent CLI、改了 PATH、npm i -g @nsjsv/ramet 升级后执行一次）
   ${CMD} start --repair   重新配对（机器被撤销 / 拒绝后，或想换个空间）
   ${CMD} status           看状态和最近日志
   ${CMD} logs [-f] [-n 行数]
@@ -80,7 +80,7 @@ const HELP = `ramet connector —— 把本机 agent 接进中心 server（出�
   RAMET_IDLE_MS      适配器闲置回收窗口毫秒（默认 10 分钟；0 = 到期立即回收，仅调试/验收用）
 
 本机 agent 配置: RAMET_AGENTS 环境变量，或 agents.json（与中心同格式；后台服务读 ~/.ramet/agents.json，run 读当前目录），例如
-  RAMET_AGENTS='[{"id":"omp","label":"omp","command":"omp","args":["acp"]}]'
+  RAMET_AGENTS='[{"id":"omp","label":"omp","command":"omp","driver":"omp"}]'（driver 必须是 claude / codex / pi / omp 之一）
 后台服务用的是执行 start 那一刻的终端环境（PATH 等快照在 ~/.ramet/connector.env.json）。
 `
 

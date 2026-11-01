@@ -35,9 +35,11 @@ if (!process.env.DATABASE_URL) {
 }
 
 const MCP = fileURLToPath(new URL('./mcp/ramet.mjs', import.meta.url))
-const FAKE_AGENT = fileURLToPath(new URL('./agents/fake-agent.mjs', import.meta.url))
+const FAKE_CODEX = fileURLToPath(new URL('./agents/fake/codex.mjs', import.meta.url))
 process.env.UPLOAD_DIR = mkdtempSync(join(tmpdir(), 'ramet-skills-uploads-'))
-process.env.RAMET_AGENTS = JSON.stringify([{ id: 'fake', label: 'Fake', command: process.execPath, args: [FAKE_AGENT] }])
+process.env.RAMET_AGENTS = JSON.stringify([
+  { id: 'fake', label: 'Fake', driver: 'codex', command: FAKE_CODEX, env: { CODEX_HOME: mkdtempSync(join(tmpdir(), 'ramet-codex-')) } },
+])
 
 const pool = getPool()
 await initDb(pool)

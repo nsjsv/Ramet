@@ -106,7 +106,7 @@
   color: var(--danger);
 }
 
-/* ---------- 条目展开详情（工具 rawInput / rawOutput / content / diff / locations、子代理输出、_meta，思考 / 说明全文；
+/* ---------- 条目展开详情（工具原样输入输出与其余字段、子代理输出，思考 / 说明全文；
    实时状态条与过程页共用，见 run-detail.ts）。长内容落在自己的滚动区里，不撑破页面。 ---------- */
 
 .run-detail {

@@ -1,8 +1,11 @@
 // ---------- 物理删除页面行 + 它的 Yjs 快照与增量 ----------
 // pages 删除、清空回收站、删空间、过程页回收共用这一处。runs / page_snapshots 随 pages 外键级联。
 // yjs 两表没有外键，必须跟页面行一起清，否则删掉的文档还能被重放出来。
+// 换机器用的会话副本（agents/session-copies.ts）在盘上，行随页面级联、目录在这里删：放在删行之后，
+// 事务万一回滚只是丢了副本（下一次同步整份重拉），不会留下没人认领的目录
 
 import type { PoolClient } from 'pg'
+import { dropPageCopies } from './agents/session-copies.js'
 
 const DELETE_PAGE = 'DELETE FROM pages WHERE id = $1'
 const DELETE_DOC = 'DELETE FROM yjs_documents WHERE doc_name = $1'
@@ -14,6 +17,7 @@ export async function purgePageRows(client: PoolClient, ids: readonly string[]):
     await client.query(DELETE_DOC, [`page:${id}`])
     await client.query(DELETE_UPDATES, [`page:${id}`])
   }
+  await dropPageCopies(ids)
 }
 
 // 物理删除整个空间：删空间路由与删号时的单人空间清理共用。空间全部页面（刻意读基表，回收站里的行也要一起物理删掉，

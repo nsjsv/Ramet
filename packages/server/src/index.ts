@@ -44,11 +44,13 @@ import { projectRoutes } from './routes/project.js'
 import { projectPtyRoutes } from './routes/project-pty.js'
 import { previewRoutes, type PreviewRuntime } from './routes/previews.js'
 import { csrfGuard, originAllowed } from './csrf.js'
+import { webRootFromEnv, webStatic } from './web-static.js'
 import { PreviewAccess } from './preview-access.js'
 import { createPreviewServer } from './preview-server.js'
 import { onMachineFirstUse, sweepGrants, type Disconnect } from './agents/machine-grants.js'
 import { InboxPoke } from './inbox.js'
 import { inboxRoutes } from './routes/inbox.js'
+import { commentRoutes } from './routes/comments.js'
 import { debugRoutes } from './routes/debug.js'
 import { runsRoutes } from './routes/runs.js'
 import { pageReadRoutes } from './page-read.js'
@@ -124,6 +126,8 @@ export function startServer(
   // CSRF：改数据的 /api 请求，浏览器自报的来源必须是 Ramet 自己（预览源与 Ramet 同站不同源，里面的脚本不可信）。
   // 必须挂在所有子应用之前；无 Origin 的非浏览器请求（connector / MCP 的 Bearer、测试）放行
   app.use('/api/*', csrfGuard())
+  // 前端产物（web-static.ts）：同样必须在子应用之前，否则匿名打开页面被它们的 requireAuth 拦成 401
+  app.use('*', webStatic(webRootFromEnv()))
   // 图床镜像（imgbed-sync.ts）：读入口 302 到图床，上传后后台镜像；未配置时是空实现
   const imgbed = options.imgbed ?? createImgbedSync(pool)
   // 公开端点必须挂在 pages/spaces 之前：两者在自己子应用里 app.use('*', requireAuth)，
@@ -311,6 +315,15 @@ export function startServer(
       runs: () => agentManager.activeRuns(),
       localAgents: () => agentManager.agents().map((a) => ({ id: a.id, label: a.label })),
       onlineAgents: (connectorId) => hub.get(connectorId)?.agents,
+    }),
+  )
+  // 页面评论（每条路由自带 requireAuth）。写成功后：页面文档上广播 {t:'comments'}（同页在线的人重拉评论，
+  // 只有连着这一页的人收得到，不经全员的 control 通道），收件箱也刷新（回复 / @ / 新开串都可能给别人添条目）
+  app.route(
+    '/',
+    commentRoutes(pool, (pageId) => {
+      hocuspocus.documents.get(`page:${pageId}`)?.broadcastStateless(JSON.stringify({ t: 'comments' }))
+      inbox.poke()
     }),
   )
   // 过程页 record（只读视图）

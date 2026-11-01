@@ -1,5 +1,5 @@
 // ---------- connector 运行时：出站 WSS 反连中心 ----------
-// 跑在 agent 所在机器上：本机起 / 复用 ACP 进程、会话 new/load/prompt、取消、权限应答、事件回传。
+// 跑在 agent 所在机器上：本机起 / 复用 agent 驱动、会话 new/load/prompt、取消、权限应答、事件回传。
 // 文档、Yjs、上下文、hash 一律留在中心，这里不碰数据库。
 //
 // 断线后指数退避重连；被撤销（4403）打印原因后干净退出，等人工 start --repair 重新配对。
@@ -8,7 +8,10 @@
 import { homedir, hostname } from 'node:os'
 import { dirname, join } from 'node:path'
 import WebSocket from 'ws'
-import { AcpAgent, errorText } from '../agents/acp.js'
+import { errorText } from '../agents/drivers/error-text.js'
+import type { DriverBase } from '../agents/drivers/base.js'
+import { agentVersions, cliUnavailable } from '../agents/drivers/cli-version.js'
+import { createAdapter } from '../agents/drivers/create.js'
 import { listDirs } from '../agents/dirs.js'
 import { loadAgents } from '../agents/registry.js'
 import {
@@ -36,6 +39,7 @@ import { handleProject, WriteConflict } from './project.js'
 import { PreviewForwarder } from './preview.js'
 import { QuickRunner } from './quick.js'
 import { loadNodePty, PtyManager, type PtyDeps, type PtyModule } from './pty.js'
+import { SessionDenied, SessionFiles } from './session-files.js'
 
 const RECONNECT_MIN_MS = 1_000
 const RECONNECT_MAX_MS = 30_000
@@ -91,14 +95,13 @@ function refuse(send: (msg: ConnMsg) => void, msg: DrivenMsg, message: string): 
 /** 本机可用 agent：显式配置（RAMET_AGENTS / cwd 下 agents.json）优先，没配就自动检测本机已装 CLI */
 export function localAgents(log: (line: string) => void): { configs: AgentConfig[]; agents: ConnectorAgentInfo[] } {
   const { agents: configs, source } = loadAgents()
-  const agents: ConnectorAgentInfo[] = configs.map((a) => ({ id: a.id, label: a.label, logo: a.logo ?? null }))
+  const agents: ConnectorAgentInfo[] = configs.map((a) => ({ id: a.id, label: a.label, logo: a.logo ?? null, driver: a.driver }))
   if (agents.length === 0) {
     // 零 agent 的连接器在线也毫无用处（中心列表里看不到任何可选 agent），必须显式报警
     log('警告：本机没有可用的 agent（自动检测也没找到）。连上去也没有可用项。')
-    log('  自动检测认这些 ACP：omp（omp acp）、claude、codex、opencode（opencode acp）、pi、gemini（经 npx）；')
-    log('  claude 还需要本机装有 node 才能跑包内适配器（或 npx 兜底）。')
-    log('  也可以显式配 RAMET_AGENTS（JSON 数组），或在 connector 进程 cwd 放 agents.json，例如：')
-    log(`  RAMET_AGENTS='[{"id":"omp","label":"omp","command":"omp","args":["acp"]}]'`)
+    log('  自动检测认这些：claude、codex、pi、omp（PATH 上有这个 CLI 就行）。')
+    log('  也可以显式配 RAMET_AGENTS（JSON 数组，每项必须写 driver），或在 connector 进程 cwd 放 agents.json，例如：')
+    log(`  RAMET_AGENTS='[{"id":"omp","label":"omp","command":"omp","driver":"omp"}]'`)
   } else {
     const how = source === 'auto' ? '自动检测到' : source === 'env' ? '来自 RAMET_AGENTS' : '来自 agents.json'
     log(`本机 agent（${how}）: ${agents.map((a) => a.id).join(', ')}`)
@@ -122,13 +125,22 @@ export async function runConnector(options: ConnectorOptions): Promise<void> {
   const name = options.name ?? hostname()
   const cwd = options.cwd ?? process.cwd()
   const { configs, agents } = localAgents(log)
+  // CLI 版本与配对并行探测（配对链接不用等它），连中心之前取齐；取不到的不报
+  const probing = agentVersions(configs)
 
   const config = readConnectorConfig(tokenFile)
   const token = config && !options.repair && !needsPair(config, origin)
     ? config.token
     : await pairAndSave(origin, { name, cwd, agents }, tokenFile, log, options.signal)
+  const versions = await probing
+  // 版本低于驱动要求的标上不可用原因（中心目录里置灰、不可选）；判定在 connector 这边，因为驱动跑在这台机器上
+  const helloAgents = agents.map((a) => {
+    const version = versions.get(a.id)
+    const unavailable = cliUnavailable(configs.find((c) => c.id === a.id)?.driver, version)
+    return { ...a, ...(version ? { version } : {}), ...(unavailable ? { unavailable } : {}) }
+  })
 
-  const adapters = new Map<string, AcpAgent>()
+  const adapters = new Map<string, DriverBase>()
   /** 闲置回收：到期时适配器 busy（在飞 prompt）就续期，绝不 SIGTERM 掉正在跑的轮次 */
   const idle = new IdleRecycler(
     (agentId) => adapters.get(agentId)?.busy === true,
@@ -207,9 +219,18 @@ export async function runConnector(options: ConnectorOptions): Promise<void> {
     ...(options.quickTimeoutMs !== undefined ? { timeoutMs: options.quickTimeoutMs } : {}),
   })
 
-  function ensureAdapter(agentId: string): AcpAgent {
+  // 搬会话（换机器时中心读 / 写这台机器上的原生会话记录）：路径只由本机驱动的会话端口算，只认机器主人，见 session-files.ts
+  const sessionFiles = new SessionFiles({
+    adapter: (agentId) => ensureAdapter(agentId),
+    existing: (agentId) => adapters.get(agentId),
+    isOwner: (actor) => readConnectorConfig(tokenFile)?.ownerId === actor,
+    log,
+  })
+
+  function ensureAdapter(agentId: string): DriverBase {
     const existing = adapters.get(agentId)
-    if (existing && existing.alive) {
+    // 正在起的（并行的另一个请求刚建出来、握手还没完）也复用：杀掉重建会让先到的那个请求收到「agent 已停止」
+    if (existing && existing.reusable) {
       // 请求到达即重设回收窗口（与"在飞工作"共同构成"空闲"的定义）
       idle.arm(agentId)
       return existing
@@ -217,7 +238,7 @@ export async function runConnector(options: ConnectorOptions): Promise<void> {
     if (existing) existing.kill()
     const cfg = configs.find((a: AgentConfig) => a.id === agentId)
     if (!cfg) throw new Error(`本机未配置 agent ${agentId}`)
-    const adapter = new AcpAgent(cfg, cwd)
+    const adapter = createAdapter(cfg, cwd)
     adapters.set(agentId, adapter)
     idle.arm(agentId)
     // 常驻监听：会话级事件（命令 / 配置 / 审批）不论有没有 prompt 在飞都作为 `session` 帧发给中心。
@@ -264,7 +285,7 @@ export async function runConnector(options: ConnectorOptions): Promise<void> {
       // 中心那头没了这边可能收不到关闭通知（代理 / 休眠 / 换网）：心跳判死 → terminate → close → 重连
       keepAlive(ws, () => log('心跳超时：和中心的连接已经断了，重连'))
       // inflight 只报身份。事件日志留在进程里，等 welcome.resume 按 after 补。
-      send({ t: 'hello', name, defaultCwd: cwd, agents, inflight: flight.helloList(), caps: connectorCaps(pty !== null) })
+      send({ t: 'hello', name, defaultCwd: cwd, agents: helloAgents, inflight: flight.helloList(), caps: connectorCaps(pty !== null) })
       // 全量会话快照：断线期间发生的审批 / 命令 / 配置变化靠它对账（快照里没有的会话中心当已结束）
       send({ t: 'sessions', list: sessionsSnapshot() })
     })
@@ -390,6 +411,19 @@ export async function runConnector(options: ConnectorOptions): Promise<void> {
           // 预览的流量帧（已过第二道闸）：只连 127.0.0.1:<登记的端口>；每帧再按记录里的共享人判一次（connector/preview.ts）
           preview.stream(msg)
           break
+        case 'session-stat':
+        case 'session-read':
+        case 'session-write':
+        case 'session-close':
+          // 搬会话（已过第二道闸：machine 范围；另外只认机器主人）。路径一律由本机驱动的会话端口按工具规则算，不收中心给的路径
+          void sessionFiles.handle(msg).then(
+            (session) => send({ t: 'res', rid: msg.rid, session }),
+            (err: unknown) => {
+              log(`${msg.t} 失败 agent=${String(msg.agent)} session=${String(msg.sessionId)}：${errorText(err)}`)
+              send({ t: 'err', rid: msg.rid, message: errorText(err), ...(err instanceof SessionDenied ? { code: 'forbidden' as const } : {}) })
+            },
+          )
+          break
         case 'quick':
           // 随手 AI 本地通道（已过第二道闸：agent 范围）。受限会话里跑一次，文本增量 quick-delta，结束 res / err
           quick.start(msg)
@@ -466,7 +500,7 @@ export async function runConnector(options: ConnectorOptions): Promise<void> {
           preview.closeActor(msg.userId)
           break
         case 'kill-cmd':
-          // 非驱动帧：停止 agent 在 ACP 终端里跑的一条命令。只让机器停下来，不判 actor；会话对不上的由适配器忽略
+          // 非驱动帧：停止一个可停的东西（子代理句柄，字段名沿用 terminalId）。只让机器停下来，不判 actor；会话对不上的由驱动忽略
           if (typeof msg.agent === 'string' && typeof msg.sessionId === 'string' && typeof msg.terminalId === 'string') {
             adapters.get(msg.agent)?.killCommand(msg.sessionId, msg.terminalId)
           }
@@ -551,6 +585,7 @@ export async function runConnector(options: ConnectorOptions): Promise<void> {
       pty?.dispose()
       preview.dispose()
       quick.dispose()
+      void sessionFiles.dispose()
       // 进程信号监听随收尾摘掉（进程内多次起停 connector 的宿主 / 测试里不会越攒越多）
       process.off('SIGINT', stop)
       process.off('SIGTERM', stop)

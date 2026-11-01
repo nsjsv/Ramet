@@ -121,7 +121,10 @@ export function AssigneeChip({
               className="menu-item"
               role="menuitemradio"
               aria-checked={a.id === assignee}
+              aria-disabled={a.unavailable ? true : undefined}
+              title={a.unavailable}
               onClick={() => {
+                if (a.unavailable) return
                 setOpen(false)
                 if (a.id !== assignee) onPick(a.id)
               }}
@@ -129,6 +132,7 @@ export function AssigneeChip({
               <AgentBadgeView badge={agentBadge(a.id)} className="chip-mark" />
               <span className="menu-text">
                 <span className="t">{a.label}</span>
+                {a.unavailable && <span className="d">{a.unavailable}</span>}
               </span>
               {a.id === assignee && <Icon name="check" size={14} className="tick" />}
             </button>

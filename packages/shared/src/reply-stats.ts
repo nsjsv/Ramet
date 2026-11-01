@@ -60,3 +60,16 @@ export function decodeStats(raw: unknown): ReplyStats {
   }
   return out
 }
+
+// ---------- 回复块 `agent` 属性 → 工具名 ----------
+// 一页只用一种 agent 工具：不同工具之间的上下文接不上，同一工具换机器可以。catalog id 有两种形状：
+// 本机 agent = 工具名本身（claude / codex / pi / omp …）；connector 上的 = `c:<connectorId>:<工具名>`
+// （connectorId 是不含冒号的 uuid，工具名自身可以含冒号）。前端过滤候选与服务端拦截用同一个函数，两端判定不会漂移。
+const REMOTE_PREFIX = 'c:'
+
+export function toolOf(agentId: string): string {
+  if (!agentId.startsWith(REMOTE_PREFIX)) return agentId
+  const rest = agentId.slice(REMOTE_PREFIX.length)
+  const i = rest.indexOf(':')
+  return i > 0 ? rest.slice(i + 1) : agentId
+}

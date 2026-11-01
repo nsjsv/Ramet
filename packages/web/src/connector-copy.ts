@@ -6,14 +6,15 @@ export const CONNECTORS_COPY = {
   pairTitle: '接入新机器',
   /** 三步（ConnectorsPane.tsx）：命令里不含任何密钥，start 在终端打印一次性配对链接，到浏览器里选空间确认（/connect/:code，ConnectMachine.tsx） */
   stepInstall: '在要跑 agent 的机器上安装',
-  stepInstallHint: '要求 Node.js 22 以上；Linux / macOS 报权限错误就在前面加 sudo。升级时重新执行这一行。',
+  stepInstallHint:
+    '要求 Node.js 22 以上；Linux / macOS 报权限错误就在前面加 sudo；国内网络慢可在末尾加 --registry=https://registry.npmmirror.com。升级时重新执行这一行。装过旧版 ramet-connector 的先 npm rm -g ramet-connector。',
   stepStart: '启动',
   stepStartHint: '命令里不含任何密钥。终端会打印一条配对链接，10 分钟内有效、只能用一次。',
   stepStartHintDev: '开发环境没有安装包：在仓库根目录前台运行。终端会打印一条配对链接，10 分钟内有效、只能用一次。',
   stepConfirm: '在浏览器里确认',
   stepConfirmHint: '打开终端里的链接，核对校验码与终端里的一致，选好空间点「确认接入」，机器上的命令随即转为后台服务（开机 / 登录自启、断线自动重连）。',
   stepConfirmMember: '成员接入的机器要等空间所有者批准才生效，批准前谁都用不了，包括你。',
-  manageHint: '之后在那台机器上用 ramet-connector status / logs -f / stop 管理；被撤销、想换空间或换中心时用 ramet-connector start --repair 重新配对。',
+  manageHint: '之后在那台机器上用 ramet status / logs -f / stop 管理；被撤销、想换空间或换中心时用 ramet start --repair 重新配对。',
   copy: '复制',
   copied: '已复制',
   copyFailed: '复制失败，请手动选中复制',

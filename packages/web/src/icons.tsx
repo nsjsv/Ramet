@@ -65,6 +65,8 @@ const PATHS = {
   external: '<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
   globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/>',
   say: '<path d="M3.75 4.5h16.5v11.25H10.5l-4.5 3.75v-3.75H3.75z"/>',
+  /** 评论（框选菜单 / 顶栏）：带两行字的气泡，和「对话视图」的空气泡区分开 */
+  comment: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M8 9h8M8 13h5"/>',
   step: '<circle cx="12" cy="12" r="4"/>',
   /** 用量标签前的「这一轮」记号：三条长短不一的横线 */
   run: '<path d="M4 6h10M4 12h16M4 18h7"/>',
@@ -75,6 +77,7 @@ const PATHS = {
   wrap: '<path d="M3 6h18"/><path d="M3 12h15a3 3 0 1 1 0 6h-4"/><path d="M16 16l-2 2 2 2"/><path d="M3 18h7"/>',
   quote: '<path d="m15 10 5 5-5 5"/><path d="M4 4v7a4 4 0 0 0 4 4h12"/>',
   retry: '<path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/>',
+  play: '<path d="M7 5l12 7-12 7z"/>',
   /** 收藏：空心 / 实心星 */
   star: '<path d="M12 2.5l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.4l-5.9 3.1 1.2-6.5L2.5 9.4l6.6-.9z"/>',
   'star-fill': '<path d="M12 2.5l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.4l-5.9 3.1 1.2-6.5L2.5 9.4l6.6-.9z" fill="currentColor"/>',

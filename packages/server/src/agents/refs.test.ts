@@ -95,7 +95,7 @@ function lastUserLine(prompt: string): string {
   return prompt.split('\n').filter((l) => l.startsWith('>> ')).at(-1) ?? ''
 }
 
-test('引用一条待办：agent 拿到它当前的内容与勾选状态；改了原块再发拿到改后的，且新建会话全文重放', async () => {
+test('引用一条待办：agent 拿到它当前的内容与勾选状态；改了原块再发拿到改后的，会话照旧、只发新消息', async () => {
   const { cookie, pageId } = await setupPage()
   const { spaceId } = await pageOwnership(pageId)
   const source = await newPage(cookie, spaceId)
@@ -124,11 +124,10 @@ test('引用一条待办：agent 拿到它当前的内容与勾选状态；改�
   await serverHas(source, cookie, (b) => b.toString().includes('和面包'))
   body.insert(body.length, [userMessage('回显提示词 再看 ', ref())])
   const second = await echo(sse, p, pageId, cookie, 2)
-  expect(lastUserLine(second)).toBe(`>> 回显提示词 再看 page:${source}#L1「- [x] 买牛奶和面包」`)
-  // 前一条消息里的同一引用也是当前内容（整页重放）
-  expect(second).toContain(`>> 回显提示词 先做 page:${source}#L1「- [x] 买牛奶和面包」 这条`)
-  // 引用的内容变了 = 文档变了：不走原生续聊的增量，新建会话
-  expect((await agentSession(pageId))?.fake?.sessionId).not.toBe(firstSession)
+  // 增量只发新消息（不带 '>> ' 前缀），里面的引用是原块当前的内容
+  expect(second).toBe(`回显提示词 再看 page:${source}#L1「- [x] 买牛奶和面包」`)
+  // 被引用块的原文变了不让会话作废：上下文归 agent 自己的会话，前一条消息不重发
+  expect((await agentSession(pageId))?.fake?.sessionId).toBe(firstSession)
 
   sse.stop()
   p.destroy()

@@ -10,11 +10,14 @@ import { afterEach } from 'vitest'
 import { WebSocket } from 'ws'
 import { approveConnector } from './connectors.js'
 import { provisionConnector } from '../test-helpers.js'
+import { createHash } from 'node:crypto'
+import { SESSION_CHUNK_BYTES, TAIL_BYTES } from './session-types.js'
 import {
   CONNECTOR_PATH,
   CONNECTOR_TOKEN_HEADER,
   isDrivenMsg,
   type CenterMsg,
+  type ConnectorAgentInfo,
   type ConnMsg,
   type DrivenMsg,
 } from './protocol.js'
@@ -59,6 +62,13 @@ export type Machine = {
   heldQuick: Extract<CenterMsg, { t: 'quick' }>[]
   /** true = write 帧按「文件已被改动」应答（err code conflict）；否则回 { path, hash: WRITE_HASH } */
   writeConflict: boolean
+  /** 搬会话（caps 声明 session 才会收到 session-* 帧）：这台机器上各会话的文件，sessionId → name → 内容。
+   *  prompt 收尾前往 main.jsonl 追加一行（像 agent 写自己的记录）；session-write 写完最后一块才换进来 */
+  sessionFiles: Map<string, Map<string, Buffer>>
+  /** 设了：第 n 个（从 1 数）session-write 帧回 err（测下发中途失败） */
+  failWriteAt: number | null
+  sessionWrites: number
+  pendingWrites: Map<string, Buffer[]>
   /** 非空：所有 pty 帧都按「connector 拒绝」应答（模拟别人的终端 / 终端不存在） */
   refusePty: 'forbidden' | 'not_found' | null
   /** 端口预览：登记（previewId → port）。port-share / port-unshare 立刻应答 */
@@ -158,7 +168,14 @@ function respond(m: Machine, msg: CenterMsg): void {
       else if (msg.t === 'ws-open') m.send({ t: 'ws-ready', wsId: msg.wsId, protocol: msg.protocols[0] ?? '' })
       else if (msg.t === 'ws-msg') m.send({ t: 'ws-data', wsId: msg.wsId, data: msg.data, binary: msg.binary })
       break
+    case 'session-stat':
+    case 'session-read':
+    case 'session-write':
+    case 'session-close':
+      respondSession(m, msg)
+      break
     case 'prompt':
+      appendTranscript(m, msg.sessionId, JSON.stringify({ prompt: msg.blocks.map((b) => (b.type === 'text' ? b.text : '')).join('') }))
       if (m.hold) {
         m.held.push(msg)
         break
@@ -186,6 +203,66 @@ function respond(m: Machine, msg: CenterMsg): void {
     }
     default:
       break
+  }
+}
+
+/** 往某个会话的 main.jsonl 追加一行（脚本化机器上的「agent 写记录」） */
+export function appendTranscript(m: Machine, sessionId: string, line: string): void {
+  let files = m.sessionFiles.get(sessionId)
+  if (!files) m.sessionFiles.set(sessionId, (files = new Map()))
+  files.set('main.jsonl', Buffer.concat([files.get('main.jsonl') ?? Buffer.alloc(0), Buffer.from(line + '\n')]))
+}
+
+/** 会话文件帧：照 sessionFiles 应答，尾巴哈希与真 connector 同一算法（session-types.ts 的 tailHashAt） */
+function respondSession(m: Machine, msg: Extract<CenterMsg, { t: `session-${string}` }>): void {
+  const files = m.sessionFiles.get(msg.sessionId)
+  switch (msg.t) {
+    case 'session-stat': {
+      if (!files || files.size === 0) {
+        m.send({ t: 'err', rid: msg.rid, message: '本机没有这个会话的记录' })
+        return
+      }
+      const known = new Map(msg.known.map((k) => [k.name, k.size]))
+      const list = [...files].map(([name, buf]) => {
+        const k = known.get(name)
+        const tailHash = k !== undefined && buf.length >= k ? createHash('sha256').update(buf.subarray(Math.max(0, k - TAIL_BYTES), k)).digest('hex') : null
+        return { name, size: buf.length, tailHash }
+      })
+      m.send({ t: 'res', rid: msg.rid, session: { op: 'session-stat', files: list } })
+      return
+    }
+    case 'session-read': {
+      const buf = files?.get(msg.name)
+      if (!buf) {
+        m.send({ t: 'err', rid: msg.rid, message: '本机没有这个会话文件' })
+        return
+      }
+      const chunk = buf.subarray(msg.offset, msg.offset + SESSION_CHUNK_BYTES)
+      m.send({ t: 'res', rid: msg.rid, session: { op: 'session-read', data: chunk.toString('base64'), size: buf.length, eof: msg.offset + chunk.length >= buf.length } })
+      return
+    }
+    case 'session-write': {
+      m.sessionWrites += 1
+      const key = `${msg.sessionId}\0${msg.name}`
+      if (m.failWriteAt === m.sessionWrites) {
+        m.pendingWrites.delete(key)
+        m.send({ t: 'err', rid: msg.rid, message: '磁盘写满了' })
+        return
+      }
+      const parts = msg.offset === 0 ? [] : (m.pendingWrites.get(key) ?? [])
+      parts.push(Buffer.from(msg.data, 'base64'))
+      m.pendingWrites.set(key, parts)
+      if (msg.last) {
+        m.pendingWrites.delete(key)
+        let target = m.sessionFiles.get(msg.sessionId)
+        if (!target) m.sessionFiles.set(msg.sessionId, (target = new Map()))
+        target.set(msg.name, Buffer.concat(parts))
+      }
+      m.send({ t: 'res', rid: msg.rid, session: { op: 'session-write' } })
+      return
+    }
+    case 'session-close':
+      m.send({ t: 'res', rid: msg.rid, session: { op: 'session-close' } })
   }
 }
 
@@ -225,10 +302,10 @@ function respondPty(m: Machine, msg: Extract<CenterMsg, { t: `pty-${string}` }>)
 }
 
 /** 用长期 token 连上并 hello；等到 welcome。同一台机器可以断线后用同一个 token 再连（新的 frames） */
-export async function connectMachine(init: { id: string; name: string; token: string; caps?: string[] }): Promise<Machine> {
+export async function connectMachine(init: { id: string; name: string; token: string; caps?: string[]; agents?: ConnectorAgentInfo[] }): Promise<Machine> {
   const frames: CenterMsg[] = []
   const ws = new WebSocket(`${base.replace('http', 'ws')}${CONNECTOR_PATH}`, { headers: { [CONNECTOR_TOKEN_HEADER]: init.token } })
-  const { caps, ...identity } = init
+  const { caps, agents, ...identity } = init
   const m: Machine = {
     ...identity,
     ws,
@@ -243,6 +320,10 @@ export async function connectMachine(init: { id: string; name: string; token: st
     quickHold: false,
     heldQuick: [],
     writeConflict: false,
+    sessionFiles: new Map(),
+    failWriteAt: null,
+    sessionWrites: 0,
+    pendingWrites: new Map(),
     refusePty: null,
     shares: new Map(),
     httpHandler: null,
@@ -262,7 +343,7 @@ export async function connectMachine(init: { id: string; name: string; token: st
   ws.once('error', (err) => opened.reject(err))
   await opened.promise
   machines.push(m)
-  m.send({ t: 'hello', name: init.name, defaultCwd: '/tmp', agents: AGENTS, caps: caps ?? ['project'] })
+  m.send({ t: 'hello', name: init.name, defaultCwd: '/tmp', agents: agents ?? AGENTS, caps: caps ?? ['project'] })
   await waitFor(() => frames.some((f) => f.t === 'welcome'))
   return m
 }
@@ -270,8 +351,8 @@ export async function connectMachine(init: { id: string; name: string; token: st
 /** 建机器 + 连上；ownerId = 这台机器的主人（相当于在浏览器里确认配对的人）。
  *  成员配对的机器本来是 pending（等空间 owner 批准），这里默认当场批准，矩阵类测试要的是已在空间里生效的机器。
  *  要测 pending 本身，自己 provisionConnector + connectMachine（见 member-connect.test.ts） */
-export async function pairMachine(spaceId: string, ownerId: string, name: string, caps?: string[]): Promise<Machine> {
+export async function pairMachine(spaceId: string, ownerId: string, name: string, caps?: string[], agents?: ConnectorAgentInfo[]): Promise<Machine> {
   const paired = await provisionConnector(pool, { spaceId, ownerId, name })
   await approveConnector(pool, paired.connectorId)
-  return connectMachine({ id: paired.connectorId, name, token: paired.token, ...(caps ? { caps } : {}) })
+  return connectMachine({ id: paired.connectorId, name, token: paired.token, ...(caps ? { caps } : {}), ...(agents ? { agents } : {}) })
 }

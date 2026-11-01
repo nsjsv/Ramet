@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { editorViewCtx, type Editor } from '@milkdown/kit/core'
 import type { EditorView } from '@milkdown/kit/prose/view'
@@ -46,6 +46,10 @@ import { attachBlockDragSelect, caretNear } from './editor/block-select'
 import { startEditorSession } from './editor/editor-session'
 import { useFullWidth } from './editor/full-width'
 import { useReadPosition } from './editor/read-position'
+import CommentsHost from './comments/CommentsHost'
+import PageDiscussion from './comments/PageDiscussion'
+import type { CommentCtx } from './comments/CommentThread'
+import { closeDrawer, toggleDrawer } from './comments/comments-store'
 
 // 聊天 / 文档双模式的存储与优先级在 view-mode.ts（页面自己的记忆 > 全局默认 > 文档），这里只消费。
 
@@ -57,6 +61,8 @@ interface Props {
   readOnly?: boolean
   /** 可管理公开状态（空间 owner）：⋮ 菜单出现「分享」 */
   canPublish?: boolean
+  /** 是该空间 owner：评论里能删别人的（服务端同样判定） */
+  spaceOwner?: boolean
   /** 标题 fragment 一变就上报（Shell 乐观更新侧栏页面树）；
    *  与 500ms 防抖 REST 写库相互独立，且必须稳定引用（否则 effect 重建 ws 连接） */
   onTitleLive: (id: string, title: string) => void
@@ -69,6 +75,7 @@ export default function EditorPage({
   username,
   readOnly = false,
   canPublish = false,
+  spaceOwner = false,
 }: Props) {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
@@ -139,6 +146,11 @@ export default function EditorPage({
   // 带 ?text=（editor/text-anchor.ts）：滚到块里那段字并高亮，字找不到退回整块闪烁
   const [searchParams] = useSearchParams()
   const blockParam = searchParams.get('block')
+  // ?comment=<串>（收件箱点进来）：评论只在文档视图里，记着对话视图的页面这一次先按文档视图打开（不改记忆）
+  const commentParam = searchParams.get('comment')
+  useEffect(() => {
+    if (commentParam) setChatMode(false)
+  }, [id, commentParam])
   const textAnchor = textParam(searchParams)
   const anchorText = textAnchor?.text ?? ''
   const anchorN = textAnchor?.n ?? 0
@@ -176,7 +188,7 @@ export default function EditorPage({
     })
     return view
   }, [getEditor])
-  useReadPosition({ pageId: id, rootRef, getView: getBodyView, tick: editorTick, enabled: !chatMode, skip: !!blockParam })
+  useReadPosition({ pageId: id, rootRef, getView: getBodyView, tick: editorTick, enabled: !chatMode, skip: !!blockParam || !!commentParam })
   // 「最近修改」进页面就预取（⋮ 菜单与块手柄菜单打开即画，edit-marks-store.ts）
   useEffect(() => {
     if (id) void refreshEditMarks(id)
@@ -407,6 +419,18 @@ export default function EditorPage({
   // 源码模式（editor/edit-mode.tsx）是 CodeMirror 编辑 markdown 原文：过程页（步骤是结构化的块）
   // 与对话视图没有 markdown 编辑，照常显示所见即所得。正文编辑器建好才挂（editorTick bump 会重渲到这里），它挂载时一次性取正文视图
   const sourceOn = editMode !== 'rich' && page?.kind !== 'run' && !chatMode && getEditor() !== undefined
+  // 评论：只给 doc 页（含集合的行、模板）的文档视图；viewer 也能评论（评论不写文档）
+  const commentsOn = !!id && page?.kind === 'doc' && !chatMode
+  const getSchema = useCallback(() => getBodyView()?.state.schema, [getBodyView])
+  const commentCtx = useMemo<CommentCtx>(
+    () => ({ readOnly: false, spaceId: page?.space_id ?? null, canModerate: spaceOwner, getSchema, tick: editorTick }),
+    [page?.space_id, spaceOwner, getSchema, editorTick],
+  )
+  // 评论深链要等正文和服务端同步过（本地缓存先出的内容里可能还没有锚定的字）
+  const commentsReady = useCallback(() => {
+    const provider = providerRef.current
+    return !!provider && provider.configuration.name === `page:${id}` && provider.synced
+  }, [id])
   return (
     <>
       <TopBar
@@ -423,7 +447,18 @@ export default function EditorPage({
           if (next === chatMode) return
           switchView(next)
         }}
-        onOpenHistory={() => setHistoryOpen(true)}
+        onOpenHistory={() => {
+          closeDrawer()
+          setHistoryOpen(true)
+        }}
+        onOpenComments={
+          commentsOn
+            ? () => {
+                setHistoryOpen(false)
+                toggleDrawer()
+              }
+            : undefined
+        }
         onExport={exportPage}
         fullWidth={fullWidth}
         onFullWidth={readOnly ? undefined : setFullWidth}
@@ -481,6 +516,8 @@ export default function EditorPage({
           />
         )}
         {runDetail && <RunFoot detail={runDetail} />}
+        {/* 整页讨论：正文下方、反向链接之上 */}
+        {commentsOn && <PageDiscussion pageId={id} ctx={commentCtx} />}
         {/* 反向链接：哪些页面 / 块引用了本页（过程页没有；没有反链时整块不画） */}
         {id && !chatMode && page && page.kind !== 'run' && <BacklinksPanel pageId={id} onNavigate={navigate} />}
         {chatMode && id && (
@@ -501,6 +538,10 @@ export default function EditorPage({
       </div>
       {/* 页内查找/替换浮条：视口级浮层（fixed 顶栏下方），viewer 也能查找（替换 action 自带 editable 守卫） */}
       <FindBar />
+      {/* 划词评论的浮层与评论抽屉（视口级 fixed，挂在正文列外） */}
+      {commentsOn && (
+        <CommentsHost pageId={id} mode="auth" getView={getBodyView} ctx={commentCtx} deepLink={commentParam} ready={commentsReady} />
+      )}
       {historyOpen && id && (
         <HistoryDrawer
           pageId={id}

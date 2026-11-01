@@ -1,4 +1,4 @@
-// ---------- 提问表单（ACP elicitation，form 模式）：运行条的提问卡与底部兜底弹条共用 ----------
+// ---------- 提问表单：运行条的提问卡与底部兜底弹条共用 ----------
 // 纯 DOM（弹条在 React 里挂一个 ref）。字段按服务端归一好的 AskForm 渲染（api.ts 同口径）：
 //   choice   按钮式选项（单选 radio 语义 / 多选 checkbox 语义），选项说明在按钮下面
 //   text     多行框自动长高（omp 的 editor 是整段预填文字）；有 format 用对应的单行 type；secret 用密码框

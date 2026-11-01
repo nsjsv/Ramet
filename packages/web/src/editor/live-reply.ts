@@ -23,10 +23,24 @@ export interface LiveReply {
 
 const inView = (r: DOMRect): boolean => r.width > 0 && r.bottom > 0 && r.top < window.innerHeight
 
-export function createLiveReply(opts: { pageId: string; replyId: string; schema: Schema; canStop: boolean; rest: () => number }): LiveReply {
+export function createLiveReply(opts: {
+  pageId: string
+  replyId: string
+  schema: Schema
+  canStop: boolean
+  rest: () => number
+  resume: () => boolean
+}): LiveReply {
   const md = new LiveMarkdown(opts.schema)
   const body = md.el
-  const view = createRunStrip({ pageId: opts.pageId, replyId: opts.replyId, canStop: opts.canStop, canAnswer: opts.canStop, rest: opts.rest })
+  const view = createRunStrip({
+    pageId: opts.pageId,
+    replyId: opts.replyId,
+    canStop: opts.canStop,
+    canAnswer: opts.canStop,
+    rest: opts.rest,
+    resume: opts.resume,
+  })
 
   let run: LiveRun | null = null
   let shown = 0

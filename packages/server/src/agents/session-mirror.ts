@@ -1,5 +1,5 @@
 // ---------- 会话镜像：按「页面 + agent」持有会话级状态（命令 / 配置 / 待批审批）----------
-// 事实源是执行端（持有 ACP 连接的进程：本机 AcpAgent / connector 上的 AcpAgent），不论有没有监听者都缓存。
+// 事实源是执行端（本机的驱动 / connector 上的驱动），不论有没有监听者都缓存。
 // 这里只是它的投影，也是中心唯一读这些状态的地方：
 //   - 每个拿到 sessionId 的绑定点（prepare、turn 里 new/load、adopt、改配置）用执行端快照播种：bind()
 //   - 之后由适配器上的常驻监听增量更新：listen()（ensureAdapter 时每个适配器装一次，按 sessionId 找页面）

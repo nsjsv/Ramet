@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // ---------- AI 侧的 Ramet MCP 进程（stdio，纯 JS） ----------
-// 由 ACP agent 按 session/new|load 的 mcpServers 配置拉起。这个进程不连 Postgres、不读任何配置文件：
+// 由 agent 按驱动交给它的 MCP 配置拉起（claude / codex / pi 是 agent 自己拉，omp 是驱动拉起后当宿主工具转接）。这个进程不连 Postgres、不读任何配置文件：
 // 只有两个环境变量，中心地址与一把凭证（见 page-read.ts；凭证绑着哪一页上的哪个 agent）。
 // 工具按模块拆在 ./tools/*.mjs，每个模块导出 tools: [{ name, define(caps), run(args, caps) }]；
 // 这里只负责问中心这把凭证能用哪些工具（GET /api/ramet/tools，被叫的会话没有 run_agent）、列出、分发。

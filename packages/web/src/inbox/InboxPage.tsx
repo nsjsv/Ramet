@@ -260,6 +260,25 @@ function PageTaskRow({ item }: { item: Of<'question'> | Of<'plan'> }) {
   )
 }
 
+/** 评论：点进页面并打开那个串（页面里打开串即记为已读），先在本地摘掉 */
+function CommentRow({ item }: { item: Of<'comment'> }) {
+  const navigate = useNavigate()
+  const open = (): void => {
+    dropInboxItem(item.key)
+    navigate(`/page/${item.pageId}?comment=${item.threadId}`)
+  }
+  return (
+    <Row
+      icon="comment"
+      head={C.comment.head(item.author?.name ?? C.comment.unknown, C.comment.reason[item.reason])}
+      sub={`${C.comment.where(pageName(item.pageTitle))} · ${relativeTime(item.at)}`}
+      onOpen={open}
+    >
+      {item.excerpt && <div className="inbox-detail-line inbox-excerpt">{item.excerpt}</div>}
+    </Row>
+  )
+}
+
 function ItemRow({ item }: { item: InboxItem }) {
   switch (item.type) {
     case 'approval':
@@ -277,6 +296,8 @@ function ItemRow({ item }: { item: InboxItem }) {
     case 'question':
     case 'plan':
       return <PageTaskRow item={item} />
+    case 'comment':
+      return <CommentRow item={item} />
   }
 }
 

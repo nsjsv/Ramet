@@ -104,17 +104,20 @@ async function startRunWithApproval(w: World, text: string) {
 /** Ramet 自己的审批（trash_page）：以 user 的页面凭证打「移入回收站」端点，它会一直等审批被答；abortAll 结束这些挂着的请求 */
 function rametApprovals(w: World, target: string) {
   const aborts: AbortController[] = []
+  // 挂着的请求必须有人持有：undici 在 Request 被 GC 回收时会中止它，服务端随之按「调用方断开」收掉审批
+  const held: Array<{ request: Request; done: Promise<unknown> }> = []
   return {
     ask(user: Who, agentId: string): void {
       const controller = new AbortController()
       aborts.push(controller)
       const token = mintPageToken(w.id[user], agentId, { pageId: w.pageId, agentId })
-      void fetch(`${base}/api/ramet/pages/${target}/trash`, {
+      const request = new Request(`${base}/api/ramet/pages/${target}/trash`, {
         method: 'POST',
         headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
         body: '{}',
         signal: controller.signal,
-      }).catch(() => undefined)
+      })
+      held.push({ request, done: fetch(request).catch(() => undefined) })
     },
     abortAll(): void {
       for (const controller of aborts) controller.abort()
@@ -195,11 +198,12 @@ test('审批（有在飞的一轮）：只有发起人看得到——被授权�
     agentId: w.agent,
     agentName: 'bobbox · Fake',
     requestId: ask.requestId,
-    title: '运行命令',
-    detail: { kind: 'execute', command: 'npm test -- --run', description: '跑一遍单元测试' },
+    // codex 的命令审批以命令行作标题；详情来自审批事件的 view
+    title: 'npm test -- --run',
+    detail: { kind: 'execute', command: 'npm test -- --run' },
     options: [
-      { optionId: 'allow_once', name: '允许', kind: 'allow_once' },
-      { optionId: 'reject_once', name: '拒绝', kind: 'reject_once' },
+      { optionId: 'allow', name: '允许一次', kind: 'allow_once' },
+      { optionId: 'reject', name: '拒绝', kind: 'reject_once' },
     ],
   })
   // 只给命令 / 路径这类摘要，不整包吐 toolCall
@@ -208,7 +212,7 @@ test('审批（有在飞的一轮）：只有发起人看得到——被授权�
     expect(await count(w.cookie[who], 'approval'), who).toBe(0)
   }
 
-  expect((await answerPermission(w.pageId, w.cookie.bob, ask, 'allow_once')).status).toBe(200)
+  expect((await answerPermission(w.pageId, w.cookie.bob, ask, 'allow')).status).toBe(200)
   await waitFor(async () => (await count(w.cookie.bob, 'approval')) === 0)
   sse.stop()
   doc.destroy()
@@ -227,12 +231,12 @@ test('审批（没有在飞的一轮，退回「能回答的人」）：机器�
   const refused: Array<[Who, number]> = [['alice', 403], ['carol', 403], ['root', 403], ['erin', 404], ['frank', 404]]
   for (const [who, status] of refused) {
     expect(await count(w.cookie[who], 'approval'), `${who} 看`).toBe(0)
-    expect((await answerPermission(w.pageId, w.cookie[who], ask, 'allow_once')).status, `${who} 答`).toBe(status)
+    expect((await answerPermission(w.pageId, w.cookie[who], ask, 'allow')).status, `${who} 答`).toBe(status)
   }
   expect(await count(w.cookie.bob, 'approval')).toBe(1)
 
   // 被授权的人答得了，答完两边都消失
-  expect((await answerPermission(w.pageId, w.cookie.dave, ask, 'allow_once')).status).toBe(200)
+  expect((await answerPermission(w.pageId, w.cookie.dave, ask, 'allow')).status).toBe(200)
   await waitFor(async () => (await count(w.cookie.bob, 'approval')) === 0 && (await count(w.cookie.dave, 'approval')) === 0)
   sse.stop()
   doc.destroy()
@@ -276,7 +280,7 @@ test('审批（Ramet 自己的，不碰机器）：没有在飞的一轮 → 页
   for (const who of OTHERS_THAN_BOB) expect(await count(w.cookie[who], 'approval'), who).toBe(0)
 
   ramet.abortAll()
-  expect((await answerPermission(w.pageId, w.cookie.bob, ask, 'allow_once')).status).toBe(200)
+  expect((await answerPermission(w.pageId, w.cookie.bob, ask, 'allow')).status).toBe(200)
   sse.stop()
   doc.destroy()
 })
@@ -450,7 +454,7 @@ test('running：发起人在飞时出现（别人没有），结束后消失', a
   expect(items[0]).toMatchObject({ pageId: w.pageId, agentId: w.agent, agentName: 'bobbox · Fake' })
   for (const who of OTHERS_THAN_BOB) expect(await count(w.cookie[who], 'running'), who).toBe(0)
 
-  expect((await answerPermission(w.pageId, w.cookie.bob, ask, 'allow_once')).status).toBe(200)
+  expect((await answerPermission(w.pageId, w.cookie.bob, ask, 'allow')).status).toBe(200)
   await sse.wait((e) => e.type === 'status' && e.state === 'done')
   expect(await count(w.cookie.bob, 'running')).toBe(0)
   sse.stop()

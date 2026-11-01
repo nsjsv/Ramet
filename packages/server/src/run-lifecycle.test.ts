@@ -1,4 +1,4 @@
-/* ---------- 一轮 run 的端到端不变量（假 ACP agent） ----------
+/* ---------- 一轮 run 的端到端不变量（假 codex） ----------
  * 运行中正文只走 SSE、文档里只有占位;收尾一次写入最后一段的块结构 + stats + 过程页;
  * 过程页是 runs 表里的 record(读接口 + 权限);服务关停也收尾。关停用例必须放最后(它关掉了本文件的服务)。 */
 import { expect, test } from 'vitest'
@@ -40,7 +40,7 @@ function textOfReply(reply: Y.XmlElement): string {
 
 const replyOf = (p: HocuspocusProvider): Y.XmlElement | null => lastReply(p.document)
 
-test('ACP 计划:实时整份替换走 SSE;收尾落到回复块的 plan 属性与过程页 record;重新生成会清掉', async () => {
+test('计划:实时整份替换走 SSE;收尾落到回复块的 plan 属性与过程页 record;重新生成会清掉', async () => {
   const { cookie, pageId } = await setupPage()
   const a = await connectDoc(pageId, cookie)
   userMessage(a.document, '计划验收')
@@ -53,10 +53,11 @@ test('ACP 计划:实时整份替换走 SSE;收尾落到回复块的 plan 属性�
   // 两次 plan 事件都是整份(第二份替换第一份,不是追加);不是工具步骤
   const plans = sse.events.filter((e) => e.type === 'plan')
   expect(plans).toHaveLength(2)
+  // codex 的计划条目只有步骤与状态，没有优先级
   expect(plans[1]).toMatchObject({
     entries: [
-      { content: '读代码', status: 'completed', priority: 'high' },
-      { content: '写测试', status: 'in_progress', priority: 'medium' },
+      { content: '读代码', status: 'completed' },
+      { content: '写测试', status: 'in_progress' },
     ],
   })
   expect(sse.events.some((e) => e.type === 'step')).toBe(false)
@@ -65,8 +66,8 @@ test('ACP 计划:实时整份替换走 SSE;收尾落到回复块的 plan 属性�
   await waitFor(() => decodeStats(replyOf(a)?.getAttribute('stats')).o === 'end')
   const reply = replyOf(a)!
   expect(decodePlan(reply.getAttribute('plan'))).toEqual([
-    { content: '读代码', status: 'completed', priority: 'high' },
-    { content: '写测试', status: 'in_progress', priority: 'medium' },
+    { content: '读代码', status: 'completed' },
+    { content: '写测试', status: 'in_progress' },
   ])
   expect(textOfReply(reply)).toBe('计划好了')
 
@@ -117,8 +118,11 @@ test('多段回复:实时走 SSE、文档只收最后一段;说明/思考/工具
   expect(reply.toArray().map((c) => (c as Y.XmlElement).nodeName)).toEqual(['heading', 'paragraph'])
   expect(textOfReply(reply)).toBe('结论好了')
   const stats = decodeStats(reply.getAttribute('stats'))
-  expect(stats).toMatchObject({ o: 'end', st: 2, tk: 1500, in: 1000, out: 200, cr: 300, cu: 38000, cs: 200000 })
-  expect('cw' in stats).toBe(false)
+  // codex 的用量按请求累计（剧本报的上下文占用 38000 也是一次请求，计入输入）；上下文占用 = 最近一次请求的 token 数（收尾那次 1500）。
+  // 输入不含缓存命中（codex 的 inputTokens 含 cachedInputTokens，驱动减掉）
+  expect(stats).toMatchObject({ o: 'end', st: 2, tk: 39500, in: 38700, out: 200, cr: 300, cu: 1500, cs: 200000 })
+  // codex 每一项都报：没有缓存写就是显式 0，照实写（不是缺省补的 0）
+  expect(stats.cw).toBe(0)
 
   // 过程页:runs record(思考 → 说明 → 工具 → 思考 → 失败工具带一行摘要)
   const runPageId = done.type === 'status' ? done.runPageId : undefined

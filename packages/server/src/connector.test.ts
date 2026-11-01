@@ -1,6 +1,6 @@
 // ---------- 本地 connector 集成测试 ----------
 // 链路：建好身份（token，配对流程本身见 connect-pair.test.ts）→ connector 出站连中心 → 上报本机 agent → catalog 出现该 agent →
-// 「继续」经 WSS 下发到 connector 本机执行（fake-agent.mjs）→ 事件回传 → 文档流式追加。
+// 「继续」经 WSS 下发到 connector 本机执行（假 codex，agents/fake/codex.mjs）→ 事件回传 → 文档流式追加。
 // 假 agent 与断言套路同 agents.test.ts（助手在本文件内自带一份）。
 //
 // 覆盖：token 撤销失效、复合 id 解析、Hub 断线收尾、relay 全链路、权限往返、
@@ -11,6 +11,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { request as httpRequest } from 'node:http'
 import { randomUUID } from 'node:crypto'
 import { mkdir, mkdtemp, realpath } from 'node:fs/promises'
+import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -35,9 +36,11 @@ if (!process.env.DATABASE_URL) {
   throw new Error('需要 DATABASE_URL 指向测试库,例如 postgres://postgres:postgres@localhost:5432/ramet_test')
 }
 
-const FAKE_AGENT = fileURLToPath(new URL('./agents/fake-agent.mjs', import.meta.url))
+const FAKE_CODEX = fileURLToPath(new URL('./agents/fake/codex.mjs', import.meta.url))
 const CONNECTOR_CLI = fileURLToPath(new URL('./connector/cli.ts', import.meta.url))
-process.env.RAMET_AGENTS = JSON.stringify([{ id: 'fake', label: 'Fake', command: process.execPath, args: [FAKE_AGENT] }])
+process.env.RAMET_AGENTS = JSON.stringify([
+  { id: 'fake', label: 'Fake', driver: 'codex', command: FAKE_CODEX, env: { CODEX_HOME: mkdtempSync(join(tmpdir(), 'ramet-codex-')) } },
+])
 
 const pool = getPool()
 // 凭据只能由 assertCanUse 签出：桩库对「能不能用」一律答能，授权判定本身在 machine-access.test.ts 测
@@ -482,7 +485,7 @@ test('connector 重启：同一会话的下一轮照常收到回复（中心不�
   const second = spawnConnector(['--name', 'rebootbox', '--token-file', tokenFile])
   await waitFor(() => second.logs.some((l) => l.includes('已连上中心')), 30_000)
 
-  // 下一轮照常出回复。跳过 load 直接 prompt 的话，新 agent 进程会回「Unsupported ACP session」
+  // 下一轮照常出回复。跳过 load 直接 prompt 的话，新进程里的驱动会回「Unsupported session」
   // （假 agent 照真 agent 这么做），这一轮就永远没有回复，用户看到的就是「发了命令收不到」
   userMessage(provider.document, '问题二')
   expect((await post(`/api/pages/${pageId}/continue`, cookie, { agent: remoteId })).status).toBe(202)
@@ -819,8 +822,8 @@ test('connector 进程 SIGKILL 后在飞占位收成 error', async () => {
     agentReplies(turn.provider.document).find((n) => n.getAttribute('id') === turn.replyId)?.getAttribute('stats'),
   ).o).toBe('error')
   await waitFor(async () => (await agentsList(box.cookie)).some((a) => a.id === box.remoteId))
-  // 出错不更新 lastSyncedHash，下一轮全文重放仍含「断线续」，假 agent 会再睡 8 秒。
-  // 要证明的是新进程还能把一轮跑完，而不是增量路径上的 turn: 字样。
+  // 新 connector 进程按会话记录 session/load 回旧会话、只发新消息；真 agent 加载不上时降级为全文重放
+  // （那样仍含「断线续」，会再睡 8 秒）。要证明的是新进程还能把一轮跑完，而不是哪条路径上的 turn: 字样。
   userMessage(turn.provider.document, '下一轮')
   expect((await post(`/api/pages/${box.pageId}/continue`, box.cookie, { agent: box.remoteId })).status).toBe(202)
   await waitFor(() => {
@@ -830,3 +833,63 @@ test('connector 进程 SIGKILL 后在飞占位收成 error', async () => {
   turn.sse.abort()
   turn.provider.destroy()
 }, 90_000)
+
+test('远端续跑时中心重启：认领回来后中断前的步骤还在，过程页接着记、回复还是同一块', async () => {
+  const box = await spawnPaired('resumecrashbox')
+  const provider = await connectDoc(box.pageId, box.cookie)
+  const firstEvents: AgentEvent[] = []
+  const firstSse = new AbortController()
+  await collectSse(box.cookie, box.pageId, firstEvents, firstSse.signal)
+  // 假 agent：一步工具 + 「写到一半」后出错；失败原因里带上「续跑慢」，续跑时先吐 resume-before 再睡 8 秒
+  userMessage(provider.document, '中途断开 续跑慢')
+  expect((await post(`/api/pages/${box.pageId}/continue`, box.cookie, { agent: box.remoteId })).status).toBe(202)
+  await waitFor(() => {
+    const node = agentReplies(provider.document)[0]
+    return decodeStats(node?.getAttribute('stats')).o === 'error' && typeof node?.getAttribute('run') === 'string'
+  })
+  const node = agentReplies(provider.document)[0]!
+  const replyId = String(node.getAttribute('id'))
+  const runPage = String(node.getAttribute('run'))
+
+  expect((await post(`/api/pages/${box.pageId}/replies/${replyId}/resume`, box.cookie, {})).status).toBe(202)
+  expect(await waitRunPlaceholder(provider.document, firstEvents)).toBe(replyId)
+  const { rows: bound } = await pool.query<{ base_run: string | null }>('SELECT base_run FROM open_runs WHERE reply_id = $1', [replyId])
+  expect(bound[0]?.base_run).toBe(runPage)
+
+  const resumed = await reviveAfterBefore({
+    cookie: box.cookie, pageId: box.pageId, logs: box.logs, exited: box.exited, provider, sse: firstSse,
+  })
+  expect(box.exited(), `connector 在中心重启期间退出了：\n${box.logs.join('')}`).toBeNull()
+  // 认领回来的第一份快照里就有中断前的步骤
+  await waitFor(() => resumed.some((e) => e.type === 'run'), 30_000)
+  const snap = resumed.find((e): e is Extract<AgentEvent, { type: 'run' }> => e.type === 'run')
+  expect(snap?.state.entries.some((e) => e.k === 'tool' && e.id === 'mid-tool')).toBe(true)
+
+  const again = await connectDoc(box.pageId, box.cookie)
+  try {
+    await waitFor(() => {
+      const n = agentReplies(again.document)[0]
+      const outcome = decodeStats(n?.getAttribute('stats')).o
+      return outcome != null && outcome !== 'run'
+    }, 45_000)
+    const nodes = agentReplies(again.document)
+    expect(nodes).toHaveLength(1)
+    expect(nodes[0]!.getAttribute('id')).toBe(replyId)
+    expect(nodes[0]!.getAttribute('run')).toBe(runPage)
+    expect(decodeStats(nodes[0]!.getAttribute('stats')).o, docText(again)).toBe('end')
+    expect(docText(again)).toContain('resumed@')
+    expect(docText(again)).not.toContain('写到一半')
+    const { rows } = await pool.query<{ record: { entries: Array<{ k: string; id?: string; text?: string }> } }>(
+      'SELECT record FROM runs WHERE page_id = $1',
+      [runPage],
+    )
+    const entries = rows[0]!.record.entries
+    expect(entries.filter((e) => e.k === 'tool').map((e) => e.id)).toEqual(['mid-tool', 'resume-tool'])
+    expect(entries.filter((e) => e.k === 'say').map((e) => e.text?.trim())).toEqual(['写到一半', 'resume-before'])
+    const { rows: runPages } = await pool.query("SELECT id FROM pages WHERE parent_id = $1 AND kind = 'run'", [box.pageId])
+    expect(runPages).toHaveLength(1)
+  } finally {
+    again.destroy()
+    firstSse.abort()
+  }
+}, 120_000)

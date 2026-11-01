@@ -1,7 +1,7 @@
 // ---------- agent 适配层类型（server 内部窄接口） ----------
 
-/** ACP prompt 的内容块:文本 / 内嵌资源(引用页展开) / 图片(这一轮那条用户消息里的图,base64)。
- *  图片只发给在 initialize 里声明了 promptCapabilities.image 的 agent:执行端(AcpAgent.prompt)不支持就丢掉 */
+/** prompt 的内容块：文本 / 内嵌资源（引用页展开）/ 图片（这一轮那条用户消息里的图，base64）。
+ *  各驱动按自家协议翻译（claude 的用户消息内容块、codex 的 input 条目、pi / omp 的 images） */
 export type PromptBlock =
   | { type: 'text'; text: string }
   | { type: 'resource'; uri: string; mimeType: string; text: string; title: string }
@@ -9,8 +9,8 @@ export type PromptBlock =
 
 export type PermissionOption = { optionId: string; name: string; kind?: string }
 
-/** 提问表单：ACP `elicitation/create`（form 模式）的 requestedSchema 经执行端归一（ask-form.ts）。
- *  只认 ACP 标准，各家（claude / codex / opencode / omp）的形状都落在这几类字段里；前端 web/src/api.ts 同口径一份 */
+/** 提问表单：各驱动把自家的提问（claude 的 AskUserQuestion、codex 的 requestUserInput、omp 的 ask、MCP elicitation）
+ *  归一成这一个形状（MCP 的 requestedSchema 经 ask-form.ts）；前端 web/src/api.ts 同口径一份 */
 export type AskOption = { value: string; label: string; description?: string }
 export type AskField = { key: string; title?: string; description?: string } & (
   | { kind: 'choice'; options: AskOption[]; multi: boolean; min?: number; max?: number; default?: string | string[] }
@@ -34,7 +34,7 @@ export type AskContent = Record<string, AskValue>
 
 export type ConfigOptionValue = { value: string; name: string; description?: string | null }
 
-/** ACP session config option，只保留 select 变体（boolean 变体在适配层丢弃） */
+/** 会话配置项（模型 / 思考档 / 模式…），只有单选一种形状 */
 export type ConfigOption = {
   id: string
   name: string
@@ -44,7 +44,7 @@ export type ConfigOption = {
   options: ConfigOptionValue[]
 }
 
-import type { PlanEntry, RunEvent, RunInfo, RunState, StepKind, StepStatus, TeamPlanView, TurnUsage } from '@ramet/shared/run-model'
+import type { PlanEntry, RunEvent, RunInfo, RunState, StepKind, StepStatus, TeamPlanView, ToolView, TurnUsage } from '@ramet/shared/run-model'
 import type { PageTool } from '../page-read.js'
 import type { QueueView } from './send-queue.js'
 import type { ToolProfile } from './tool-profile.js'
@@ -53,7 +53,7 @@ import type { ToolProfile } from './tool-profile.js'
 export type { Step, StepDelta, StepKind, StepStatus, TurnUsage } from '@ramet/shared/run-model'
 export { MAX_RUN_STEPS } from '@ramet/shared/run-model'
 
-/** agent 报的本轮用量(ACP PromptResponse.usage;UNSTABLE 字段,没报就是 undefined),形状在共享包 */
+/** 一轮的结局与 agent 报的本轮用量（没报就是 undefined），形状在共享包 */
 export type PromptResult = { stopReason: string; usage?: TurnUsage }
 
 /** 统一事件模型(适配器事件 + SSE 原样转发给前端;status 由 Manager 生成)
@@ -74,12 +74,13 @@ export type AgentEvent =
   /** 失败原因。replyId 是这次失败所属的回复块（本轮已经开了占位块）：前端把原因放进那块的失败条；
    *  没有就是没有块可挂（预备会话 / 配置失败、占位块开不出来），前端才落到页面顶部的运行错误条。 */
   | { type: 'error'; message: string; replyId?: string }
-  /** toolCall 是原始请求载荷（ACP request_permission 的 toolCall：title/kind/rawInput/…），
-   *  按需展开；fs 写闸门的文件内容属于客户端数据，不进事件。
+  /** toolCall：原生驱动只放 {toolCallId, title, kind}（详情在 view）；老 connector 经 ACP 发来的是 agent 原样给的一大包，照收。
    *  agentId 由中心会话镜像在广播时盖章（适配器自己只知道 sessionId；requestId 只在单个进程内唯一，
    *  前端按 agentId + requestId 认同一条） */
-  /** form 表示这是一条提问（ACP elicitation）：options 固定是提交（accept）/ 跳过（decline），答案随应答带 content */
-  | { type: 'permission'; requestId: string; title: string; options: PermissionOption[]; toolCall?: Record<string, unknown>; form?: AskForm; sessionId?: string; agentId?: string }
+  /** form 表示这是一条提问：options 固定是提交（accept）/ 跳过（decline），答案随应答带 content */
+  /** view 是这次要批的工具调用的中性视图（审批卡的命令 / diff 预览优先读它，没有再从 toolCall 推） */
+  /** defaultToNo：agent 要求这条审批不能一键批准（拒绝排在选项最前，主按钮落在拒绝上） */
+  | { type: 'permission'; requestId: string; title: string; options: PermissionOption[]; toolCall?: Record<string, unknown>; view?: ToolView; form?: AskForm; defaultToNo?: boolean; sessionId?: string; agentId?: string }
   /** 一条审批结束（有人答 / 停止该会话 / 会话被换掉 / 进程退出 / connector 终态断开）。移除审批的唯一信号 */
   | { type: 'permission_resolved'; requestId: string; sessionId?: string; agentId?: string }
   | { type: 'commands'; list: AgentCommand[]; sessionId?: string; agentId?: string }
@@ -91,6 +92,8 @@ export type AgentEvent =
   | { type: 'choice'; agentId: string }
   /** 本页的工具档位（agent_session.tools，tool-profile.ts）：SSE 首帧 + 改档时广播 */
   | { type: 'tool_profile'; profile: ToolProfile }
+  /** 本页锁定的工具（第一块回复的工具名，'' = 还没有回复、不锁）：SSE 首帧 + 第一块回复的占位块建好时广播 */
+  | { type: 'tool_lock'; tool: string }
   | {
       type: 'tool'
       id: string
@@ -103,19 +106,22 @@ export type AgentEvent =
       parentId?: string
       /** 这一步现在在做什么。有值就替换，缺省保持上一次 */
       activity?: string
-      /** 原始 tool_call/tool_call_update 字段（sessionUpdate/toolCallId 已由 id/type 表达），增量合并 */
+      /** 原样载荷，增量合并。原生驱动不写工具载荷（详情在 view）；老 connector 经 ACP 发来的照收，
+       *  run_agent 的留痕（subRun）与审批记录（permission）也放这里 */
       acp?: Record<string, unknown>
+      /** 中性步骤视图的增量（按字段合并，见 shared 的 mergeView） */
+      view?: ToolView
       /** acp 命中体积上限被截断（可见标记） */
       truncated?: boolean
       sessionId?: string
     }
-  /** ACP 终端（terminal/create…）里 agent 跑的命令：id 是绑定的工具步骤（toolCallId），delta 是新到的输出（合并过一小段时间的），
-   *  exit 表示命令退出了（terminalId 一并带上，前端据此认停止这条命令），truncated 表示实时转发的输出超过上限被截了
-   *  （命令自己的完整输出仍在执行端按 outputByteLimit 保留，agent 经 terminal/output 能取到）。RunRecord 据此发成品 `child`（terminal）与 `step` */
+  /** agent 跑的命令的实时输出：id 是那一步（toolCallId），delta 是新到的输出（增量）。
+   *  exit / truncated 只有老 connector 经 ACP 终端跑命令时才发（原生驱动的退出码在步骤 view 里），照收。
+   *  RunRecord 据此发成品 `child`（terminal）与 `step` */
   | { type: 'terminal'; id: string; delta?: string; exit?: TerminalExit; truncated?: boolean; sessionId?: string }
-  /** 实时附加信息（用量/上下文/stopReason/ACP 元数据）：折进 RunState.info，按字段合并 */
+  /** 实时附加信息（用量/上下文/stopReason/agent 原样元数据）：折进 RunState.info，按字段合并 */
   | { type: 'info'; info: RunInfo; sessionId?: string }
-  /** agent 的计划清单（ACP plan 更新，整份替换；适配层已归一）：RunRecord 据此发成品 `plan`（RunEvent） */
+  /** agent 的计划清单（整份替换；驱动已归一）：RunRecord 据此发成品 `plan`（RunEvent） */
   | { type: 'plan'; entries: PlanEntry[]; truncated?: boolean; sessionId?: string }
   /** 带队计划变了（提交 / 发起人改 / 取消 / 开工 / 收尾）：整份视图。广播给页面所有订阅者（不带因人而异的字段，`mine` 只在 GET 里）；
    *  前端的计划卡据此更新，收件箱里等待批计划的条目也跟着重拉 */
@@ -129,16 +135,15 @@ export type AgentEvent =
   | { type: 'run'; replyId: string; at: number; state: RunState; agent?: string }
   | RunEvent
 
-/** agent 原生斜杠命令（ACP available_commands_update） */
-/** input 是命令要参数时的提示文案（ACP available_commands_update 的 input.hint）；null / 缺省表示不带参数 */
+/** agent 原生斜杠命令。input 是命令要参数时的提示文案；null / 缺省表示不带参数 */
 export type AgentCommand = { name: string; description?: string | null; input?: string | null }
 
 export type PermissionEvent = Extract<AgentEvent, { type: 'permission' }>
 
-/** ACP 终端命令的退出状态（terminal/wait_for_exit）。exitCode / signal 至多一个有值 */
+/** 老 connector 的 ACP 终端命令的退出状态。exitCode / signal 至多一个有值 */
 export type TerminalExit = { terminalId: string; exitCode: number | null; signal: string | null }
 
-/** 会话级状态：执行端（持有 ACP 连接的进程）是唯一事实源，不论有没有监听者都缓存。
+/** 会话级状态：执行端（持有 agent 进程的驱动）是唯一事实源，不论有没有监听者都缓存。
  *  中心的会话镜像只是它的投影（每个绑定点用快照播种，之后吃下面这些事件的增量）。 */
 export type SessionState = {
   commands: AgentCommand[]
@@ -156,6 +161,10 @@ export function isSessionEvent(ev: AgentEvent): ev is SessionEvent {
   return ev.type === 'commands' || ev.type === 'config' || ev.type === 'permission' || ev.type === 'permission_resolved'
 }
 
+/** 用哪个驱动跟这个 agent 说话（drivers/create.ts 分派）。配置里必须写（registry.ts 校验） */
+export type AgentDriver = 'claude' | 'codex' | 'pi' | 'omp'
+export const AGENT_DRIVERS: readonly AgentDriver[] = ['claude', 'codex', 'pi', 'omp']
+
 export type AgentConfig = {
   id: string
   label: string
@@ -164,9 +173,12 @@ export type AgentConfig = {
   env?: Record<string, string>
   /** 前端 logo 名 */
   logo?: string
+  driver: AgentDriver
+  /** 探版本用的 CLI 可执行文件，缺省就是 command（command 是包装脚本时才要写） */
+  cli?: string
 }
 
-/** 单 agent 适配器:一个实例持有一个子进程,可承载多个 session */
+/** 单 agent 适配器：一个实例承载这个 agent 的多个会话（进程是共享还是每会话一个由驱动定） */
 export interface AgentAdapter {
   /** 已 spawn 且 initialize 完成 */
   ready(): Promise<void>
@@ -176,19 +188,23 @@ export interface AgentAdapter {
   setConfigOption(sessionId: string, configId: string, value: string): Promise<ConfigOption[]>
   prompt(sessionId: string, blocks: PromptBlock[], runId?: string): Promise<PromptResult>
   cancel(sessionId: string): void
-  /** 停止这个会话里 agent 用 ACP 终端跑的一条命令（terminal/kill）。终端不存在 / 不属于这个会话 / 已经退出时返回 false。
+  /** 停止这个会话里一个可停的东西（步骤 view.handle：子代理；老 connector 上是 ACP 终端的 terminalId）。
+   *  句柄不存在 / 不属于这个会话 / 已经结束时返回 false。
    *  和 cancel 一样不要机器使用凭据：只会让机器停下来；谁能停由页面写权限决定 */
-  killCommand(sessionId: string, terminalId: string): boolean
+  killCommand(sessionId: string, handle: string): boolean
   /** 应答审批;optionId 为 null 表示取消/拒绝。content 是提问的答案（只对带 form 的审批有意义，中心已校验过）。
    *  返回是否已交给执行端（远端 connector 不在线返回 false，审批留着以后可以再答）；审批的移除只由 permission_resolved 驱动 */
   respondPermission(requestId: string, optionId: string | null, content?: AskContent): boolean
-  /** 该会话在执行端缓存的会话级状态。只读：不允许因此发起 ACP 请求 */
+  /** 该会话在执行端缓存的会话级状态。只读：不允许因此向 agent 发请求 */
   sessionState(sessionId: string): SessionState
   on(listener: (ev: AgentEvent) => void): () => void
   /** 有在飞工作或有待批审批，是闲置回收的唯一判据：一个长轮次全程只发事件、不发请求，
    *  只按最后一次请求计时会在中途把在飞轮次 SIGTERM 掉（用户看到已停止）；
    *  待批审批期间回收会让审批永远答不到。两端（中心/connector）都读它决定回收还是续期，见 agents/idle.ts */
   busy: boolean
+  /** 彻底放掉这个会话在执行端的状态，之后 loadSession 一定重新从磁盘读（换机器把会话记录写进来之前先调）。
+   *  远端是 session-close 帧：machine 范围，要用 machine 范围的凭据签出的视图 */
+  closeSession(sessionId: string): Promise<void>
   /** 杀掉子进程(闲置回收/server 关停) */
   kill(): void
 }

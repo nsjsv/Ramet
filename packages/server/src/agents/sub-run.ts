@@ -69,7 +69,7 @@ export type SubRunOpts = {
 const MAX_TRACE = 80
 const clip = (text: string, n: number): string => (text.length > n ? `${text.slice(0, n)}…` : text)
 
-/** 被叫的步骤瘦身成留痕形态：只留一行字 / 类型 / 状态 / 时间，不带 ACP 原始载荷与子代理正文（体积有界） */
+/** 被叫的步骤瘦身成留痕形态：只留一行字 / 类型 / 状态 / 时间，不带原始载荷与子代理正文（体积有界） */
 function trace(entries: RunEntry[]): Array<Record<string, unknown>> {
   return entries.slice(0, MAX_TRACE).map((e) => ({
     k: e.k,

@@ -21,7 +21,8 @@ import { decodePlan, decodeTeam } from '@ramet/shared/run-model'
 import { buildDock } from '../hud/dock'
 import { buildPlanStrip } from './plan-card'
 import { buildTeamStrip, disposeTeamStrips } from '../team/team-mount'
-import { buildFailStrip, failText, isFailedReply } from './reply-fail'
+import { buildFailStrip, buildStoppedStrip, failText, isFailedReply, isStoppedReply } from './reply-fail'
+import { lastReply, resumableReply, resumes } from './reply-target'
 import { ensureAgentsLoaded, subscribeAgentList, subscribeDefaultAgent } from '../default-agent'
 
 const logoListeners = new Set<() => void>()
@@ -165,7 +166,7 @@ export function aiBlockView(opts: { loadAgents: boolean }) {
 // 正在跑的那条回复由实时视图接管（live-slot.ts 判定、live-reply.ts 画）：块首依次放运行条与实时正文
 // （抬头之下、正文之上），占位段落隐藏、块不可编辑（`is-live`）。收尾事务到达后真内容在原位渲染，
 // 运行条收回、用量标签就位再摘掉（run-land.ts）。块由 run.replyId 指名，不猜最后一条。
-// 失败收尾（o:error）的块挂失败条（reply-fail.ts，含重试）。agent 报过计划清单的块，收尾后在同一位置挂计划卡（plan-card.ts）：
+// 失败收尾（o:error）的块挂失败条（reply-fail.ts，含重试）；手动停止的最后一块挂「已停止 · 继续」条（同一位置）。agent 报过计划清单的块，收尾后在同一位置挂计划卡（plan-card.ts）：
 // 运行条收尾时只收掉胶囊 / 托盘、把计划卡留在原位，随后由块上的 plan 属性接手，所以交接处不闪不跳。
 
 const liveKey = new PluginKey<DecorationSet>('agentLiveReply')
@@ -191,18 +192,22 @@ export function liveReplyView(pageId: string, canStop: boolean) {
     const build = (doc: PMNode): DecorationSet => {
       if (!slot) return DecorationSet.empty
       const decos: Decoration[] = []
+      const last = lastReply(doc)
       doc.forEach((node, offset) => {
         if (node.type.name !== 'agent_reply') return
         const hit = slot!.attach(node)
         const id = String(node.attrs.id)
         const opts = { ignoreSelection: true, stopEvent: () => true }
         if (!hit) {
-          // 没有实时视图接管的失败块（刷新后、实时视图收回后）：失败条接在运行条原来的位置
+          // 没有实时视图接管的失败块（刷新后、实时视图收回后）：失败条接在运行条原来的位置。
+          // 续跑只给最后一块，它后面来了新消息 / 回复时节点本身没变，所以 resume 要进 key 才会重画
+          const resume = resumes(node, last)
           if (isFailedReply(node.attrs.stats)) {
-            const key = `fail:${id}:${failText(id)}:${canStop}:${chainRestAfter(doc, id)}`
-            decos.push(
-              Decoration.widget(offset + 1, () => buildFailStrip({ pageId, replyId: id, canRetry: canStop, rest: chainRestAfter(doc, id) }), { ...opts, side: -1, key }),
-            )
+            const rest = chainRestAfter(doc, id)
+            const key = `fail:${id}:${failText(id)}:${canStop}:${rest}:${resume}`
+            decos.push(Decoration.widget(offset + 1, () => buildFailStrip({ pageId, replyId: id, canRetry: canStop, rest, resume }), { ...opts, side: -1, key }))
+          } else if (canStop && resume && isStoppedReply(node.attrs.stats)) {
+            decos.push(Decoration.widget(offset + 1, () => buildStoppedStrip(pageId, id), { ...opts, side: -1, key: `stopped:${id}` }))
           }
           // agent 的计划清单随回复块落盘（plan 属性），放在失败条（若有）之下、正文之上，与运行中它在运行条里的位置一致
           const plan = decodePlan(node.attrs.plan)
@@ -253,6 +258,7 @@ export function liveReplyView(pageId: string, canStop: boolean) {
           visible: () => v.dom.offsetParent !== null,
           onChange: refresh,
           rest: (replyId) => chainRestAfter(v.state.doc, replyId),
+          resume: (replyId) => resumableReply(v.state.doc, replyId),
         })
         const raf = requestAnimationFrame(refresh)
         // 运行中跟住正在生成的块末尾（doc-follow.ts），哪些块 live 由上面的 is-live 装饰决定

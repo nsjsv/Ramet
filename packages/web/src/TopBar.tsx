@@ -12,6 +12,7 @@ import { PageIcon } from './PageIcon'
 import { EditModeItems } from './editor/edit-mode'
 import PreviewToggle from './project/PreviewToggle'
 import ProjectToggle from './project/ProjectToggle'
+import CommentsButton from './comments/CommentsButton'
 
 /* ---------- 页面顶栏 ----------
  * 一条 48px，sticky 钉在 .main 滚动口顶部：左面包屑（[data-flip]：侧栏收起 / 展开时 FLIP 跟着滑），
@@ -36,6 +37,8 @@ interface Props {
   chatOn?: boolean
   onViewChange?: (chat: boolean) => void
   onOpenHistory: () => void
+  /** 开 / 关评论抽屉；缺省 = 这页没有评论（过程页 / skill 页 / 对话视图），不画按钮 */
+  onOpenComments?: () => void
   /** 导出当前页（zip）；返回是否成功（失败的提示由调用方给）。缺省 = 不给导出项 */
   onExport?: () => Promise<boolean>
   /** 全宽（页面属性，editor/full-width.ts）；onFullWidth 缺省 = 只读或不适用，⋮ 菜单不给开关 */
@@ -113,6 +116,7 @@ export default function TopBar(p: Props) {
         )}
         <PreviewToggle pageId={p.pageId} />
         <ProjectToggle pageId={p.pageId} />
+        {p.pageId && p.onOpenComments && <CommentsButton pageId={p.pageId} onClick={p.onOpenComments} />}
         {p.pageId && <FavoritePageButton pageId={p.pageId} />}
         <button
           type="button"

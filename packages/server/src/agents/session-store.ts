@@ -2,6 +2,7 @@
 // sessions / configs / workspaces（以及页面级的 choice / tools）是 agent_session 这一列 jsonb 里平级的键。这里只有 SQL 与
 // 读写函数，只依赖 pool：不碰 manager 的内存状态、不广播。turn.ts / session-config.ts / manager.ts 共用。
 import type { Pool } from 'pg'
+import { toolOf } from '@ramet/shared/reply-stats'
 import type { ResolvedAgent, SavedSession } from './manager-types.js'
 import { toolProfileOf, type ToolProfile } from './tool-profile.js'
 
@@ -66,7 +67,7 @@ export async function saveToolProfile(pool: Pool, pageId: string, profile: ToolP
 
 // ---------- 工作区（cwd）覆盖 ----------
 // 用户指定的工作区与会话的 cwd 是两个概念：前者是意图（落库、协作者可见），后者是
-// 这个会话建在哪、喂到哪个 hash 的派生事实（sessions[agentId].cwd）。会话复用由
+// 这个会话建在哪的派生事实（sessions[agentId].cwd）。会话复用由
 // runTurn / prepare 的 saved.cwd === 生效 cwd 判定，改工作区自动作废旧会话，没有额外失效逻辑。
 
 async function loadWorkspace(pool: Pool, pageId: string, agentId: string): Promise<string | null> {
@@ -105,14 +106,49 @@ export async function persistSession(
   agentId: string,
   sessionId: string,
   cwd: string,
-  /** null = 准备会话（建了会话但还没喂文档，见 SavedSession 注释） */
-  lastSyncedHash: string | null,
+  /** 会话看到的最后一块（SavedSession.seen）；null = 准备会话（建了会话但还没喂文档，见 SavedSession 注释） */
+  seen: string | null,
   /** 交给这个会话 MCP 的凭证属于谁（SavedSession.userId） */
   userId: string,
   /** 这个会话交付的工具档位（SavedSession.tools） */
   tools: ToolProfile,
+  /** 只有改写老记录（还没有 seen）时原样带上它的 hash，否则老记录的增量判据就丢了 */
+  lastSyncedHash?: string | null,
 ): Promise<void> {
-  await pool.query(SAVE_STATE, [pageId, agentId, JSON.stringify({ sessionId, cwd, lastSyncedHash, userId, tools })])
+  const record = { sessionId, cwd, seen, userId, tools, ...(lastSyncedHash ? { lastSyncedHash } : {}) }
+  await pool.query(SAVE_STATE, [pageId, agentId, JSON.stringify(record)])
+}
+
+// 会话记录 + 这一页这个工具的会话最后在哪台机器上跑（current[工具] = catalog id），同一条 UPDATE：
+// 换机器（session-move.ts）据 current 判断上次在哪、从中心把那个会话下发到这一台
+const SAVE_TURN_STATE = `UPDATE pages SET agent_session =
+  COALESCE(agent_session, '{}'::jsonb) ||
+  jsonb_build_object('sessions', COALESCE(agent_session->'sessions', '{}'::jsonb) || jsonb_build_object($2::text, $3::jsonb)) ||
+  jsonb_build_object('current', COALESCE(agent_session->'current', '{}'::jsonb) || jsonb_build_object($4::text, to_jsonb($2::text)))
+  WHERE id = $1`
+const SELECT_CURRENT = `SELECT agent_session->'current'->>$2 AS current FROM pages WHERE id = $1`
+
+/** 一轮发出提示词之前落会话记录（seen = 这一轮的回复块），同时把 current[工具] 记成这个 agent。
+ *  只有真正喂过文档的会话才算「这一页的会话在这台机器上」：准备会话、改配置时落的记录不改 current，
+ *  否则在别的机器上点开 chip（prepare）就会让这一页忘了会话其实在哪 */
+export async function persistTurnSession(
+  pool: Pool,
+  pageId: string,
+  agentId: string,
+  sessionId: string,
+  cwd: string,
+  seen: string,
+  userId: string,
+  tools: ToolProfile,
+): Promise<void> {
+  const record = { sessionId, cwd, seen, userId, tools }
+  await pool.query(SAVE_TURN_STATE, [pageId, agentId, JSON.stringify(record), toolOf(agentId)])
+}
+
+/** 这一页这个工具的会话最后在哪个 agent（catalog id）上跑；没有 = null */
+export async function loadCurrent(pool: Pool, pageId: string, tool: string): Promise<string | null> {
+  const { rows } = await pool.query<{ current: string | null }>(SELECT_CURRENT, [pageId, tool])
+  return rows[0]?.current ?? null
 }
 
 /** 该用户能复用的会话记录：只有 MCP 凭证就是他的那个会话才算（见 SavedSession.userId），别人的当作没有 */

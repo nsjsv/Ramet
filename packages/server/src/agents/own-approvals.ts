@@ -1,6 +1,6 @@
 // ---------- Ramet 自己的审批（知识中枢的删除等）----------
-// ACP 的审批归执行端（适配器持有 request_permission，会话镜像投影它）。Ramet 自己的工具（trash_page 等）在中心里执行，
-// 没有 ACP 会话替它挂审批，所以由这里持有：发起时往页面的 SSE 广播一条同形状的 `permission` 事件
+// agent 的审批归执行端（驱动持有，会话镜像投影它）。Ramet 自己的工具（trash_page 等）在中心里执行，
+// 没有 agent 会话替它挂审批，所以由这里持有：发起时往页面的 SSE 广播一条同形状的 `permission` 事件
 // （前端的审批卡不区分来源），答案走同一个 POST /permission（manager.answerPermission 先问这里）。
 // 无超时，只在有人答 / 页面上的运行被停止 / 调用方断开（signal）时结束，结束时广播 permission_resolved。
 // SSE 新订阅者由 replay 补发待批，刷新页面不丢。
@@ -61,7 +61,7 @@ export class OwnApprovals {
     })
   }
 
-  /** 答一条审批。不是这里的审批返回 false（调用方再去找 ACP 会话的那条）；optionId 为 null = 取消 = 拒绝 */
+  /** 答一条审批。不是这里的审批返回 false（调用方再去找 agent 会话的那条）；optionId 为 null = 取消 = 拒绝 */
   answer(pageId: string, agentId: string, requestId: string, optionId: string | null, by: string | null = null): boolean {
     const p = this.pending.get(requestId)
     if (!p || p.pageId !== pageId || p.agentId !== agentId) return false

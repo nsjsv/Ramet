@@ -1,4 +1,4 @@
-# 构建上下文瘦身:两份 Dockerfile 的 context 都是仓库根
+# 构建上下文瘦身：仓库里的 Dockerfile 都以仓库根为 context
 node_modules
 **/node_modules
 .git
@@ -8,3 +8,6 @@ postgres-data
 .trellis
 .env
 .env.*
+# 本地开发的上传文件，不进构建上下文
+**/uploads
+**/*.test.ts

@@ -3,7 +3,7 @@
 // 预览的是别人机器上的开发服务器，里面的 JS 不可信，所以 /api 的非 GET/HEAD/OPTIONS 请求必须证明自己来自 Ramet 自己的页面：
 //   1. 浏览器自带的 `Origin`：带了就必须等于 Ramet 自己的源，否则 403；没带说明不是浏览器（connector、MCP 工具的 Bearer 请求、测试），放行；
 //   2. `Sec-Fetch-Site`（页面脚本改不了的禁用头）：same-site / cross-site 都是 403，同站不同端口（预览源）正好是 same-site。
-// Ramet 自己的源怎么算：反代会改 Host（web 容器的 nginx 用 `$host` 会丢端口），所以不比协议，只比 host[:port]，
+// Ramet 自己的源怎么算：反代会改 Host（nginx 用 `$host` 会丢端口），所以不比协议，只比 host[:port]，
 // 来源取请求的 Host 头或 RAMET_PUBLIC_URL。同一主机上别的端口（预览源）两个都对不上，403。
 // WebSocket 升级（/collab）同理：浏览器握手带 Origin，对不上就不给升级，不然预览页的脚本能带着登录 cookie 连进协同。
 

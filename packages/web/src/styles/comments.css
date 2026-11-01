@@ -1,0 +1,446 @@
+/* ---------- 评论（comments/）----------
+ * 正文高亮 .comment-mark（comment-anchor.ts 的装饰，编辑页与公开页同款）、划词浮层 .cm-pop、
+ * 讨论串 .cm-thread（浮层 / 抽屉 / 整页讨论共用）、输入框 .cm-composer、抽屉 .cm-drawer（外壳是 history.css 的 .hd-drawer）、
+ * 整页讨论 .cm-discussion、顶栏按钮角标。颜色全用令牌，暗色主题跟着令牌走。 */
+
+/* 正文里被评论的字：淡黄底 + 下划线；激活的串（浮层开着）加深 */
+.comment-mark {
+  background: color-mix(in srgb, var(--warn) 14%, transparent);
+  border-bottom: 2px solid color-mix(in srgb, var(--warn) 45%, transparent);
+  cursor: pointer;
+  transition: background var(--d-1);
+}
+
+.comment-mark:hover,
+.comment-mark.is-active {
+  background: color-mix(in srgb, var(--warn) 30%, transparent);
+}
+
+/* ---------- 浮层 ---------- */
+@keyframes cm-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+.cm-pop {
+  position: fixed;
+  z-index: 45;
+  width: 340px;
+  max-width: calc(100vw - 16px);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  animation: cm-pop-in var(--d-2) var(--ease-out);
+}
+
+.cm-pop-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.cm-pop-head .cm-quote {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 引用的原文：左边一道竖线，最多三行 */
+.cm-quote {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  padding-left: 8px;
+  border-left: 2px solid color-mix(in srgb, var(--warn) 55%, transparent);
+  color: var(--ink-2);
+  font-size: var(--t-sm);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.cm-pop .cm-list {
+  max-height: 45vh;
+  overflow-y: auto;
+}
+
+/* ---------- 讨论串 ---------- */
+.cm-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cm-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cm-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.cm-item.is-deleted {
+  color: var(--ink-3);
+  font-size: var(--t-sm);
+  font-style: italic;
+}
+
+.cm-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: var(--t-xs);
+}
+
+.cm-name {
+  color: var(--ink);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cm-time {
+  flex: none;
+  color: var(--ink-3);
+}
+
+.cm-item-acts {
+  margin-left: auto;
+  display: inline-flex;
+  gap: 6px;
+  opacity: 0;
+  transition: opacity var(--d-1);
+}
+
+.cm-item:hover .cm-item-acts,
+.cm-item:focus-within .cm-item-acts {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .cm-item-acts {
+    opacity: 1;
+  }
+}
+
+.cm-link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink-3);
+  font: inherit;
+  cursor: pointer;
+}
+
+.cm-link:hover {
+  color: var(--ink);
+}
+
+.cm-link.is-danger:hover {
+  color: var(--danger);
+}
+
+.cm-body {
+  color: var(--ink);
+  font-size: var(--t-sm);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.cm-body a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.cm-resolved-line {
+  color: var(--ok);
+  font-size: var(--t-xs);
+}
+
+.cm-thread.is-resolved .cm-body {
+  color: var(--ink-2);
+}
+
+.cm-thread-foot {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.cm-resolve {
+  align-self: flex-start;
+}
+
+.cm-error {
+  color: var(--danger);
+  font-size: var(--t-xs);
+}
+
+/* ---------- 输入框（迷你 PM，样式基底是对话输入框的 .chat-input） ---------- */
+.cm-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cm-composer-box {
+  position: relative; /* @ 成员候选挂在它下方 */
+  padding: 4px 10px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  transition: border-color var(--d-2), box-shadow var(--d-2);
+}
+
+.cm-composer-box:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--line));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.cm-composer .chat-input {
+  font-size: var(--t-sm);
+}
+
+.cm-composer .chat-input p {
+  margin: 0;
+}
+
+/* 候选往下开：评论框常在浮层 / 抽屉顶部附近，往上开会被视口裁掉 */
+.cm-composer .chat-mention {
+  top: calc(100% + 4px);
+  bottom: auto;
+  z-index: 50;
+}
+
+.cm-composer-acts {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.cm-btn {
+  padding: 3px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--ink-2);
+  font-size: var(--t-xs);
+  cursor: pointer;
+  transition: background var(--d-1), color var(--d-1);
+}
+
+.cm-btn:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.cm-btn.is-primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.cm-btn.is-primary:hover {
+  background: color-mix(in srgb, var(--accent) 88%, var(--ink));
+  color: var(--on-accent);
+}
+
+.cm-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ---------- 抽屉 ---------- */
+.cm-drawer-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.cm-drawer-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px 12px 16px;
+}
+
+.cm-group + .cm-group {
+  margin-top: 16px;
+}
+
+.cm-group-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 4px 6px;
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+  font-weight: 500;
+}
+
+.cm-count {
+  color: var(--ink-3);
+}
+
+.cm-rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.cm-row {
+  border-radius: var(--r-md);
+}
+
+.cm-row.is-open {
+  padding-bottom: 10px;
+  background: var(--bg-sunk);
+}
+
+.cm-row.is-open .cm-thread {
+  padding: 0 10px;
+}
+
+.cm-row-head {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: var(--r-md);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.cm-row-head:hover {
+  background: var(--hover);
+}
+
+.cm-row-kind {
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+}
+
+.cm-orphan {
+  margin-right: 6px;
+  padding: 0 6px;
+  border-radius: var(--r-pill);
+  background: var(--danger-tint);
+  color: var(--danger);
+  font-size: 11px;
+}
+
+.cm-row-excerpt {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: var(--t-sm);
+  overflow-wrap: anywhere;
+}
+
+.cm-row-meta {
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+}
+
+.cm-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 32px 12px;
+  color: var(--ink-3);
+  font-size: var(--t-sm);
+  text-align: center;
+}
+
+.cm-empty b {
+  color: var(--ink-2);
+}
+
+/* ---------- 整页讨论 ---------- */
+.cm-discussion {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 40px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+.cm-discussion-title {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: var(--t-sm);
+  font-weight: 600;
+}
+
+.cm-discussion > div > .cm-thread {
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.cm-fold {
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+  cursor: pointer;
+}
+
+.cm-fold:hover {
+  color: var(--ink);
+}
+
+/* ---------- 顶栏按钮角标 ---------- */
+.cm-topbar-btn {
+  position: relative;
+}
+
+.cm-badge {
+  position: absolute;
+  top: 1px;
+  right: 0;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: var(--r-pill);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 14px;
+  text-align: center;
+  pointer-events: none;
+}
+
+/* 收件箱里评论条目的摘要：最多两行 */
+.inbox-excerpt {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  color: var(--ink-2);
+}

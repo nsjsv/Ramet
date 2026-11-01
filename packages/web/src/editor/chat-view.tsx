@@ -19,7 +19,7 @@ import { LiveSlot, type LiveHit } from './live-slot'
 import { buildPlanStrip } from './plan-card'
 import { buildTeamStrip, disposeTeamStrips } from '../team/team-mount'
 import { buildDock } from '../hud/dock'
-import { buildFailStrip, isFailedReply } from './reply-fail'
+import { buildFailStrip, buildStoppedStrip, isFailedReply, isStoppedReply } from './reply-fail'
 import { buildActs, bubbleActsFor, type BubbleActs } from './chat-acts'
 import { hydrateRich } from './rich-render'
 import { clearCarried, peekCarried, registerComposer } from './composer-bridge'
@@ -46,7 +46,7 @@ import { mentionSources, warmMentionSources } from './mention-sources'
 import { advance, type Session } from './trigger-session'
 import { chatUnits, registerChatUnits } from './view-morph'
 import { flyFrom } from '../motion'
-import { redoableUserIds } from './reply-target'
+import { lastReply, redoableUserIds, resumableReply, resumes } from './reply-target'
 import { avatarKey, fillAvatar, personOf, subscribePeople, type Person } from '../people'
 
 /* ---------- 传统（聊天）模式视图 ----------
@@ -106,7 +106,7 @@ function buildBubble(
   retry: { pageId: string; canRetry: boolean },
   acts: BubbleActs | null,
   rest: number,
-  /** 用户消息有「重新回复」落点 */
+  /** 用户消息有「重新回复」落点；AI 回复是「失败 / 停止后能续跑」（最后一块、不是带队轮） */
   redo: boolean,
   /** 用户消息的发言人（AI 回复不用） */
   author: Person | null,
@@ -130,8 +130,9 @@ function buildBubble(
     // 气泡内纵向顺序：运行条、正文（运行条高度封顶，正文位置与步骤数无关）
     if (live) bubble.append(live.ctrl.strip)
     else if (kind === 'ai') {
-      // 没有实时视图接管的失败气泡：失败条放在运行条的位置，agent 的计划清单（回复块的 plan 属性）紧随其后
-      if (isFailedReply(node.attrs.stats)) bubble.append(buildFailStrip({ ...retry, replyId: id, rest }))
+      // 没有实时视图接管的失败 / 停止气泡：失败条或「已停止 · 继续」条放在运行条的位置，agent 的计划清单（回复块的 plan 属性）紧随其后
+      if (isFailedReply(node.attrs.stats)) bubble.append(buildFailStrip({ ...retry, replyId: id, rest, resume: redo }))
+      else if (redo && retry.canRetry && isStoppedReply(node.attrs.stats)) bubble.append(buildStoppedStrip(retry.pageId, id))
       const plan = decodePlan(node.attrs.plan)
       if (plan.length > 0) bubble.append(buildPlanStrip(plan))
       const team = decodeTeam(node.attrs.team)
@@ -179,6 +180,7 @@ function chatDecorations(
 ): DecorationSet {
   const decos: Decoration[] = []
   const redoable = redoableUserIds(doc)
+  const last = lastReply(doc)
   for (const mark of landmarks(doc)) {
     const node = mark.node
     if (mark.kind !== 'user' && mark.kind !== 'ai') {
@@ -198,8 +200,8 @@ function chatDecorations(
     // @ 点名链停在这条失败回复后还剩几个（只有最后一条回复算，其余 0）
     const replyId: unknown = node.attrs.id
     const rest = isAi && typeof replyId === 'string' ? chainRestAfter(doc, replyId) : 0
-    // 用户消息的「重新回复」取决于它后面的块（删掉回复 / 新消息到达），节点自己没变，所以要进 key 才会重建
-    const redo = !isAi && typeof replyId === 'string' && redoable.has(replyId)
+    // 用户消息的「重新回复」、AI 回复能不能续跑都取决于它后面的块（删掉回复 / 新消息到达），节点自己没变，所以要进 key 才会重建
+    const redo = isAi ? resumes(node, last) : typeof replyId === 'string' && redoable.has(replyId)
     // 发言人取消息记的 author，没记的回落页面创建者；成员列表还没到时先画中性头像，到了由 subscribePeople 重算
     const authorAttr: unknown = node.attrs.author
     const author = isAi ? null : personOf(meta.spaceId, typeof authorAttr === 'string' && authorAttr ? authorAttr : meta.ownerId)
@@ -277,6 +279,7 @@ function chatDecoPlugin(
         visible: () => host.offsetParent !== null,
         onChange: refresh,
         rest: (replyId) => chainRestAfter(view.state.doc, replyId),
+        resume: (replyId) => resumableReply(view.state.doc, replyId),
       })
       // 首帧结束前把当前消息都记成已在场，历史记录不入场
       arm = requestAnimationFrame(() => {
@@ -334,6 +337,7 @@ export default function ChatView({ pageId, readOnly, pages, onPagesChanged, getE
   // skill / 成员从缓存同步取，会话开启时后台补取，到了靠它重画一次
   const [, setSourcesTick] = useState(0)
   const mentionSession = useRef<Session | null>(null)
+  // @ 候选列全部工具：显式 @ 点名不受本页的工具锁定（它用自己的会话，对话内容靠补发带过去）
   const { agents } = useAgents()
   const matches =
     mention && pages ? candidatesFor(mention, mentionSources(pages, agents, pageId), mention.trigger === '@' ? mentionCat : null) : []
@@ -731,7 +735,8 @@ export default function ChatView({ pageId, readOnly, pages, onPagesChanged, getE
                   type="button"
                   className="chat-send"
                   onClick={() => send()}
-                  disabled={(!input.trim() && !hasAttach) || attach.uploading}
+                  // 锁定的工具一台在线的都没有、又没 @ 别的 agent：发出去也只会被拒，提示在来源 chip 上
+                  disabled={(!input.trim() && !hasAttach) || attach.uploading || (agentState.lock !== '' && !agent && !input.includes('](agent:'))}
                   aria-label={COPY.chips.send}
                 >
                   <Icon name="arrow-up" size={16} />

@@ -1,12 +1,15 @@
 // ---------- 权限模式（posture）与机器主人 ----------
-// 「跳过全部确认」= agent 自己的免审批档（claude 的 bypassPermissions、codex 的 agent-full-access）。
+// 「跳过全部确认」= agent 自己的免审批档（claude 的 bypassPermissions / auto、codex 的完全访问、omp 的 yolo）。
 // 这一档让 agent 在机器上不经确认执行任何东西，所以只有机器主人能进：
 //   - 本机 agent 的主人是服务器 admin；connector 上 agent 的主人是配对人（connectors.owner_id）
 //   - 所有会把会话送进该档、或在该档下执行的入口都走同一个 authorize()，入口处不要各写一份判断：
 //       set-config（改 mode）/ answer（审批选项把会话切进该档）/ run（会话此刻就在该档）
-// 表只收录核实过的 agent；表外的（gemini、pi、自定义 id）mode 不可改，server 拒绝，前端不摆，不猜。
+// 表只收录核实过的 agent；表外的（pi、老 connector 上的其它 id）mode 不可改，server 拒绝，前端不摆，不猜（pi 本来就没有 mode）。
 // 已知余量：表外厂商的未知提权路径（比如某个审批选项把会话切进全权）无法预先拦；
 // run 检查保证非主人的下一轮不会在该档执行。
+import { exitPlanOptionId, UNRESTRICTED_MODES } from './drivers/claude/permissions.js'
+import { UNRESTRICTED_MODES as CODEX_UNRESTRICTED } from './drivers/codex/config.js'
+import { UNRESTRICTED_MODES as OMP_UNRESTRICTED } from './drivers/pi/config.js'
 import type { ResolvedAgent } from './manager-types.js'
 
 type Posture = {
@@ -18,19 +21,26 @@ type Posture = {
 
 /** 键 = agent 自己的 id（本机配置里的 id / connector 上报的原始 id，不带 `c:<connectorId>:` 前缀） */
 const POSTURE: Record<string, Posture> = {
-  // 依据 claude-agent-acp 的 dist/session-mode.js、permissions/effects.js
-  claude: { unrestricted: ['bypassPermissions'], elevating: ['exit-plan-bypass', 'exit-plan-clear-bypass'] },
-  // 依据 codex-acp 的 dist/index.js
-  codex: { unrestricted: ['agent-full-access'], elevating: [] },
-  // `omp acp` / `opencode acp` 的 mode 只有 default / plan、build / plan，没有免审批档
-  omp: { unrestricted: [], elevating: [] },
-  opencode: { unrestricted: [], elevating: [] },
-}
-
-/** 某个 agent（原生 id，不带 `c:<connectorId>:` 前缀）的「跳过全部确认」档的 mode 值；表外的 agent 返回空（不猜）。
- *  随手 AI 的受限会话（connector/quick.ts）据此在运行前把会话切出这一档 */
-export function unrestrictedModesOf(agentId: string): readonly string[] {
-  return Object.hasOwn(POSTURE, agentId) ? POSTURE[agentId]!.unrestricted : []
+  // 原生驱动（drivers/claude）：免确认的模式与 ExitPlanMode 里切进这些模式的选项，取自驱动自己的常量（同一份，不另抄）。
+  // 另带 claude-agent-acp 的提权选项 id（其 dist/permissions/options/shared.js）：中心已不带 ACP，但还没升级的 connector
+  // 仍可能经 ACP 跑 claude，它的审批经中继到这里，一样要拦
+  claude: {
+    unrestricted: UNRESTRICTED_MODES,
+    elevating: [
+      ...UNRESTRICTED_MODES.map(exitPlanOptionId),
+      'exit-plan-bypass',
+      'exit-plan-clear-bypass',
+      'exit-plan-auto',
+      'exit-plan-clear-auto',
+    ],
+  },
+  // 原生驱动（drivers/codex）的「完全访问」预设取自驱动自己的常量；agent-full-access 是 codex-acp（其 dist/index.js）的同一档，
+  // 留给还没升级、仍经 ACP 跑 codex 的 connector。codex 的审批决定里没有切进完全访问的（「本会话总是允许」只放行这一类动作）
+  codex: { unrestricted: [...CODEX_UNRESTRICTED, 'agent-full-access'], elevating: [] },
+  // 原生驱动（drivers/pi）的 omp 审批档：yolo 取自驱动自己的常量。还没升级、仍经 `omp acp` 跑的 connector 只有 default / plan，
+  // 不含 yolo，所以同一行对它没有影响。omp 的审批 select 里没有切审批档的选项（elevating 为空）
+  omp: { unrestricted: OMP_UNRESTRICTED, elevating: [] },
+  // pi 没有审批也没有 mode，不在表里
 }
 
 export class ForbiddenError extends Error {}

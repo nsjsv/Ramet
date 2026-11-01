@@ -1,5 +1,5 @@
-/* ---------- agent 核心链路集成测试（假 ACP agent） ----------
- * fake-agent.mjs 是说最小 ACP 协议的子进程，行为由 prompt 文本驱动（触发词见它的文件头）。 */
+/* ---------- agent 核心链路集成测试（假 codex） ----------
+ * 缺省 agent `fake` 是走 codex 原生驱动的假 CLI（agents/fake/codex.mjs），行为由 prompt 文本驱动（触发词见 agents/fake/scenario.mjs 文件头）。 */
 
 import { expect, test } from 'vitest'
 import { mkdir, mkdtemp, realpath } from 'node:fs/promises'
@@ -26,6 +26,7 @@ import {
   postJson,
   replyAgent,
   replyAttr,
+  replyBlocks,
   setupPage,
   SSECollector,
   userMessage,
@@ -52,10 +53,10 @@ test('continue:流式追加进文档(双客户端可见),done 更新 agent_sessi
   expect(replyAgent(a)).toBe('fake') // AI 块带产出者 id(前端据它渲染 icon/名字)
 
   const sess = await agentSession(pageId)
-  expect(sess?.fake?.sessionId).toMatch(/^sess-\d+$/)
-  expect(sess?.fake?.lastSyncedHash).toBeTruthy()
+  expect(sess?.fake?.sessionId).toMatch(/^[0-9a-f-]{36}$/) // codex 的线程 id
+  expect(sess?.fake?.seen).toBe(replyAttr(a, 'id')) // 会话看到的最后一块 = 这一轮的回复
 
-  // 不编辑,再 continue:hash 相等 → session/load + 增量(假 agent 回 delta),sessionId 不变
+  // 再 continue:接着同一个会话,只发新消息(假 agent 回 delta),sessionId 不变
   const sse2 = new SSECollector()
   await sse2.start(pageId, cookie)
   userMessage(a.document, '第二问')
@@ -96,7 +97,7 @@ test('@/[[ 引用不整页粘贴:提示词里只有文本块,引用页正文不�
   a.destroy()
 })
 
-test('编辑后 continue:hash 失配 → 新 session 全文重放', async () => {
+test('改了旧消息再 continue:会话 id 不变,只发了新消息(上下文归 agent 自己的会话)', async () => {
   const { cookie, pageId } = await setupPage()
   const a = await connectDoc(pageId, cookie)
   userMessage(a.document, '第一问')
@@ -106,21 +107,16 @@ test('编辑后 continue:hash 失配 → 新 session 全文重放', async () => 
   await sse.wait((ev) => ev.type === 'status' && ev.state === 'done')
   const first = (await agentSession(pageId))?.fake?.sessionId
 
-  userMessage(a.document, '第二问')
+  userMessage(a.document, '回显提示词 第二问')
   editFirstUserMessage(a.document, '第一问(改)')
   await continuePage(pageId, cookie)
-  await sse.wait(() => {
-    // 第一轮 done 已收过;等第二个 done(status done 出现两次)
-    const dones = sse.events.filter((e) => e.type === 'status' && e.state === 'done')
-    return dones.length >= 2
-  })
+  await sse.wait(() => sse.events.filter((e) => e.type === 'status' && e.state === 'done').length >= 2)
   sse.stop()
 
-  const second = (await agentSession(pageId))?.fake?.sessionId
-  expect(second).not.toBe(first)
-  // 全文重放包含两问文本 → 假 agent 判 full
-  expect(docText(a)).toContain('> turn:full')
-  expect(docText(a)).toContain('第一问(改)')
+  expect((await agentSession(pageId))?.fake?.sessionId).toBe(first)
+  // 回显的提示词只有新消息:改过的旧消息不重发
+  await waitFor(() => replyBlocks(a)[1]?.outcome === 'end')
+  expect(replyBlocks(a)[1]!.text).toBe('回显提示词 第二问')
   a.destroy()
 })
 
@@ -134,15 +130,15 @@ test('permission:SSE 收到审批请求(带 agentId),POST 应答后 agent 收到
   await continuePage(pageId, cookie)
   const perm = await sse.wait((ev) => ev.type === 'permission')
   if (perm.type !== 'permission') throw new Error('不是审批事件')
-  expect(perm.options.some((o) => o.optionId === 'allow_once')).toBe(true)
+  expect(perm.options.map((o) => o.optionId)).toEqual(['allow', 'reject'])
   expect(perm.agentId).toBe('fake')
   // 没带 agentId：400（requestId 只在单个进程内唯一，必须带 agent 才认得出是哪一条）
-  expect((await postJson(`/api/pages/${pageId}/permission`, cookie, { requestId: perm.requestId, optionId: 'allow_once' })).status).toBe(400)
-  // 审批应答后 agent 收到结果,回显 granted:<optionId>
+  expect((await postJson(`/api/pages/${pageId}/permission`, cookie, { requestId: perm.requestId, optionId: 'allow' })).status).toBe(400)
+  // 审批应答后 agent 收到结果,回显 granted:<剧本里的选项 id>（codex 的 accept 对应剧本的 allow_once）
   const res = await postJson(`/api/pages/${pageId}/permission`, cookie, {
     agentId: perm.agentId,
     requestId: perm.requestId,
-    optionId: 'allow_once',
+    optionId: 'allow',
   })
   expect(res.status).toBe(200)
   await sse.wait((ev) => ev.type === 'permission_resolved' && ev.requestId === perm.requestId && ev.agentId === 'fake')
@@ -150,7 +146,7 @@ test('permission:SSE 收到审批请求(带 agentId),POST 应答后 agent 收到
   sse.stop()
   await waitFor(() => docText(a).includes('> granted:allow_once'))
   // 已经结束的审批再答：404
-  expect((await postJson(`/api/pages/${pageId}/permission`, cookie, { agentId: 'fake', requestId: perm.requestId, optionId: 'allow_once' })).status).toBe(404)
+  expect((await postJson(`/api/pages/${pageId}/permission`, cookie, { agentId: 'fake', requestId: perm.requestId, optionId: 'allow' })).status).toBe(404)
   a.destroy()
 })
 
@@ -234,7 +230,7 @@ test('config:continue 后 SSE 收到 config 事件(model+thinking)', async () =>
   expect(ev.type === 'config' && ev.agentId === 'fake').toBe(true)
   if (ev.type !== 'config') return
   const model = ev.options.find((o) => o.id === 'model')
-  const thinking = ev.options.find((o) => o.id === 'thinking')
+  const thinking = ev.options.find((o) => o.id === 'effort')
   expect(model?.category).toBe('model')
   expect(model?.currentValue).toBe('m1')
   expect(model?.options.map((v) => v.value)).toEqual(['m1', 'm2'])
@@ -291,7 +287,7 @@ test('config:改配置后同 session 继续,agent 输出新值', async () => {
   a.destroy()
 })
 
-test('config:编辑后新 session 全文重放,配置持久化仍生效', async () => {
+test('config:换工作区后新 session 全文重放,配置持久化仍生效', async () => {
   const { cookie, pageId } = await setupPage()
   const a = await connectDoc(pageId, cookie)
   userMessage(a.document, '第一问')
@@ -299,19 +295,22 @@ test('config:编辑后新 session 全文重放,配置持久化仍生效', async 
   await sse.start(pageId, cookie)
   await continuePage(pageId, cookie)
   await sse.wait((ev) => ev.type === 'status' && ev.state === 'done')
+  const first = (await agentSession(pageId))?.fake?.sessionId
 
-  expect((await postConfig(pageId, cookie, { agent: 'fake', configId: 'thinking', value: 'high' })).status).toBe(200)
+  expect((await postConfig(pageId, cookie, { agent: 'fake', configId: 'effort', value: 'high' })).status).toBe(200)
 
+  // 换工作区是结构性原因：旧会话在别的目录，作废重建
+  expect((await setWorkspace(pageId, cookie, { agent: 'fake', cwd: await mkdtemp(join(tmpdir(), 'ramet-cfg-')) })).status).toBe(200)
   userMessage(a.document, '第二问')
-  editFirstUserMessage(a.document, '第一问(改)')
   await continuePage(pageId, cookie)
   await sse.wait(() => sse.events.filter((e) => e.type === 'status' && e.state === 'done').length >= 2)
   sse.stop()
   // 新 session 全文重放,但 agent 拿到的 thinking 仍是持久化的 high
   await waitFor(() => {
-    const t = docText(a)
-    return t.includes('> turn:full') && t.includes('thinking=high')
+    const t = replyBlocks(a)[1]?.text ?? ''
+    return t.includes('turn:full') && t.includes('thinking=high')
   })
+  expect((await agentSession(pageId))?.fake?.sessionId).not.toBe(first)
   a.destroy()
 })
 
@@ -334,7 +333,7 @@ test('prepare:选 agent 即建会话并推配置项;会话被首次生成复用(
   expect(ev.agentId).toBe('fake')
   expect(ev.options.find((o) => o.id === 'model')?.currentValue).toBe('m1')
   const prepared = await agentSession(pageId)
-  expect(prepared?.fake?.lastSyncedHash).toBeNull() // 准备会话:建了但没喂过文档
+  expect(prepared?.fake?.seen).toBeNull() // 准备会话:建了但没喂过文档
   const preparedId = prepared!.fake!.sessionId
 
   // 再选一次不会另建会话(准备会话可重复消费)
@@ -366,6 +365,9 @@ test('prepare:未知 agent 400;非成员 404', async () => {
 })
 
 /* ---------- 工具调用过程：实时事件 + 归档为过程页 ---------- */
+
+/** 「用工具」剧本里第一步读的文件 */
+const READ_PATH = 'packages/server/src/agents/acp.ts'
 
 /** SSE 里收到的过程事件（成品 step；合并已在服务端完成） */
 function stepEvents(events: AgentEvent[]): Array<Extract<AgentEvent, { type: 'step' }>> {
@@ -406,14 +408,14 @@ test('过程:步骤逐步到达且增量合并保留原字段;结束归档为 ki
   expect(tool('call-1')).toMatchObject({
     id: 'call-1',
     kind: 'read',
-    title: '读 acp.ts',
+    title: READ_PATH, // codex 的读文件是一条 cat 命令，步骤标题取路径
     status: 'completed',
-    detail: 'packages/server/src/agents/acp.ts',
+    detail: READ_PATH,
   })
-  expect(tool('call-1')!.acp).toMatchObject({ locations: [{ path: 'packages/server/src/agents/acp.ts' }] })
+  expect(tool('call-1')!.view).toMatchObject({ path: READ_PATH, command: `cat ${READ_PATH}` })
   expect(tool('call-2')).toMatchObject({ kind: 'execute', status: 'completed' })
-  // 增量合并本身也验一次共享 mergeStep:acp 显式 [] 覆盖对应键
-  expect(mergeStep(tool('call-1'), { id: 'call-1', acp: { locations: [] } })!.acp).toMatchObject({ locations: [] })
+  // 增量合并本身也验一次共享 mergeStep:view 按字段合并，后到的覆盖、没带的字段留着
+  expect(mergeStep(tool('call-1'), { id: 'call-1', view: { path: 'b.ts' } })!.view).toMatchObject({ path: 'b.ts', command: `cat ${READ_PATH}` })
 
   // 归档:run 结束事件带过程页 id;库里多出一个挂在本文档下的 kind='run' 页面,内容就是这轮步骤
   const runPageId = done.type === 'status' ? done.runPageId : undefined
@@ -431,7 +433,7 @@ test('过程:步骤逐步到达且增量合并保留原字段;结束归档为 ki
   )).rows[0]!.record
   expect(run.outcome).toBe('end')
   expect(run.entries.filter((e) => e.k === 'tool').map((e) => [e.kind, e.title, e.status])).toEqual([
-    ['read', '读 acp.ts', 'completed'],
+    ['read', READ_PATH, 'completed'],
     ['execute', '跑测试', 'completed'],
   ])
   // 步骤是正文里的块：每步一个 run_step、带块 id，sid 与 record 的条目一一对上；末尾留一个空段落给用户笔记。
@@ -448,7 +450,7 @@ test('过程:步骤逐步到达且增量合并保留原字段;结束归档为 ki
   )
   expect(stepEls.every((b) => typeof b.getAttribute('id') === 'string' && b.getAttribute('id'))).toBe(true)
   const readStep = stepEls.find((b) => b.getAttribute('sid') === 'call-1')!
-  expect(textOf(readStep)).toBe('读 acp.ts')
+  expect(textOf(readStep)).toBe(READ_PATH)
   expect(readStep.getAttribute('kind')).toBe('read')
   expect(readStep.getAttribute('status')).toBe('completed')
   const tail = blocks[blocks.length - 1]!
@@ -457,7 +459,7 @@ test('过程:步骤逐步到达且增量合并保留原字段;结束归档为 ki
   expect(tail.getAttribute('id')).toBeTruthy()
   // 搜索索引 = 正文（步骤的字 + 笔记）+ 最终输出
   const indexed = await pool.query<{ content_text: string }>('SELECT content_text FROM pages WHERE id = $1', [runPageId])
-  expect(indexed.rows[0]!.content_text).toContain('读 acp.ts')
+  expect(indexed.rows[0]!.content_text).toContain(READ_PATH)
 
   // 过程页一建出来就有一条 AI 的历史；父文档上这轮回复也记成这个 agent，不并进用户那 5 分钟
   const runSnap = await pool.query<{ actor: string; actor_agent: string | null }>(
@@ -538,12 +540,12 @@ test('过程:步骤逐步到达且增量合并保留原字段;结束归档为 ki
     data?: string
     run?: { entries?: Array<{ title?: string }> }
   }
-  expect(pub.run?.entries?.some((e) => e.title === '读 acp.ts')).toBe(true)
+  expect(pub.run?.entries?.some((e) => e.title === READ_PATH)).toBe(true)
   const pubDoc = new Y.Doc()
   Y.applyUpdate(pubDoc, Buffer.from(pub.data ?? '', 'base64'))
   expect(textOf(pubDoc.getXmlFragment('prosemirror'))).toContain('我补的一句')
   // 步骤是正文里的真块，公开的过程页正文里就有它们；工具详情只在 record 里
-  expect(textOf(pubDoc.getXmlFragment('prosemirror'))).toContain('读 acp.ts')
+  expect(textOf(pubDoc.getXmlFragment('prosemirror'))).toContain(READ_PATH)
 
   // 回复还在：过程页留着。删掉 AI 块之后，挂在本文档下的过程页一起物理删除
   expect(await reapUnreferencedRuns(pool, pageId, a.document)).toEqual([])

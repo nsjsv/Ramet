@@ -84,6 +84,8 @@ import { docRail, type RailStore } from './doc-rail'
 import { docHeadActs } from './doc-acts'
 import { collectionInlineSchema, collectionLinkSchema, collectionPaste } from './collection-block'
 import { collectionBlockViews } from '../collection/block-view'
+import { commentHighlights } from '../comments/comment-anchor'
+import { commentsChanged } from '../comments/comments-store'
 
 // collab 插件内含 yUndoPlugin（Yjs UndoManager），这里只补快捷键绑定。
 
@@ -150,6 +152,16 @@ export function startEditorSession(deps: EditorSessionDeps): () => void {
     setPeers(peers)
   }
   provider.awareness?.on('change', onAwareness)
+
+  // 评论不进文档：别人写了评论，服务端在本页文档上广播 {"t":"comments"}。只认这一种，别的 stateless 一律忽略
+  const onStateless = ({ payload }: { payload: string }) => {
+    try {
+      if ((JSON.parse(payload) as { t?: unknown } | null)?.t === 'comments') commentsChanged(id)
+    } catch {
+      // 不是 JSON：不是给评论的
+    }
+  }
+  provider.on('stateless', onStateless)
 
   // 正文 IndexedDB 缓存：IDB 先灌本地已有内容进 doc，ws sync 只补缺失增量。
   // doc 每笔 update 由 y-indexeddb 直写 updates store，销毁不丢数据。
@@ -273,6 +285,7 @@ export function startEditorSession(deps: EditorSessionDeps): () => void {
       .use(selectionTooltip) // 文字框选菜单（configSelectionMenu 填充菜单 DOM）
       .use(linkHover({ navigate, openExternal })) // 行内链接悬浮栏：缩略地址 / 复制 / 编辑文字与地址（不加 schema，公开页不挂）
       .use(textFlash) // 文字定位链接的高亮（?block=&text=，PublicPage 同款挂）
+      .use(commentHighlights) // 划词评论的高亮（纯装饰，PublicPage 同款挂）
       .use(blockIdSchemas) // 预设里可寻址块的 id attr（必须排在 commonmark / gfm 之后，同名原位替换）
       .use(linkNotInclusive) // 链接末尾继续打字 / 回车不续链接 mark（同名原位替换，排在 commonmark 之后）
       .use(blockSelectKeys) // 块选区键位 / 剪贴板 / 整段拖放（必须排在所有 keymap 之前：块选时 PM 只有个折叠 caret）
@@ -348,6 +361,7 @@ export function startEditorSession(deps: EditorSessionDeps): () => void {
       .use(
         docMention({
           pages: () => pagesRef.current,
+          // 列全部工具：显式 @ 点名不受本页的工具锁定（它用自己的会话，对话内容靠补发带过去）
           agents: agentList,
           pageId: id,
           enabled: !readOnly,
@@ -443,6 +457,7 @@ export function startEditorSession(deps: EditorSessionDeps): () => void {
     titleViewRef.current = null
     providerRef.current = undefined // 聊天模式取不到旧 doc（视图本身已在组件卸载/key 变更时先行销毁）
     provider.awareness?.off('change', onAwareness)
+    provider.off('stateless', onStateless)
     setPeers([]) // 换页 / 卸载：旧页的人不留在顶栏
     // y-prosemirror 1.3.7 缺陷：yCursorPlugin 把 awareness 广播的 dispatch 用
     // timeout(0) 延迟（setMeta→updateMetas），而 updateMetas 的 binding.isDestroyed 守卫

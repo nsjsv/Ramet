@@ -3,6 +3,7 @@
 // 前端对在飞的一轮（store 里的 RunState）与打开的已结束的一轮（GET /api/runs/:id 的 record）现算。两端同一个函数，口径不会漂。
 import { lineDiff } from './line-diff.js'
 import type { RunEntry, StepKind, StepStatus, TeamState, ToolEntry } from './run-model.js'
+import { stepEdits, subRunOf } from './tool-view.js'
 
 export type TallyFile = { path: string; add: number; del: number }
 /** 协作：sub = agent 自己开的子代理（被别的步骤 parentId 引用的那一步）；call = run_agent 叫来的 agent（acp.subRun）；team = 带队组员 */
@@ -38,7 +39,7 @@ function stepState(status: StepStatus): TallyAgent['status'] {
   return status === 'completed' ? 'done' : status === 'failed' ? 'failed' : status === 'pending' ? 'waiting' : 'running'
 }
 
-/** 编辑类步骤改了哪些文件：ACP content 里的 diff（同一路径累加）；没有 diff 的按 locations / detail 记文件、0 / 0 */
+/** 编辑类步骤改了哪些文件：diff 按路径累加增减行；没有 diff 的按被改的文件记、0 / 0（口径见 stepEdits） */
 function addFiles(e: ToolEntry, files: Map<string, TallyFile>): void {
   const touch = (path: string, add: number, del: number): void => {
     if (!path) return
@@ -47,23 +48,17 @@ function addFiles(e: ToolEntry, files: Map<string, TallyFile>): void {
     f.del += del
     files.set(path, f)
   }
-  const content = Array.isArray(e.acp?.content) ? e.acp.content : []
-  let diffs = 0
-  for (const item of content) {
-    const d = rec(item)
-    if (d?.type !== 'diff') continue
-    diffs++
+  const { diffs, path } = stepEdits(e)
+  for (const d of diffs) {
     let add = 0
     let del = 0
-    for (const line of lineDiff(str(d.oldText), str(d.newText))) {
+    for (const line of lineDiff(d.old, d.new)) {
       if (line.t === '+') add++
       else if (line.t === '-') del++
     }
-    touch(str(d.path), add, del)
+    touch(d.path, add, del)
   }
-  if (diffs > 0) return
-  const loc = Array.isArray(e.acp?.locations) ? rec(e.acp.locations[0]) : undefined
-  touch(str(loc?.path) || e.detail || '', 0, 0)
+  if (diffs.length === 0) touch(path, 0, 0)
 }
 
 export function runTally(state: { entries: readonly RunEntry[]; team?: TeamState }, totalMs: number): RunTally {
@@ -78,7 +73,7 @@ export function runTally(state: { entries: readonly RunEntry[]; team?: TeamState
     if (e.status === 'failed') failed++
     if (rec(e.acp?.permission)) asks++
     if (EDIT_KINDS.has(e.kind) && e.status !== 'failed') addFiles(e, files)
-    const sub = rec(e.acp?.subRun)
+    const sub = rec(subRunOf(e))
     if (sub) {
       const outcome = str(sub.outcome)
       const agent = str(sub.agent)

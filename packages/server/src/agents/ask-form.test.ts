@@ -1,5 +1,5 @@
 /* ---------- 提问表单：归一 / 校验 / 摘要（纯函数）----------
- * 形状取自各家真实表单（claude-agent-acp / codex-acp / opencode v2 / omp），见 ask-form.ts 文件头 */
+ * 形状取自各家真实表单，见 ask-form.ts 文件头 */
 import { expect, test } from 'vitest'
 import { askSummary, checkAskAnswer, companionOf, normalizeAskForm } from './ask-form.js'
 import type { AskForm } from './types.js'

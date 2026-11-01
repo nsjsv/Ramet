@@ -271,8 +271,8 @@ export function machinesRoutes(
           code: created.code,
           expiresAt: created.expiresAt.toISOString(),
           confirmExpiresAt: created.confirmExpiresAt.toISOString(),
-          // 安装包的命令名（scripts/pack-connector.mjs）；源码里跑的人换成 npm run connector -w packages/server --
-          command: `ramet-connector grant confirm ${created.code}`,
+          // npm 包的命令名（scripts/pack-connector.mjs）；源码里跑的人换成 npm run connector -w packages/server --
+          command: `ramet grant confirm ${created.code}`,
         },
         201,
       )

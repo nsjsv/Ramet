@@ -112,6 +112,12 @@ export function findTextInBlock(block: PMNode, blockPos: number, text: string, n
   return at === undefined ? null : rangeAt(parts, at, at + text.length)
 }
 
+/** 锚定的那段字在文档里的区间：块不在或块里找不到这段字都返回 null（评论高亮的文字兜底也用它） */
+export function textAnchorRange(doc: PMNode, anchor: TextAnchor): { from: number; to: number } | null {
+  const found = findBlock(doc, anchor.blockId)
+  return found ? findTextInBlock(found.node, found.pos, anchor.text, anchor.n) : null
+}
+
 /** 链接：同源绝对地址（跨端粘贴也能打开）；第一处不带 n */
 export function textLinkHref(pageId: string, a: TextAnchor): string {
   return `${location.origin}/page/${pageId}?block=${a.blockId}&text=${encodeURIComponent(a.text)}${a.n ? `&n=${a.n}` : ''}`
@@ -151,9 +157,8 @@ export const textFlash = $prose(
 /** 定位到块里的那段字：高亮并滚到视口中间。块不在返回 false（调用方等下一次时机再试）；
  *  块在、字找不到退回整块闪烁，照样算定位成功 */
 export function focusTextAnchor(view: EditorView, blockId: string, anchor: { text: string; n: number }): boolean {
-  const found = findBlock(view.state.doc, blockId)
-  if (!found) return false
-  const range = findTextInBlock(found.node, found.pos, anchor.text, anchor.n)
+  if (!findBlock(view.state.doc, blockId)) return false
+  const range = textAnchorRange(view.state.doc, { blockId, ...anchor })
   if (!range) return focusBlockById(view, blockId)
   view.dispatch(view.state.tr.setMeta(flashKey, range))
   const mark = view.dom.querySelector('.text-link-flash')

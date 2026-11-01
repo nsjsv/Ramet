@@ -1,13 +1,13 @@
-// ---------- 提问（ACP elicitation/create，form 模式）----------
-// 执行端（AcpAgent：本机与 connector 同一份）把 agent 发来的 requestedSchema 归一成 AskForm，挂成一条带 form 的审批；
+// ---------- 提问（MCP elicitation 的 requestedSchema，form 模式）----------
+// 驱动把提问归一成 AskForm，挂成一条带 form 的审批：MCP elicitation 直接交 requestedSchema；claude 的 AskUserQuestion、
+// codex 的 requestUserInput 先拼成同样的 requestedSchema 再走这里（限长、去重、密码类同一套）。
 // 中心在 POST /permission 时按同一份 AskForm 校验答案（checkAskAnswer），并生成「问题 → 答：…」（askSummary，
 // 写进那一步工具调用的 activity 与审计）。
-// 只认 ACP 标准，不按 agent 分支。各家的实际形状（全落在下面几类字段里）：
+// 只认 JSON Schema 的这几类字段，不按 agent 分支。见过的形状（全落在下面几类字段里）：
 //   claude   AskUserQuestion：question_<n>（oneOf 单选 / array+anyOf 多选）+ question_<n>_custom 自由文本，带 toolCallId
 //   codex    request_user_input：必填 string（oneOf，含「None of the above」）+ <id>_note；_meta.codex.isSecret = 密码类
-//   opencode question：oneOf 单选 / 多选 + <key>_custom，带 required 与 toolCallId
-//   omp      ask：q<n> + q<n>__other；select / confirm / input / editor 包成必填的 { value }（无标题 enum / boolean / string）；
-//            计划审批与工具审批也是单字段的 select
+//   其它     oneOf 单选 / 多选 + <key>_custom，带 required 与 toolCallId；q<n> + q<n>__other；
+//            单字段的 { value }（无标题 enum / boolean / string）
 // 「补充文本」配对（companionOf）：紧跟在选择题 K 后面、键名以 `K_` 开头的文本字段（_custom / _note / __other）。前端同口径一份。
 import type { AskContent, AskField, AskForm, AskOption, AskValue, PermissionOption } from './types.js'
 
@@ -94,7 +94,7 @@ function normalizeField(key: string, raw: unknown): AskField | null {
   }
 }
 
-/** ACP CreateElicitationRequest（form 模式）→ AskForm。认不出的字段：可选的丢掉，必填的整条不认（null → 执行端回 cancel） */
+/** elicitation 请求（form 模式，带 requestedSchema）→ AskForm。认不出的字段：可选的丢掉，必填的整条不认（null → 驱动回 cancel） */
 export function normalizeAskForm(params: Rec): AskForm | null {
   const schema = obj(params.requestedSchema) ?? {}
   const props = obj(schema.properties) ?? {}

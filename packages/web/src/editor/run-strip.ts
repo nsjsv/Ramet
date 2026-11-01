@@ -2,7 +2,7 @@
 // 一个实例 = 一条正在跑的回复的「过程」部分，摆在回复块的抬头之下、正文之上（正文在 live-reply.ts）。
 //   - 胶囊：定宽；转圈 · 现在在做什么（key 变了才上下滑）· 步数与用时 · 展开箭头 · 停止。
 //     停止钮是胶囊里的独立按钮，不在 role=button 的区域里，文字再长也不移动它，键盘激活不会触发展开
-//   - 计划卡：agent 报了计划清单（ACP plan）才有，紧跟胶囊（plan-card.ts）
+//   - 计划卡：agent 报了计划清单才有，紧跟胶囊（plan-card.ts）
 //   - 带队（/带队）：这一轮有 team 原语才有，紧跟计划卡（team/team-mount.tsx 挂一个 React root）：计划轮是可编辑的计划卡，
 //     执行轮是任务列表 + 实时甘特；组员干活时组长还没开口，胶囊上显示组员的进展
 //   - 审批卡：钉在计划卡（没有计划则胶囊）下、托盘上，不进滚动区、不倒计时；只展示队首，摘除的唯一信号是
@@ -75,6 +75,8 @@ export function createRunStrip(opts: {
   canAnswer: boolean
   /** @ 点名链停在这一家后还剩几个（失败时每次同步读一次；0 = 不出「继续剩下的」） */
   rest: () => number
+  /** 失败时「重试」走续跑还是重新生成（点击时按当下文档现算，见 reply-target.ts 的 resumableReply） */
+  resume: () => boolean
 }): RunStrip {
   const strip = el('div', 'run-strip')
   strip.contentEditable = 'false'
@@ -107,7 +109,7 @@ export function createRunStrip(opts: {
         setAgentRunError(err instanceof Error ? `${COPY.run.stopFailed}：${err.message}` : COPY.run.stopFailed)
       })
     })
-    pill.append(stop, buildRetryButton(opts.pageId, opts.replyId)) // 重试只在 is-failed 时显示（CSS）
+    pill.append(stop, buildRetryButton(opts.pageId, opts.replyId, opts.resume)) // 重试只在 is-failed 时显示（CSS）
     pill.append(continueBtn)
   }
   const plan = createPlanCard({ open: true })

@@ -642,7 +642,7 @@ describe.skipIf(!realPty)('真 connector + 真 pty：全链路与归属', () => 
     expect(res.status).toBe(409)
     expect(await res.json()).toMatchObject({ error: 'terminal unsupported' })
     const head = (await (await fetch(`${base}/api/pages/${page.id}/project?agent=${encodeURIComponent(w.agent)}`, { headers: { cookie } })).json()) as Wire
-    expect(head.caps).toEqual(['project', 'preview', 'quick', 'write', 'prompt-image'])
+    expect(head.caps).toEqual(['project', 'preview', 'quick', 'write', 'prompt-image', 'session'])
     expect(connectorLogs(connectorId).some((l) => l.includes('node-pty 没装上'))).toBe(true)
   })
 })

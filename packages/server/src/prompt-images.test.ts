@@ -1,17 +1,10 @@
 // ---------- 截图直接给模型看（真库 + 假 agent） ----------
-// 用户消息里的本站图片作为图片块跟在文本后面发给 agent，agent 在 initialize 里声明了 promptCapabilities.image 才发。
-// 假 agent 的「报图片」回显收到的图片块数，FAKE_IMAGE=1 让它声明能收图（子进程继承本进程的环境变量）。
+// 用户消息里的本站图片作为图片块跟在文本后面发给 agent（驱动按自家协议交给 CLI）。
+// 假 CLI 的「报图片」回显收到的图片块数。
 import sharp from 'sharp'
-import { afterAll, beforeAll, expect, test } from 'vitest'
+import { expect, test } from 'vitest'
 import * as Y from 'yjs'
 import { base, connectDoc, continuePage, docText, setupPage, SSECollector, userMessage, waitFor } from './agents/test-kit.js'
-
-beforeAll(() => {
-  process.env.FAKE_IMAGE = '1'
-})
-afterAll(() => {
-  delete process.env.FAKE_IMAGE
-})
 
 /** 1×1 PNG，每次颜色不同：上传按内容去重，同样的字节会拿回同一个 id */
 let shade = 0

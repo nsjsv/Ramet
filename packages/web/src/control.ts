@@ -61,7 +61,7 @@ export function subscribePreviews(cb: (pageId: string | null) => void): () => vo
   }
 }
 
-/** 旁听：只在别人（App）开着连接时收事件，自己不建连接。发版检查用它接 'sync'——部署会重建 web 容器，
+/** 旁听：只在别人（App）开着连接时收事件，自己不建连接。发版检查用它接 'sync'——部署重启 server 时
  * 连接必断一次再重连；登录页 / 公开页不该为它多开一条 ws */
 export function listenControl(cb: (ev: ControlEvent) => void): () => void {
   bystanders.add(cb)

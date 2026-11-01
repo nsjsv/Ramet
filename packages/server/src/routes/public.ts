@@ -8,6 +8,7 @@ import { bookmarkUrl, type LinkPreview } from '../link-preview.js'
 import { pageCoverOf, type CoverColumns } from '../page-cover.js'
 import { linkPreviewCache } from './link-preview.js'
 import { rowIcon, type PageIcon } from '../page-icon.js'
+import { publicThreads } from '../comments/store.js'
 
 // 公开端点:匿名可读已发布子树的元数据与内容,登录用户可克隆进自己的个人空间。
 // 注意:这里不挂全局 requireAuth —— 两个 GET 就是设计给匿名用的;只有 clone 单路由挂鉴权。
@@ -132,6 +133,13 @@ export function publicRoutes(
       cover: layout ? pageCoverOf(layout) : null,
       ...(run ? { run: run.record, parent } : {}),
     })
+  })
+
+  // 公开页的评论：只读、只给未解决的串；作者只有名字，正文里的 @ 记号降成纯文字（user id 不出公开接口）
+  app.get('/api/public/pages/:id/comments', async (c) => {
+    const id = c.req.param('id')
+    if (!(await isPublic(id))) return c.json({ error: 'page not found' }, 404)
+    return c.json({ threads: await publicThreads(pool, id) })
   })
 
   // 公开页里书签卡 / 网页提及的元信息:匿名可调,所以只抓「这个公开页正文里真有的那个地址」,

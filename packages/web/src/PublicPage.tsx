@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, matchPath, useLocation, useNavigate } from 'react-router-dom'
 import * as Y from 'yjs'
 import { Editor, rootCtx, editorViewOptionsCtx, editorViewCtx } from '@milkdown/kit/core'
@@ -19,6 +19,10 @@ import { mentionUpgrade } from './editor/mention-upgrade'
 import { pageMentionSchema } from './editor/page-mention'
 import { blockIdSchemas, commonmarkPreset, focusBlockById } from './editor/block-id'
 import { focusTextAnchor, textFlash, textParam } from './editor/text-anchor'
+import { commentHighlights } from './comments/comment-anchor'
+import CommentsHost from './comments/CommentsHost'
+import PageDiscussion from './comments/PageDiscussion'
+import type { CommentCtx } from './comments/CommentThread'
 import { runStepSchema } from './editor/run-step'
 import { runStepView } from './editor/run-step-view'
 import { setRunInfo } from './editor/run-store'
@@ -99,6 +103,14 @@ export default function PublicPage() {
   const [kind, setKind] = useState<PublicPageTree['kind'] | null>(null)
   const [cloning, setCloning] = useState(false)
   const [cloneError, setCloneError] = useState<string | null>(null)
+  // 评论（只读）：高亮 / 浮层要拿只读实例的视图，建好时 tick 一次让评论宿主重画高亮
+  const viewRef = useRef<EditorView | undefined>(undefined)
+  const [viewTick, setViewTick] = useState(0)
+  const getView = useCallback(() => (viewRef.current?.isDestroyed ? undefined : viewRef.current), [])
+  const commentCtx = useMemo<CommentCtx>(
+    () => ({ readOnly: true, spaceId: null, canModerate: false, getSchema: () => undefined, tick: viewTick }),
+    [viewTick],
+  )
 
   useEffect(() => {
     let cancelled = false
@@ -248,6 +260,7 @@ export default function PublicPage() {
           .use(blockRefSchema) // 块提及 chip（行内）：编辑端文档可能含它，点击跳 /p/ 定位
           .use(blockSyncSchema) // 同步块：公开页只渲染 toDOM 静态占位（不挂 nodeView/不连源页）
           .use(textFlash) // 文字定位链接的高亮（同 Editor）
+          .use(commentHighlights) // 划词评论的高亮（同 Editor）
           .use(imageView) // 图片加载占位（同 Editor）
           .use(lightboxPlugin) // 点图片全屏看原图（只读页无上传，不挂 uploadPlugin）
           .use(ySync)
@@ -258,6 +271,10 @@ export default function PublicPage() {
               return
             }
             instance = created
+            created.action((ctx) => {
+              viewRef.current = ctx.get(editorViewCtx)
+            })
+            setViewTick((t) => t + 1)
             // ?block= 直访定位：只读实例建好后滚到目标块并闪烁（文档里的块 id 是编辑端已持久化的，
             // 无补 id 插件；找不到静默放弃）
             if (!blockParam) return
@@ -279,6 +296,7 @@ export default function PublicPage() {
 
     return () => {
       cancelled = true
+      viewRef.current = undefined
       void instance?.destroy()
       doc.destroy()
       // 容器是复用的 React 节点：清掉 PM 留下的内容再重建
@@ -339,10 +357,12 @@ export default function PublicPage() {
             </h1>
             {run && <RunHead detail={run} replyHref={(parentId, replyId) => `/p/${parentId}${replyId ? `?block=${replyId}` : ''}`} />}
             <div className="public-body" ref={hostRef} />
+            {kind === 'doc' && id && <PageDiscussion pageId={id} ctx={commentCtx} />}
             {run && <RunFoot detail={run} />}
           </>
         )}
       </main>
+      {kind === 'doc' && id && <CommentsHost pageId={id} mode="public" getView={getView} ctx={commentCtx} />}
     </div>
   )
 }

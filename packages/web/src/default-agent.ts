@@ -1,4 +1,5 @@
 import { useEffect, useSyncExternalStore } from 'react'
+import { toolOf } from '@ramet/shared/reply-stats'
 import { api, type AgentInfo } from './api'
 import { subscribeControl } from './control'
 
@@ -45,11 +46,19 @@ export function useDefaultAgent(): string {
 
 /** 这条消息发给谁：按偏好顺序取第一个仍在目录里的 id，全都不在 → 目录第一个，目录空 → ''（没有可用 agent）。
  *  不给偏好 = 只看全局默认。页面上的解析（消息指定 → 本页记住的 → 全局默认）收在 agent-bar.tsx 的 pageAgent */
-export function pickAgent(list: AgentInfo[], ...prefs: string[]): string {
+export function pickAgent(list: readonly AgentInfo[], ...prefs: string[]): string {
+  // 用不了的（CLI 版本太旧等）不当回落目标：发给它只会失败
+  const usable = list.filter((a) => !a.unavailable)
   for (const id of prefs.length > 0 ? prefs : [getDefaultAgent()]) {
-    if (id && list.some((a) => a.id === id)) return id
+    if (id && usable.some((a) => a.id === id)) return id
   }
-  return list[0]?.id ?? ''
+  return usable[0]?.id ?? ''
+}
+
+/** 一页只用一种工具（服务端按第一块回复定，经 SSE 的 tool_lock 给）：锁定后只留这个工具在各台机器上的 agent，
+ *  别的工具不出现；lock 为空（还没有回复）原样返回。工具名的判定与服务端拦截同一个 toolOf */
+export function agentsForPage<T extends { id: string }>(agents: readonly T[], lock: string): readonly T[] {
+  return lock ? agents.filter((a) => toolOf(a.id) === lock) : agents
 }
 
 /* ---------- 真实 agent 列表（GET /api/agents）----------

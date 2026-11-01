@@ -10,7 +10,7 @@ import { infoHtml, toolDetailHtml } from './run-detail'
 import { advToggleHtml, stepViewHtml } from './run-view'
 import { detailKey, entryIcon, entryObject, entryVerb, escapeHtml, fmtDuration } from './run-format'
 import { entryKeys, isToggleTarget } from './run-rows'
-import { isRunningCommand, stepTerminalId } from './step-terminal'
+import { isRunningCommand, isSubagentStep, stepTerminalId } from './step-terminal'
 
 /** 思考 / 说明在行里只留一行：折叠空白后取尾（实时）或头（已结束） */
 const LINE_MAX = 160
@@ -30,7 +30,7 @@ export interface Tray {
 }
 
 export interface TrayOptions {
-  /** 给了才在 ACP 终端里还在跑的命令那一行摆「停止这条命令」（没有页面写权限的看不到） */
+  /** 给了才在还在跑、能停的那一行（子代理 / 老 connector 的终端命令）摆停止按钮（没有页面写权限的看不到） */
   onKillCommand?: (terminalId: string) => void
 }
 
@@ -77,8 +77,9 @@ export function createTray(opts: TrayOptions = {}): Tray {
     const note = e.k === 'tool' && e.note ? `<div class="trow-note">${escapeHtml(e.note)}</div>` : ''
     const advPart = e.k === 'tool' ? advToggleHtml(advOpen) + (advOpen ? `<div class="run-card-adv">${toolDetailHtml(e)}</div>` : '') : ''
     const detail = open ? `<div class="run-card">${stepViewHtml(e, e.k, text)}${advPart}</div>` : ''
-    // 停止这条命令：只在 ACP 终端里还在跑的命令那一行，摆在行尾状态格里（.t 会溢出省略，按钮不能放进去）；点它不展开行
-    const kill = killable ? `<button type="button" class="trow-kill" data-act="kill-cmd">${escapeHtml(COPY.run.stopCommand)}</button>` : ''
+    // 停止按钮：只在还在跑、能停的那一行，摆在行尾状态格里（.t 会溢出省略，按钮不能放进去）；点它不展开行
+    const killLabel = e.k === 'tool' && isSubagentStep(e) ? COPY.run.stopSubagent : COPY.run.stopCommand
+    const kill = killable ? `<button type="button" class="trow-kill" data-act="kill-cmd">${escapeHtml(killLabel)}</button>` : ''
     row.innerHTML =
       `<span class="k">${entryIcon(e)}</span>` +
       `<span class="t">${escapeHtml(title)}${note}</span>` +

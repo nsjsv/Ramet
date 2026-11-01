@@ -19,9 +19,8 @@ import { Decoration, DecorationSet } from '@milkdown/kit/prose/view'
 import { useEffect } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { COPY } from '../copy'
-import { useAgents } from '../default-agent'
 import { Icon } from '../icons'
-import { setAgentRunError, useAgentEvents, usePageAgent } from './agent-bar'
+import { setAgentRunError, useAgentEvents, usePageAgent, usePageAgents } from './agent-bar'
 import { api } from '../api'
 import { selfId } from '../people'
 import { askAgent, writeSessionOption } from './agent-controls'
@@ -103,6 +102,15 @@ function isBlank(node: PMNode): boolean {
   return node.textContent.trim().length === 0
 }
 
+function hasAgentMention(node: PMNode): boolean {
+  let hit = false
+  node.descendants((n) => {
+    if (n.type.name === 'agent_mention') hit = true
+    return !hit
+  })
+  return hit
+}
+
 function applyMessageDom(dom: HTMLElement, node: PMNode): void {
   dom.setAttribute('data-agent', attrText(node, 'agent'))
   dom.setAttribute('data-cwd', attrText(node, 'cwd'))
@@ -152,14 +160,17 @@ interface MessageHeadProps {
   cfg: MessageConfig
   /** 正文是空的：发送钮不可点 */
   blank: boolean
+  /** 正文里 @ 了 agent：显式 @ 点名不受本页的工具锁定，锁定的工具都不在线也能发 */
+  mentions: boolean
 }
 
 const QUEUED_LABEL = '排队中 · 取消'
 const QUEUED_TIP = '这一轮结束后继续发给 agent；点一下取消排队'
 
 /** 署名行的文档宿主：attrs → props，props 的改动 → attrs */
-function MessageHead({ pageId, view, blockId, cfg, blank }: MessageHeadProps) {
-  const { agents, loaded } = useAgents()
+function MessageHead({ pageId, view, blockId, cfg, blank, mentions }: MessageHeadProps) {
+  // 目录按本页锁定的工具过滤：锁定的工具没有在线的时，列表为空、不去修 attrs（修成 '' 会丢掉用户的选择）
+  const { agents, loaded, lock } = usePageAgents(pageId)
   // 解析规则与别处同一所有者（pageAgent）：消息 attrs 指定且仍在目录里才用它，否则依次回落本页的来源、
   // 全局默认、目录第一个。不要直接用 getDefaultAgent()，那会把「已被撤销的 connector agent」这类失效 id
   // 当成活值，界面卡死在它上面并且反复 prepare
@@ -222,7 +233,8 @@ function MessageHead({ pageId, view, blockId, cfg, blank }: MessageHeadProps) {
           className="msg-send"
           aria-label={COPY.chips.send}
           title={COPY.chips.send}
-          disabled={blank}
+          // 锁定的工具一台在线的都没有、又没 @ 别的 agent：发出去也只会被拒，提示在 chip 上
+          disabled={blank || (lock !== '' && !agent && !mentions)}
           // 别把编辑器焦点抢走；发送本身走与「末尾空行回车」同一个 sendLast
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => sendLast(view, pageId)}
@@ -288,8 +300,8 @@ export function messageChipsView(pageId: string, acts: ((node: PMNode) => HTMLEl
                   const p = posOfMessage(view, id)
                   const current = p == null ? null : view.state.doc.nodeAt(p)
                   const cfg = current && current.type.name === 'user_message' ? messageConfigOf(current) : messageConfigOf(node)
-                  const blank = current ? isBlank(current) : isBlank(node)
-                  root.render(<MessageHead pageId={pageId} view={view} blockId={blockId} cfg={cfg} blank={blank} />)
+                  const msg = current ?? node
+                  root.render(<MessageHead pageId={pageId} view={view} blockId={blockId} cfg={cfg} blank={isBlank(msg)} mentions={hasAgentMention(msg)} />)
                 }
                 render()
                 if (id) chipRefreshers.set(id, render)

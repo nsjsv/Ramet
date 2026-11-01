@@ -36,8 +36,8 @@ export type QueueHost = {
   start(pageId: string, user: { id: string; role: string }, agent: string): Promise<'ok' | 'busy' | { reason: string }>
   /** 这个人此刻还能写这一页吗 */
   writable(pageId: string, user: { id: string; role: string }): Promise<boolean>
-  /** 这个人此刻能用这个 agent 吗（机器使用权 / 在线）：不能 = 原因。写消息之前先判，免得写进去了才发现跑不了 */
-  usable(user: { id: string; role: string }, agent: string): Promise<string | null>
+  /** 这个人此刻能用这个 agent 吗（机器使用权 / 在线 / 这一页锁定的工具）：不能 = 原因。写消息之前先判，免得写进去了才发现跑不了 */
+  usable(pageId: string, user: { id: string; role: string }, agent: string): Promise<string | null>
   broadcast(pageId: string, ev: AgentEvent): void
 }
 
@@ -164,7 +164,7 @@ export class SendQueue {
           await this.drop(pageId, row, '排队的人已经不能编辑这一页了')
           continue
         }
-        const unusable = await this.host.usable(user, row.agent)
+        const unusable = await this.host.usable(pageId, user, row.agent)
         if (unusable) {
           await this.drop(pageId, row, unusable)
           continue

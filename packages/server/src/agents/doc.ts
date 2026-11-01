@@ -9,7 +9,7 @@
 import { randomUUID } from 'node:crypto'
 import * as Y from 'yjs'
 import { parseBlocks } from '@ramet/shared/markdown-blocks'
-import { decodeStats, encodeStats } from '@ramet/shared/reply-stats'
+import { decodeStats, encodeStats, toolOf } from '@ramet/shared/reply-stats'
 import { encodePlan, encodeTeam, mentionChainOf, stepVerb, type ChainBlock, type MentionChain, type PlanEntry, type TeamState } from '@ramet/shared/run-model'
 import { textOf, type AtomText } from '../updates.js'
 import type { PromptEnv } from './prompt-env.js'
@@ -154,42 +154,87 @@ export function blockMarkdown(el: Y.XmlElement, atoms?: AtomText): string {
  *  把顶层块摊成 ChainBlock，用户消息里 @ 到的 agent 按出现顺序收集，回复块只数个数。 */
 export function mentionChain(fragment: Y.XmlFragment): MentionChain | null {
   const blocks: ChainBlock[] = []
-  const collect = (el: Y.XmlFragment | Y.XmlElement, into: string[]): void =>
-    el.forEach((child) => {
-      if (!(child instanceof Y.XmlElement)) return
-      if (child.nodeName === 'agent_mention') {
-        const id: unknown = child.getAttribute('agentId')
-        if (typeof id === 'string' && id) into.push(id)
-      } else collect(child, into)
-    })
   fragment.forEach((node) => {
     if (!(node instanceof Y.XmlElement)) return
-    if (node.nodeName === 'user_message') {
-      const mentions: string[] = []
-      collect(node, mentions)
-      blocks.push({ kind: 'user_message', mentions })
-    } else blocks.push({ kind: node.nodeName === 'agent_reply' ? 'agent_reply' : 'other' })
+    if (node.nodeName === 'user_message') blocks.push({ kind: 'user_message', mentions: agentMentions(node) })
+    else blocks.push({ kind: node.nodeName === 'agent_reply' ? 'agent_reply' : 'other' })
   })
   return mentionChainOf(blocks)
 }
 
-/** end = 只序列化前 end 个顶层块（缺省整页）。「视图」不变量靠它：每一轮只看它自己的视图。
- *  env = 这一轮实际看到的引用解析与各回复的过程摘要（prompt-env.ts 的 resolvePromptEnv）；不传则引用按默认口径
- *  （快照文字）、回复不带过程摘要。有过程摘要时，摘要行并进回复的引用行（回复正文之前）。 */
-export function serializeDoc(fragment: Y.XmlFragment, end: number = fragment.length, env?: PromptEnv): string {
-  const out: string[] = []
+/** 块里 @ 到的 agent（任意深度的 agent_mention），按出现顺序 */
+function agentMentions(el: Y.XmlElement, into: string[] = []): string[] {
+  el.forEach((child) => {
+    if (!(child instanceof Y.XmlElement)) return
+    if (child.nodeName === 'agent_mention') {
+      const id: unknown = child.getAttribute('agentId')
+      if (typeof id === 'string' && id) into.push(id)
+    } else agentMentions(child, into)
+  })
+  return into
+}
+
+/** 这块回复是不是被显式 @ 点名出来的：它往前最近一条用户消息 @ 了这块回复自己的 agent。
+ *  一页一种工具只锁「接着对话的那个」，@ 出来的别的工具的回复可以重新生成；混用老页面里后来换了工具的回复不算 */
+export function mentionedReply(fragment: Y.XmlFragment, replyId: string): boolean {
+  let message: Y.XmlElement | null = null
+  let hit = false
+  let done = false
+  fragment.forEach((node) => {
+    if (done || !(node instanceof Y.XmlElement)) return
+    if (node.nodeName === 'user_message') message = node
+    else if (node.nodeName === 'agent_reply' && node.getAttribute('id') === replyId) {
+      done = true
+      const agent: unknown = node.getAttribute('agent')
+      hit = message !== null && typeof agent === 'string' && agentMentions(message).includes(agent)
+    }
+  })
+  return hit
+}
+
+/** 这一页锁定的工具：第一块顶层回复的 `agent` 属性对应的工具名（toolOf）；还没有回复 = ''（不锁）。
+ *  混用过多个工具的老页面同样按第一块回复算：锁定只看文档本身，没有另一份状态 */
+export function lockedTool(fragment: Y.XmlFragment): string {
+  let tool: string | null = null
+  fragment.forEach((node) => {
+    if (tool !== null || !(node instanceof Y.XmlElement) || node.nodeName !== 'agent_reply') return
+    const agent: unknown = node.getAttribute('agent')
+    tool = typeof agent === 'string' ? toolOf(agent) : ''
+  })
+  return tool ?? ''
+}
+
+/** 第 from..to-1 个顶层块各自的提示词文字（el = 块节点；顶层裸文字为 null）。整页序列化与原生会话的补发（catch-up.ts，
+ *  要逐块加署名）共用这一份逐块渲染：同一块在两处必须是同一段文字。有过程摘要时，摘要行并进回复的引用行（回复正文之前） */
+export function serializeBlocks(
+  fragment: Y.XmlFragment,
+  from: number,
+  to: number,
+  env?: PromptEnv,
+): Array<{ el: Y.XmlElement | null; text: string }> {
+  const out: Array<{ el: Y.XmlElement | null; text: string }> = []
   fragment.forEach((c, i) => {
-    if (i >= end) return
+    if (i < from || i >= to) return
     if (c instanceof Y.XmlText) {
-      out.push(c.toString())
+      out.push({ el: null, text: c.toString() })
       return
     }
     const el = c as Y.XmlElement
     const text = blockMarkdown(el, env?.atoms)
     const process = el.nodeName === 'agent_reply' ? env?.process(el) : undefined
-    out.push(process ? `${process.map((line) => `> ${line}`).join('\n')}\n${text}` : text)
+    out.push({ el, text: process ? `${process.map((line) => `> ${line}`).join('\n')}\n${text}` : text })
   })
-  return out.filter((t) => t.trim().length > 0).join('\n\n')
+  return out
+}
+
+/** end = 只序列化前 end 个顶层块（缺省整页）。「视图」不变量靠它：每一轮只看它自己的视图。
+ *  env = 这一轮实际看到的引用解析与各回复的过程摘要（prompt-env.ts 的 resolvePromptEnv）；不传则引用按默认口径
+ *  （快照文字）、回复不带过程摘要。 */
+export function serializeDoc(fragment: Y.XmlFragment, end: number = fragment.length, env?: PromptEnv): string {
+  return serializeBlocks(fragment, 0, end, env)
+    .map((b) => b.text)
+    .filter((t) => t.trim().length > 0)
+    .join('\n\n')
 }
 
 /* ---------- 消息级调用配置 ----------
@@ -278,6 +323,38 @@ export function redoTarget(fragment: Y.XmlFragment, replyId: string): RedoTarget
   return { ok: true, ...hit, message }
 }
 
+export type ResumeTarget =
+  | {
+      ok: true
+      index: number
+      agent: string
+      message: MessageConfig
+      el: Y.XmlElement
+      /** 中断的方式：失败 / 手动停止（续跑说明按它措辞） */
+      outcome: 'error' | 'cancelled'
+      /** 回复块的 run 属性（过程页 id）；没有 = '' */
+      run: string
+    }
+  | { ok: false; reason: 'no-reply' | 'no-message' | 'not-last' | 'not-interrupted' | 'team' }
+
+/** 续跑的落点：在 redoTarget 的口径上再要求它是页面上最后一块回复（之后没有用户消息 / 回复，别的块不算）、
+ *  以失败或停止收尾、不是带队的一轮。后面已经有新消息的回复只能重新生成：续出来的内容会接在后来的对话之前 */
+export function resumeTarget(fragment: Y.XmlFragment, replyId: string): ResumeTarget {
+  const redo = redoTarget(fragment, replyId)
+  if (!redo.ok) return redo
+  let later = false
+  fragment.forEach((c, i) => {
+    if (i > redo.index && c instanceof Y.XmlElement && (c.nodeName === 'user_message' || c.nodeName === 'agent_reply')) later = true
+  })
+  if (later) return { ok: false, reason: 'not-last' }
+  const el = fragment.get(redo.index) as Y.XmlElement
+  if (el.getAttribute('team')) return { ok: false, reason: 'team' }
+  const outcome = decodeStats(el.getAttribute('stats')).o
+  if (outcome !== 'error' && outcome !== 'cancelled') return { ok: false, reason: 'not-interrupted' }
+  const run: unknown = el.getAttribute('run')
+  return { ...redo, el, outcome, run: typeof run === 'string' ? run : '' }
+}
+
 // 取最后一个用户消息块的文本：与 stripLastUserMessage 同一个边界（最后一个以 '>>' 开头的顶层块），
 // 块内每一行（含段间空行 '>> '）都带前缀，连续的 '>>' 行都算这条消息；每行只剥 blockMarkdown 加的那一层
 export function lastUserMessage(doc: string): string | null {
@@ -292,8 +369,8 @@ export function lastUserMessage(doc: string): string | null {
   return lines.join('\n')
 }
 
-// 去掉末尾的用户消息块(本轮要发的新输入):其余部分与 lastSyncedHash 比对,
-// 相等 → 走增量(只有新消息是新增);不等 → 编辑过,全文重放。
+// 去掉末尾的用户消息块(本轮要发的新输入):只给老会话记录(只有 lastSyncedHash、没有 seen)比对,
+// 相等 → 走增量(只有新消息是新增);不等 → 全文重放一次。
 // 顶层块以 '\n\n' 分隔,用户消息块以 '>> ' 开头(内层续行也以 '>>' 打头但块内只有 '\n')
 export function stripLastUserMessage(doc: string): string {
   const idx = doc.lastIndexOf('\n\n>>')
@@ -357,8 +434,7 @@ export class ReplyWriter {
 
   /** 收尾:内容换成 markdown 的块结构,同时写 stats(与过程页 id)、agent 最后一份计划清单(`plan` 属性,
    *  JSON 串;没有计划 = 不留这个属性)和带队的团队计划(`team` 属性,同样 JSON 串)。一个事务:
-   *  前端看到 stats 变成终态时,真内容必然已经就位。调用点在 turn.ts runTurn 的统一 finally,
-   *  且在算 lastSyncedHash 之前(hash 要落在这份最终结构上;plan 属性不进提示词,hash 不受它影响) */
+   *  前端看到 stats 变成终态时,真内容必然已经就位。调用点在 run-finalize.ts 的统一收尾 */
   finalize(markdown: string, stats: string, runPageId: string | null, plan?: readonly PlanEntry[], team?: TeamState): void {
     const { blocks } = parseBlocks(markdown)
     const encodedPlan = encodePlan(plan)
@@ -377,6 +453,12 @@ export class ReplyWriter {
     })
   }
 
+  /** 续跑：只把 stats 改回 `o:run`，正文与 `run` / `plan` 属性都留着（`run` 留着，过程页不会被当成没人引用回收）。
+   *  收尾照常 finalize 写回同一块 */
+  reopen(): void {
+    this.reply.setAttribute('stats', encodeStats({ o: 'run' }))
+  }
+
   /** 原地复位（重新生成）：清空子块、stats 回到 `o:run`、去掉 `run` / `plan` / `team` 属性；块 id / agent 不变 ——
    *  引用、收藏跟着新回答走。之后照常流式与收尾（finalize）。一个事务：协作者看到的是一步切换 */
   reset(): void {
@@ -388,21 +470,6 @@ export class ReplyWriter {
       this.reply.removeAttribute('plan')
       this.reply.removeAttribute('team')
     })
-  }
-
-  /** 这一块的「视图」：页首到它自己（含），即本轮收尾时 agent 看过的全部内容，收尾 hash 按它算（env = 本轮开头解析的环境，新回复的过程摘要已补进）。
-   *  它之后别人追加的内容不属于这一轮，留给下一轮增量（起始 hash 与收尾 hash 必须同一视图） */
-  viewText(env: PromptEnv, newProcess?: string[]): string {
-    const frag = this.doc.getXmlFragment('prosemirror')
-    let end = frag.length
-    frag.forEach((node, i) => {
-      if (node === this.reply) end = i + 1
-    })
-    // 本轮新回复的过程页是刚归档的，开头的环境里没有它：摘要由调用方（收尾）从刚建好的文档算出，在这里补给它。
-    // 无档（tool-profile.ts）不带过程摘要，新回复也不补，与下一轮开头的口径一致
-    const fresh = env.tools === 'none' ? undefined : newProcess
-    const seen: PromptEnv = { ...env, process: (el) => (el === this.reply ? fresh : env.process(el)) }
-    return serializeDoc(frag, end, seen)
   }
 }
 

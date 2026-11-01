@@ -28,7 +28,7 @@ async function archivedRun(runId: string): Promise<{ agent: string; commands: Ag
 
 /* ---------- 终端分页下方的「agent 跑的命令」：只读，与人的终端并列 ----------
  * 每条显示命令行、agent、状态 / 退出码，点开看实时输出。输出复用步骤展开的同一个渲染器（run-view，内容全经转义）。
- * ACP 终端里还在跑的命令可以单独停止（只停这条，不停整轮）。 */
+ * 还在跑、握着句柄的命令可以单独停止（只停这条，不停整轮）。 */
 export default function AgentCommands({
   pageId,
   agent,

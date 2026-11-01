@@ -1,8 +1,8 @@
 // ---------- 会话事件（connector 链路）----------
-// 中心与 connector 之间同样守同一组不变量：命令 / 审批归会话（connector 上的 AcpAgent 是事实源，常驻监听发
+// 中心与 connector 之间同样守同一组不变量：命令 / 审批归会话（connector 上的驱动是事实源，常驻监听发
 // `session` 帧，中心的 RemoteAgent 是副本）；审批没有超时，只在有人答 / 停止 / 进程退出 / 终态断开时结束，
 // 离线答复 409 且审批留着；connector 的闲置回收和中心是同一个 busy 定义；机器主人 = 配对人。
-// 前半是真的进程内 connector（配对、常驻、跑假 agent），后半是「脚本化 connector」：直接说协议，
+// 前半是真的进程内 connector（配对、常驻、跑假 codex `fake` / 假 claude `claude`），后半是「脚本化 connector」：直接说协议，
 // 断线 / 重连 / 快照内容完全由测试决定，真进程给不出确定的离线窗口。
 // 机器只归接入人：别人要用得先有授权（machine_grants）；被授权的人不是主人，进不了「跳过全部确认」。
 import { afterEach, expect, test, vi } from 'vitest'
@@ -57,16 +57,18 @@ test('命令（connector）：选 agent 不发消息就有，各 agent 一份互
 
   await prepareAndWait(sse, pageId, cookie, claude)
   await sse.wait((e) => e.type === 'commands' && e.agentId === claude && e.list.length > 0)
-  expect(commandNames(sse.events, claude)).toEqual(['claude-cmd'])
+  expect(commandNames(sse.events, claude)).toEqual(['claude-cmd', 'claude-cmd-arg'])
+  // codex 没有斜杠命令：fake 的是一份空表，不会覆盖 claude 的
   await prepareAndWait(sse, pageId, cookie, fake)
-  await sse.wait((e) => e.type === 'commands' && e.agentId === fake && e.list.length > 0)
-  expect(commandNames(sse.events, fake)).toEqual(['fake-cmd'])
-  expect(commandNames(sse.events, claude)).toEqual(['claude-cmd'])
+  await sse.wait((e) => e.type === 'commands' && e.agentId === fake)
+  expect(commandNames(sse.events, fake)).toEqual([])
+  expect(commandNames(sse.events, claude)).toEqual(['claude-cmd', 'claude-cmd-arg'])
 
   const late = new SSECollector()
   await late.start(pageId, cookie)
-  await late.wait((e) => e.type === 'commands' && e.agentId === fake && e.list.length > 0)
-  expect(commandNames(late.events, claude)).toEqual(['claude-cmd'])
+  await late.wait((e) => e.type === 'commands' && e.agentId === fake)
+  await late.wait((e) => e.type === 'commands' && e.agentId === claude)
+  expect(commandNames(late.events, claude)).toEqual(['claude-cmd', 'claude-cmd-arg'])
   sse.stop()
   late.stop()
 })
@@ -96,12 +98,12 @@ test('审批（connector）：两台机器上的 agent 各自从 perm-0 数起�
   expect(a2.agentId).toBe(remote(boxB, 'fake'))
   expect(a1.requestId).toBe(a2.requestId) // 两个 connector 各有各的进程，各自从 perm-0 数起
   // 拿另一台机器的 agentId 答：这一页没有那条审批
-  expect((await postJson(`/api/pages/${p1}/permission`, cookie, { agentId: remote(boxB, 'fake'), requestId: a1.requestId, optionId: 'allow_once' })).status).toBe(404)
+  expect((await postJson(`/api/pages/${p1}/permission`, cookie, { agentId: remote(boxB, 'fake'), requestId: a1.requestId, optionId: 'allow' })).status).toBe(404)
 
-  expect((await answerPermission(p1, cookie, a1, 'allow_once')).status).toBe(200)
+  expect((await answerPermission(p1, cookie, a1, 'allow')).status).toBe(200)
   await waitFor(() => docText(d1).includes('granted:allow_once'))
   expect(docText(d2)).not.toContain('granted:')
-  expect((await answerPermission(p2, cookie, a2, 'reject_once')).status).toBe(200)
+  expect((await answerPermission(p2, cookie, a2, 'reject')).status).toBe(200)
   await waitFor(() => docText(d2).includes('granted:reject_once'))
   for (const s of [s1, s2]) s.stop()
   d1.destroy()
@@ -122,7 +124,7 @@ test('停止（connector）：结束该会话的待批并广播 resolved，之�
   expect((await postJson(`/api/pages/${pageId}/stop`, cookie)).status).toBe(200)
   await sse.wait((e) => e.type === 'permission_resolved' && e.requestId === pending.requestId && e.agentId === pending.agentId)
   await sse.wait((e) => e.type === 'status' && e.state === 'done')
-  expect((await answerPermission(pageId, cookie, pending, 'allow_once')).status).toBe(404)
+  expect((await answerPermission(pageId, cookie, pending, 'allow')).status).toBe(404)
   sse.stop()
   d.destroy()
 })
@@ -149,7 +151,7 @@ test('审批没有超时（connector，假时钟）：推进 11 分钟审批仍�
     await late.start(pageId, cookie)
     await waitPermission(late, (e) => e.requestId === pending.requestId)
     // 真能答才算还活着：connector 上的进程被回收的话，审批早被按取消结束并清出了副本（404 / 409）
-    expect((await answerPermission(pageId, cookie, pending, 'allow_once')).status).toBe(200)
+    expect((await answerPermission(pageId, cookie, pending, 'allow')).status).toBe(200)
     await late.wait((e) => e.type === 'permission_resolved' && e.requestId === pending.requestId)
     userMessage(d.document, '报后台审批')
     expect(await continuePage(pageId, cookie, { agent: remote(connectorId, 'fake') })).toBe(202)
@@ -174,7 +176,7 @@ test('主人（connector）：配对人是主人 —— 没授权的人（成员
   const { rows } = await pool.query<{ owner_id: string | null }>('SELECT owner_id FROM connectors WHERE id = $1', [connectorId])
   expect(rows[0]?.owner_id).toBe(ownerId)
   const ownerOf = async (who: string) => (await agentsList(who)).find((a) => a.id === claude)?.posture
-  expect(await ownerOf(cookie)).toEqual({ owner: true, modes: true, unrestricted: ['bypassPermissions'] })
+  expect(await ownerOf(cookie)).toEqual({ owner: true, modes: true, unrestricted: ['bypassPermissions', 'auto'] })
 
   const sse = new SSECollector()
   await sse.start(pageId, cookie)
@@ -230,16 +232,16 @@ test('主人（connector）：被授权的非主人选会把会话切进「跳�
   userMessage(a.document, '退出计划')
   expect(await continuePage(pageId, bob, { agent: claude })).toBe(202) // bob 发起，审批在 bob 的这一轮里
   const plan = await waitPermission(sse, (e) => e.agentId === claude)
-  expect(plan.options.map((o) => o.optionId)).toContain('exit-plan-bypass')
+  expect(plan.options.map((o) => o.optionId)).toContain('exit-plan:bypassPermissions')
 
-  expect((await answerPermission(pageId, bob, plan, 'exit-plan-bypass')).status).toBe(403)
+  expect((await answerPermission(pageId, bob, plan, 'exit-plan:bypassPermissions')).status).toBe(403)
   // 403 不吞审批：新订阅者还看得到它
   const late = new SSECollector()
   await late.start(pageId, cookie)
   await waitPermission(late, (e) => e.requestId === plan.requestId)
 
-  // 主人选了：会话切进 bypassPermissions（agent 只推了 current_mode_update），镜像据此广播并落成页面级意图
-  expect((await answerPermission(pageId, cookie, plan, 'exit-plan-bypass')).status).toBe(200)
+  // 主人选了：会话切进 bypassPermissions（CLI 只报了新的 permissionMode），镜像据此广播并落成页面级意图
+  expect((await answerPermission(pageId, cookie, plan, 'exit-plan:bypassPermissions')).status).toBe(200)
   await sse.wait((e) => e.type === 'config' && e.agentId === claude && e.options.some((o) => o.category === 'mode' && o.currentValue === 'bypassPermissions'))
   await waitFor(() => docText(a).includes('plan-exit:exit-plan-bypass'))
 
@@ -267,7 +269,7 @@ test('主人（connector）：被授权的非主人选普通审批选项不受�
   userMessage(a.document, '退出计划')
   expect(await continuePage(pageId, bob, { agent: claude })).toBe(202)
   const plan = await waitPermission(sse, (e) => e.agentId === claude)
-  expect((await answerPermission(pageId, bob, plan, 'exit-plan-default')).status).toBe(200)
+  expect((await answerPermission(pageId, bob, plan, 'exit-plan:default')).status).toBe(200)
   await waitFor(() => docText(a).includes('plan-exit:exit-plan-default'))
   sse.stop()
   a.destroy()

@@ -51,13 +51,12 @@ export function ConnectorsPane({ space }: { space: Space }) {
   }
 
   const onCopyFailed = (): void => setError(C.copyFailed)
-  // 生产：先装安装包（部署时打出的 /dl/ramet-connector.tgz，不含源码），再 start；dev 下没有安装包，用源码前台跑
+  // 生产：先从 npm 装 connector（包名 @nsjsv/ramet，不含源码），再 start；dev 下用源码前台跑
   // （--cloud 给页面自己的地址：vite 把 /connector 代理到 server，终端打印的确认链接也就落在这个前端上）。
-  // --allow-remote=all：npm 12 默认拒绝从网址装包（EALLOWREMOTE），旧版本 npm 不认识这个参数只会警告一句。
   // 两条命令分开复制，不用 && 连（Windows PowerShell 5.1 不认）
   const dev = import.meta.env.DEV
-  const install = `npm i -g --allow-remote=all ${location.origin}/dl/ramet-connector.tgz`
-  const start = dev ? `npm run connector -w packages/server -- --cloud ${location.origin}` : `ramet-connector start --cloud ${location.origin}`
+  const install = 'npm i -g @nsjsv/ramet'
+  const start = dev ? `npm run connector -w packages/server -- --cloud ${location.origin}` : `ramet start --cloud ${location.origin}`
 
   return (
     <>

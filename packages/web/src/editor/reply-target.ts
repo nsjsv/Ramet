@@ -50,3 +50,33 @@ export function redoableUserIds(doc: PMNode): Set<string> {
   if (pending && pending.textContent.trim()) add(pending)
   return out
 }
+
+// ---------- 失败 / 停止的回复：「重试」「继续」是续跑还是重新生成 ----------
+// 只有页面上最后一块回复能接着原会话续跑（服务端 resumeTarget 同口径：之后没有用户消息 / 回复，别的块不算），
+// 带队轮（team 属性）服务端也拒；其余失败块的「重试」照旧从头重新生成。
+
+/** 页面上最后一块回复：之后再出现用户消息就没有（那条消息还没人答，续跑会把它跳过去） */
+export function lastReply(doc: PMNode): PMNode | null {
+  let last: PMNode | null = null
+  doc.forEach((node) => {
+    if (isUserMessage(node)) last = null
+    else if (node.type.name === 'agent_reply') last = node
+  })
+  return last
+}
+
+export function isLastReply(doc: PMNode, replyId: string): boolean {
+  const last = lastReply(doc)
+  return Boolean(replyId) && last?.attrs.id === replyId
+}
+
+/** reply 能续跑：它就是 last（装饰重算时 last 一趟算好传进来，别逐块重扫），且不是带队轮 */
+export function resumes(reply: PMNode, last: PMNode | null): boolean {
+  return reply === last && Boolean(reply.attrs.id) && !reply.attrs.team
+}
+
+/** 点击时按当下文档现算（运行条的按钮建好后文档还会变） */
+export function resumableReply(doc: PMNode, replyId: string): boolean {
+  const last = lastReply(doc)
+  return last !== null && last.attrs.id === replyId && resumes(last, last)
+}

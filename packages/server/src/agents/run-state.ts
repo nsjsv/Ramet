@@ -4,11 +4,10 @@
 import { randomUUID } from 'node:crypto'
 import type { RunRecord } from './run-record.js'
 import type { PromptResult } from './types.js'
-import type { PromptEnv } from './prompt-env.js'
 
 /** 这一轮是带队的哪一轮（null = 普通对话）。
  *  plan = 计划轮（组长出计划，goal = 用户 `/带队` 后面的目标）；exec = 执行轮（用户确认后开工，planId = team_plans 的行）。
- *  两种轮都不复用旧会话、不把会话 / 收尾 hash 写回 agent_session（见 agents/team.ts 文件头） */
+ *  两种轮都不复用旧会话、不把会话写回 agent_session（见 agents/team.ts 文件头） */
 export type TeamRound = { kind: 'plan'; goal: string } | { kind: 'exec'; planId: string; /** draft → running 的翻转成功了（收尾只收口自己翻转过的计划） */ begun?: boolean }
 
 export type RunState = {
@@ -19,6 +18,10 @@ export type RunState = {
   userId: string
   adapterKey: string
   sessionId: string | null
+  /** 本轮会话所在的目录（会话建好时记下）：随过程档案落库，续跑按它加载同一个会话 */
+  cwd: string | null
+  /** 本轮失败的原因（收尾前记下）：随过程档案落库，续跑时告诉 agent 断在哪 */
+  error: string | null
   cancelled: boolean
   /** 使用授权被收回而中止的原因（置位时 cancelled 同时为真）。这一轮收成 error + 这句原因，不是「已停止」 */
   revoked: string | null
@@ -50,9 +53,6 @@ export type RunState = {
   msgBefore: Record<string, string>
   /** open_runs 绑定行已写（收尾要删） */
   bound: boolean
-  /** 本轮开头解析好的提示词环境（agent 实际看到的引用与各回复的过程摘要，prompt-env.ts）。收尾基线 hash 必须用它算，
-   *  与开头的 hash 同一口径。认领回来的回合没有（开头不在本进程），不落收尾 hash，下一轮全文重放 */
-  seen: PromptEnv | null
   /** 带队的哪一轮；普通对话 = null。判定只在两处：continue 带 team（执行轮）、runTurn 认出 `/带队`（计划轮） */
   team: TeamRound | null
 }
@@ -74,6 +74,8 @@ export function createRunState(opts: {
     userId: opts.userId,
     adapterKey: opts.adapterKey,
     sessionId: null,
+    cwd: null,
+    error: null,
     cancelled: false,
     revoked: null,
     ended: false,
@@ -91,7 +93,6 @@ export function createRunState(opts: {
     msgOpts: {},
     msgBefore: {},
     bound: false,
-    seen: null,
     team: opts.team ?? null,
   }
 }

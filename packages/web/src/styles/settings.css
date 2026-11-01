@@ -356,6 +356,12 @@ label.set-row-text {
   background: var(--accent-tint);
 }
 
+/* 用不了的 agent（CLI 版本太旧等）：置灰，原因在行尾 */
+.set-pick:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .set-pick-label {
   flex: 1;
   min-width: 0;

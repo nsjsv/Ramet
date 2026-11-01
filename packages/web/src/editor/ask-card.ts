@@ -1,14 +1,14 @@
 /* ---------- 审批 / 提问卡：运行条（run-strip.ts）与右上角工作台面板（hud/）共用 ----------
  * 纯 DOM。审批 = 标题 + 命令 / diff 预览 + agent 给的选项；提问（带 form）= 标题 + 表单（ask-form.ts）。
  * 答完不本地摘除：卡片的唯一摘除信号是 permission_resolved（任何一处答了，所有地方一起消失）。 */
-import type { TeamState } from '@ramet/shared/run-model'
+import { isPlanApproval, type TeamState } from '@ramet/shared/run-model'
 import { api, ApiError } from '../api'
 import { COPY } from '../copy'
 import { agentLabel } from '../team/team-agents'
 import { askSource } from '../team/team-model'
 import { setAgentRunError, type PermissionReq } from './agent-bar'
 import { mountAsk } from './ask-form'
-import { isPlanApproval, permissionPreviewHtml } from './run-detail'
+import { permissionPreviewHtml } from './run-detail'
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag)
@@ -46,12 +46,12 @@ export function buildAskCard(pageId: string, req: PermissionReq, team: TeamState
     who.textContent = COPY.team.ask.from(agentLabel(req.agentId) ?? req.agentId, src.tasks.map((t) => t.title))
     card.append(who)
   }
-  // agent 的提问（ACP elicitation）：表单替代选项按钮（提交 / 跳过；答案不合表单的原因显示在卡片里）
+  // agent 的提问：表单替代选项按钮（提交 / 跳过；答案不合表单的原因显示在卡片里）
   if (req.form) {
     card.append(mountAsk(pageId, { agentId: req.agentId, requestId: req.requestId, form: req.form }, setAgentRunError).el)
     return card
   }
-  const preview = permissionPreviewHtml(req.toolCall)
+  const preview = permissionPreviewHtml(req)
   if (preview) {
     const box = el('div', isPlanApproval(req.toolCall) ? 'ask-preview is-plan' : 'ask-preview')
     box.innerHTML = preview // 由 run-detail 的转义渲染器产出（escapeHtml），与工具详情同一来源
