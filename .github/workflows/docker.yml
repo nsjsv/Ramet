@@ -2,14 +2,13 @@
 # 需要的仓库配置（Settings → Secrets and variables → Actions）：
 #   secrets   DOCKERHUB_USERNAME、DOCKERHUB_TOKEN（Docker Hub → Account settings → Personal access tokens，Read & Write）
 #   variables DOCKERHUB_IMAGE（如 yourname/ramet；不设就用 <DOCKERHUB_USERNAME>/ramet）
-# 标签：main 上的每次推送 → latest + sha-<短提交>；推 v1.2.3 这样的 tag → 1.2.3、1.2 再加 sha。
+# 只在推版本标签时构建：v1.2.3 → 1.2.3、1.2、latest。main 上的普通推送不出镜像，自托管用户拉 latest 拿到的一定是发过版的。
+# 预发布标签（v1.2.3-rc.1）只打完整版本号，不动 1.2 和 latest。
 name: docker
 
 on:
   push:
-    branches: [main]
     tags: ['v*']
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -37,11 +36,11 @@ jobs:
         uses: docker/metadata-action@v6
         with:
           images: ${{ vars.DOCKERHUB_IMAGE || format('{0}/ramet', secrets.DOCKERHUB_USERNAME) }}
+          # latest=auto：只有不带预发布后缀的版本标签才打 latest
+          flavor: latest=auto
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=sha,prefix=sha-
 
       - uses: docker/build-push-action@v7
         with:
