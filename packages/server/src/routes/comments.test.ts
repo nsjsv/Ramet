@@ -22,6 +22,8 @@ async function world(): Promise<World> {
   cookie.frank = await login('frank')
   const id = {} as Record<Who, string>
   for (const who of Object.keys(cookie) as Who[]) id[who] = await userIdOf(who)
+  // 整页讨论默认关：这里的用例两种评论都要用（开关本身的行为见文件末尾）
+  await pool.query('UPDATE pages SET page_comments = true WHERE id = $1', [pageId])
   return { pageId, cookie, id }
 }
 
@@ -277,4 +279,57 @@ test('删号：作者显示为已注销（null），串还在', async () => {
   expect((await call('DELETE', `/api/admin/users/${w.id.bob}`, w.cookie.alice)).status).toBe(200)
   const list = await threads(w)
   expect(list[0]!.comments.map((c) => c.author)).toEqual([null, { id: w.id.alice, name: 'alice' }])
+})
+
+test('新页默认：划词评论开、整页讨论关', async () => {
+  const { cookie, pageId } = await setupPage()
+  const page = (await (await call('GET', '/api/pages', cookie)).json()) as { id: string; inline_comments: boolean; page_comments: boolean }[]
+  expect(page.find((p) => p.id === pageId)).toMatchObject({ inline_comments: true, page_comments: false })
+  expect((await call('POST', `/api/pages/${pageId}/comments`, cookie, { kind: 'page', body: 'x' })).status).toBe(403)
+  expect((await call('POST', `/api/pages/${pageId}/comments`, cookie, { kind: 'inline', anchor: ANCHOR, body: 'x' })).status).toBe(201)
+})
+
+test('两种评论各自开关：关掉的那种不列、写 403，删除照旧；公开接口与收件箱同滤；重新打开即恢复', async () => {
+  const w = await world()
+  const inline = await newThread(w, 'bob', '划词 @alice')
+  const page = await newThread(w, 'bob', '整页 @alice', 'page')
+  expect((await call('PATCH', `/api/pages/${w.pageId}/publish`, w.cookie.alice, { published: true })).status).toBe(200)
+  const inboxOf = async () =>
+    ((await (await call('GET', '/api/inbox', w.cookie.alice)).json()) as { items: { type: string; threadId?: string }[] }).items
+      .filter((i) => i.type === 'comment')
+      .map((i) => i.threadId)
+      .sort()
+  expect(await inboxOf()).toEqual([inline.id, page.id].sort())
+
+  // viewer 改不了页面属性；参数不是布尔 400
+  expect((await call('PATCH', `/api/pages/${w.pageId}`, w.cookie.erin, { inline_comments: false })).status).toBe(403)
+  expect((await call('PATCH', `/api/pages/${w.pageId}`, w.cookie.bob, { page_comments: 'no' })).status).toBe(400)
+  const off = await call('PATCH', `/api/pages/${w.pageId}`, w.cookie.bob, { inline_comments: false })
+  expect(off.status).toBe(200)
+  expect((await off.json()) as object).toMatchObject({ inline_comments: false, page_comments: true })
+
+  // 划词关了：列表只剩整页讨论；划词那边发、回复、解决、编辑 403，整页讨论照常
+  expect((await threads(w)).map((t) => t.id)).toEqual([page.id])
+  expect((await call('POST', `/api/pages/${w.pageId}/comments`, w.cookie.alice, { kind: 'inline', anchor: ANCHOR, body: 'x' })).status).toBe(403)
+  expect((await call('POST', `/api/comment-threads/${inline.id}/replies`, w.cookie.alice, { body: 'x' })).status).toBe(403)
+  expect((await call('POST', `/api/comment-threads/${inline.id}/resolve`, w.cookie.alice, { resolved: true })).status).toBe(403)
+  expect((await call('PATCH', `/api/comments/${inline.comments[0]!.id}`, w.cookie.bob, { body: 'y' })).status).toBe(403)
+  await reply(w, 'alice', page.id, '整页照常')
+  // 非成员照旧 404，不因开关泄露存在性
+  expect((await call('POST', `/api/comment-threads/${inline.id}/replies`, w.cookie.frank, { body: 'x' })).status).toBe(404)
+
+  const pub = (await (await call('GET', `/api/public/pages/${w.pageId}/comments`)).json()) as { threads: { id: string }[] }
+  expect(pub.threads.map((t) => t.id)).toEqual([page.id])
+  const doc = (await (await call('GET', `/api/public/pages/${w.pageId}/doc`)).json()) as object
+  expect(doc).toMatchObject({ inline_comments: false, page_comments: true })
+  expect(await inboxOf()).toEqual([])
+
+  // 反过来：整页关、划词开
+  expect((await call('PATCH', `/api/pages/${w.pageId}`, w.cookie.alice, { inline_comments: true, page_comments: false })).status).toBe(200)
+  expect((await threads(w)).map((t) => t.id)).toEqual([inline.id])
+  expect((await call('POST', `/api/pages/${w.pageId}/comments`, w.cookie.alice, { kind: 'page', body: 'x' })).status).toBe(403)
+  expect((await call('POST', `/api/comment-threads/${page.id}/replies`, w.cookie.alice, { body: 'x' })).status).toBe(403)
+  await reply(w, 'alice', inline.id, '划词恢复了')
+  // 删除不受开关影响
+  expect((await call('DELETE', `/api/comments/${page.comments[0]!.id}`, w.cookie.bob)).status).toBe(200)
 })

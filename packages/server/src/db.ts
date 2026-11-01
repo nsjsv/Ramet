@@ -1,7 +1,7 @@
 import { Pool, type PoolClient } from 'pg'
 import { COVER_COLUMNS } from './page-cover.js'
 import { API_PAGE_FIELDS } from './page-icon.js'
-import { COMMENTS_DDL } from './comments/schema.js'
+import { COMMENT_SWITCHES_DDL, COMMENTS_DDL } from './comments/schema.js'
 
 // 页面变更日志（page-sync.ts）的 UPDATE 触发列：对外字段（API_PAGE_FIELDS，含 position）+ 图标两列 + 封面三列 + deleted_at。
 // 由白名单拼出，不另抄一份列清单，对外字段加列时触发条件跟着变。content_text / agent_session /
@@ -255,6 +255,8 @@ ALTER TABLE pages ADD COLUMN IF NOT EXISTS content_updated_at TEXT;
 ALTER TABLE pages ADD COLUMN IF NOT EXISTS is_template BOOLEAN NOT NULL DEFAULT false;
 -- 全宽:true = 正文不收 720 列、铺满画面。页面属性(协作者与公开页同看),同样排在视图重建之前
 ALTER TABLE pages ADD COLUMN IF NOT EXISTS full_width BOOLEAN NOT NULL DEFAULT false;
+-- 评论开关(两列,见 comments/schema.ts)。同样排在视图重建之前
+${COMMENT_SWITCHES_DDL}
 -- 页面封面:来源类型 + 值(files.id / 外链地址 / 预设名)+ 垂直位置百分比,对外折成 cover 单字段(见 page-cover.ts)。
 -- 类型与值同空同非空、位置在 [0,100] 由约束表达,任何写入路径都造不出半截封面
 ALTER TABLE pages ADD COLUMN IF NOT EXISTS cover_kind TEXT;

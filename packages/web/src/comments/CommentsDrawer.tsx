@@ -2,6 +2,7 @@
  * 列出本页全部讨论串（划词 + 整页），分「未解决 / 已解决」。每行是引用原文（整页讨论标「整页讨论」）+ 首条摘要；
  * 划词串点了滚到正文锚点并弹浮层；整页讨论与「原文已删除」的串在抽屉里就地展开。 */
 
+import type { CommentSwitchState } from './CommentSwitches'
 import type { EditorView } from '@milkdown/kit/prose/view'
 import { COPY } from '../copy'
 import { Icon } from '../icons'
@@ -49,7 +50,19 @@ function Row({ thread, orphan, expanded, ctx, getView }: { thread: Thread; orpha
   )
 }
 
-export default function CommentsDrawer({ threads, expanded, ctx, getView }: { threads: Thread[]; expanded: string | null; ctx: CommentCtx; getView: () => EditorView | undefined }) {
+export default function CommentsDrawer({
+  threads,
+  expanded,
+  ctx,
+  getView,
+  kinds,
+}: {
+  threads: Thread[]
+  expanded: string | null
+  ctx: CommentCtx
+  getView: () => EditorView | undefined
+  kinds: CommentSwitchState
+}) {
   const view = getView()
   const orphanOf = (t: Thread): boolean => t.kind === 'inline' && !!t.anchor && !!view && !commentRange(view, t.anchor)
   const open = threads.filter((t) => !t.resolvedAt)
@@ -80,7 +93,7 @@ export default function CommentsDrawer({ threads, expanded, ctx, getView }: { th
         {threads.length === 0 ? (
           <div className="cm-empty">
             <b>{C.empty}</b>
-            <span>{C.emptyHint}</span>
+            <span>{C.emptyHint(kinds.inline, kinds.page)}</span>
           </div>
         ) : (
           <>

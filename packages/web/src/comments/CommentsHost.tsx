@@ -1,7 +1,9 @@
 /* ---------- 一个页面的评论宿主（编辑页 / 公开页各挂一个）----------
  * 绑定 store、把未解决的划词串（和正在写的草稿）喂给高亮插件、登记划词菜单的「评论」入口（只编辑页）、
  * 处理 `?comment=<串>` 深链（划词串滚到锚点开浮层；整页讨论 / 原文已删除的打开抽屉并展开），画浮层与抽屉。
- * 整页讨论区（PageDiscussion）由宿主页面放在正文下方，同一个 store。 */
+ * 整页讨论区（PageDiscussion）由宿主页面放在正文下方，同一个 store。
+ * 两种评论的开关（kinds）由宿主读页面属性传进来：服务端只列开着的那种串，划词评论关着就不登记划词入口。
+ * 宿主按开关做 key：开关一变就重新绑定、重拉（别人切的开关随页面树重拉过来，也走这条）。 */
 
 import { useEffect, useRef } from 'react'
 import type { EditorView } from '@milkdown/kit/prose/view'
@@ -9,6 +11,7 @@ import { encodeAnchor, scrollToAnchor, setCommentMarks, yContextOf, type Comment
 import { setCommentEntry } from './comment-entry'
 import CommentPopover from './CommentPopover'
 import CommentsDrawer from './CommentsDrawer'
+import type { CommentSwitchState } from './CommentSwitches'
 import type { CommentCtx } from './CommentThread'
 import { bindCommentsPage, openDraft, openDrawer, openThread, useComments } from './comments-store'
 
@@ -28,19 +31,21 @@ interface Props {
   deepLink?: string | null
   /** 正文已经和服务端同步过（深链要等它：本地缓存先出的内容里可能还没有锚定的字） */
   ready?: () => boolean
+  kinds: CommentSwitchState
 }
 
-export default function CommentsHost({ pageId, mode, getView, ctx, deepLink, ready }: Props) {
+export default function CommentsHost({ pageId, mode, getView, ctx, deepLink, ready, kinds }: Props) {
   const s = useComments()
   useEffect(() => bindCommentsPage(pageId, mode), [pageId, mode])
 
+  const inline = kinds.inline
   useEffect(() => {
-    if (mode !== 'auth') return
+    if (mode !== 'auth' || !inline) return
     return setCommentEntry(pageId, (view, range) => {
       const anchor = encodeAnchor(view.state.doc, yContextOf(view.state), range.from, range.to)
       if (anchor) openDraft(anchor)
     })
-  }, [pageId, mode])
+  }, [pageId, mode, inline])
 
   const ours = s.pageId === pageId
   const { threads, popover } = s
@@ -86,7 +91,7 @@ export default function CommentsHost({ pageId, mode, getView, ctx, deepLink, rea
   return (
     <>
       {popover && <CommentPopover popover={popover} threads={threads} getView={getView} ctx={ctx} />}
-      {s.drawer && <CommentsDrawer threads={threads} expanded={s.expanded} ctx={ctx} getView={getView} />}
+      {s.drawer && <CommentsDrawer threads={threads} expanded={s.expanded} ctx={ctx} getView={getView} kinds={kinds} />}
     </>
   )
 }

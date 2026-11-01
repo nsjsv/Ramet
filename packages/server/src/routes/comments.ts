@@ -8,6 +8,8 @@
  * DELETE /api/comments/:cid                       → { threadDeleted }：作者本人或空间 owner
  * 判定：能读这个页面的空间成员（含 viewer）都能看、发、回复、解决——评论不改文档，所以不要写权；全局 admin 不例外。
  * 页面不存在 / 已在回收站 / 非成员 / 串或评论不属于可读页面 一律 404（不泄露存在性）；不是 doc 页（过程页 / skill / 集合）发不了，400。
+ * 两种评论各有页面开关（pages.inline_comments / page_comments）：关掉的那种列表里不出，发、回复、解决、编辑都 403
+ * （界面上已收起，不能绕过界面继续写）；删除照旧可用（清理自己的话不该被开关挡住），已读只动我自己的收件箱。
  * 每次写成功都通知调用方（index.ts 把它接到页面文档的 stateless 广播与收件箱刷新）。
  * 每条路由自带 requireAuth（路径限定），挂载顺序无影响。 */
 
@@ -32,6 +34,7 @@ import {
 
 const NOT_FOUND = { error: 'not found' }
 const NOT_COMMENTABLE = { error: 'comments are only available on doc pages' }
+const COMMENTS_OFF = { error: 'this kind of comment is turned off on this page' }
 
 async function readJson(c: Context<AuthEnv>): Promise<Record<string, unknown> | null> {
   const body = (await c.req.json().catch(() => null)) as unknown
@@ -61,11 +64,17 @@ export function commentRoutes(pool: Pool, changed: (pageId: string) => void = ()
     const id = c.req.param('id')
     const user = c.get('user')
     if (!(await pageAccess(pool, id, user))) return c.json(NOT_FOUND, 404)
-    const page = (await pool.query<{ kind: string; space_id: string }>('SELECT kind, space_id FROM live_pages WHERE id = $1', [id])).rows[0]
+    const page = (
+      await pool.query<{ kind: string; space_id: string; inline_comments: boolean; page_comments: boolean }>(
+        'SELECT kind, space_id, inline_comments, page_comments FROM live_pages WHERE id = $1',
+        [id],
+      )
+    ).rows[0]
     if (!page) return c.json(NOT_FOUND, 404)
     if (page.kind !== 'doc') return c.json(NOT_COMMENTABLE, 400)
     const input = await readJson(c)
     if (input?.kind !== 'inline' && input?.kind !== 'page') return c.json({ error: "kind must be 'inline' or 'page'" }, 400)
+    if (!(input.kind === 'inline' ? page.inline_comments : page.page_comments)) return c.json(COMMENTS_OFF, 403)
     let anchor = null
     if (input.kind === 'inline') {
       anchor = parseAnchor(input.anchor)
@@ -84,6 +93,7 @@ export function commentRoutes(pool: Pool, changed: (pageId: string) => void = ()
     const ctx = await readableThread(c)
     if (!ctx) return c.json(NOT_FOUND, 404)
     if (ctx.pageKind !== 'doc') return c.json(NOT_COMMENTABLE, 400)
+    if (!ctx.kindEnabled) return c.json(COMMENTS_OFF, 403)
     const parsed = parseBody((await readJson(c))?.body)
     if ('error' in parsed) return c.json(parsed, 400)
     const comment = await addReply(pool, { pageId: ctx.pageId, spaceId: ctx.spaceId, threadId: ctx.threadId, userId: c.get('user').id, body: parsed.body })
@@ -95,6 +105,7 @@ export function commentRoutes(pool: Pool, changed: (pageId: string) => void = ()
     const ctx = await readableThread(c)
     if (!ctx) return c.json(NOT_FOUND, 404)
     if (ctx.pageKind !== 'doc') return c.json(NOT_COMMENTABLE, 400)
+    if (!ctx.kindEnabled) return c.json(COMMENTS_OFF, 403)
     const resolved = (await readJson(c))?.resolved
     if (typeof resolved !== 'boolean') return c.json({ error: 'resolved must be a boolean' }, 400)
     const thread = await setResolved(pool, ctx.pageId, ctx.threadId, c.get('user').id, resolved)
@@ -117,6 +128,7 @@ export function commentRoutes(pool: Pool, changed: (pageId: string) => void = ()
     const ctx = await commentContext(pool, c.req.param('cid'))
     if (!ctx || ctx.deleted || !(await pageAccess(pool, ctx.pageId, user))) return c.json(NOT_FOUND, 404)
     if (ctx.authorId !== user.id) return c.json({ error: 'forbidden' }, 403)
+    if (!ctx.kindEnabled) return c.json(COMMENTS_OFF, 403)
     const parsed = parseBody((await readJson(c))?.body)
     if ('error' in parsed) return c.json(parsed, 400)
     const comment = await editComment(pool, ctx.commentId, ctx.spaceId, parsed.body)

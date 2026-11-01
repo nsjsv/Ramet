@@ -13,11 +13,12 @@ import { EditModeItems } from './editor/edit-mode'
 import PreviewToggle from './project/PreviewToggle'
 import ProjectToggle from './project/ProjectToggle'
 import CommentsButton from './comments/CommentsButton'
+import CommentSwitches, { type CommentSwitchState } from './comments/CommentSwitches'
 
 /* ---------- 页面顶栏 ----------
  * 一条 48px，sticky 钉在 .main 滚动口顶部：左面包屑（[data-flip]：侧栏收起 / 展开时 FLIP 跟着滑），
  * 右「X分钟前编辑」（点开版本历史）+ 在场头像 + 文档 / 对话切换（一个图标钮，图标是要去的那个视图）+ 收藏星标
- * + ⋮（版本历史 / 导出 zip / 分享 / 源码模式 / 全宽；分隔线下是字数与上次编辑，菜单打开时现算 / 现取）。
+ * + ⋮（版本历史 / 导出 zip / 分享 / 源码模式 / 全宽 / 评论（悬浮展开开关子菜单）；分隔线下是字数与上次编辑，菜单打开时现算 / 现取）。
  * 面包屑数据全在 pages 扁平表里沿 parent_id 上溯，零新取数；跨空间 / 缺父 / 环状脏数据即停。导航走 onNavigate。
  * 链顶的页挂在目录树里时，前面再接上它所在的目录链（目录数据共享侧栏已取的那份）。 */
 
@@ -44,6 +45,8 @@ interface Props {
   /** 全宽（页面属性，editor/full-width.ts）；onFullWidth 缺省 = 只读或不适用，⋮ 菜单不给开关 */
   fullWidth?: boolean
   onFullWidth?: (on: boolean) => void
+  /** 评论开关（页面属性，⋮ 菜单里「评论」的子菜单）；缺省 = 只读或这页没有评论（过程页 / skill / 集合），⋮ 菜单不给开关 */
+  commentSwitches?: CommentSwitchState
   /** 当前页正文字数（⋮ 菜单打开时调用）；编辑器还没建好 = null；缺省 = 没有正文，不显示字数 */
   getWordCount?: () => number | null
 }
@@ -166,6 +169,7 @@ export default function TopBar(p: Props) {
                 {p.fullWidth && <Icon name="check" size={14} className="menu-check" />}
               </button>
             )}
+            {p.pageId && p.commentSwitches && <CommentSwitches pageId={p.pageId} state={p.commentSwitches} onChanged={p.onChanged} />}
             <EditInfoLines words={words} info={editInfo} />
           </div>
         )}

@@ -40,6 +40,9 @@ export type PageRow = {
   in_page_tree: boolean
   /** 全宽:正文铺满画面(不收 720 列) */
   full_width: boolean
+  /** 评论开关:划词评论 / 整页讨论各一个,关掉的那种不显示、不收新评论 */
+  inline_comments: boolean
+  page_comments: boolean
 }
 
 type SpaceRole = 'owner' | 'member' | 'viewer'
@@ -362,6 +365,8 @@ export function pagesRoutes(
       index?: unknown
       is_template?: unknown
       full_width?: unknown
+      inline_comments?: unknown
+      page_comments?: unknown
       cover?: unknown
     }
     let written = false
@@ -369,6 +374,14 @@ export function pagesRoutes(
     if (body.full_width !== undefined) {
       if (typeof body.full_width !== 'boolean') return c.json({ error: 'full_width must be a boolean' }, 400)
       await pool.query('UPDATE pages SET full_width = $1 WHERE id = $2', [body.full_width, id])
+      written = true
+    }
+    // 评论开关：同样是页面属性，写了就广播（协作者的评论跟着收起 / 出现）
+    for (const col of ['inline_comments', 'page_comments'] as const) {
+      const on = body[col]
+      if (on === undefined) continue
+      if (typeof on !== 'boolean') return c.json({ error: `${col} must be a boolean` }, 400)
+      await pool.query(`UPDATE pages SET ${col} = $1 WHERE id = $2`, [on, id])
       written = true
     }
     // 设为模板 / 取消模板：只是让它出现在「从模板新建」列表里

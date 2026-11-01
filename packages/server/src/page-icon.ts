@@ -45,6 +45,8 @@ export const API_PAGE_FIELDS = [
   'in_page_tree',
   'is_template',
   'full_width',
+  'inline_comments',
+  'page_comments',
   'position',
 ] as const
 

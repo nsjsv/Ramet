@@ -419,8 +419,13 @@ export default function EditorPage({
   // 源码模式（editor/edit-mode.tsx）是 CodeMirror 编辑 markdown 原文：过程页（步骤是结构化的块）
   // 与对话视图没有 markdown 编辑，照常显示所见即所得。正文编辑器建好才挂（editorTick bump 会重渲到这里），它挂载时一次性取正文视图
   const sourceOn = editMode !== 'rich' && page?.kind !== 'run' && !chatMode && getEditor() !== undefined
-  // 评论：只给 doc 页（含集合的行、模板）的文档视图；viewer 也能评论（评论不写文档）
-  const commentsOn = !!id && page?.kind === 'doc' && !chatMode
+  // 评论：只给 doc 页（含集合的行、模板）的文档视图；viewer 也能评论（评论不写文档）。
+  // 两种评论各有页面开关（划词默认开、底部讨论默认关）；都关了就整套不挂（顶栏按钮、高亮、抽屉）
+  const commentKinds = useMemo(
+    () => ({ inline: page?.inline_comments !== false, page: page?.page_comments === true }),
+    [page?.inline_comments, page?.page_comments],
+  )
+  const commentsOn = !!id && page?.kind === 'doc' && !chatMode && (commentKinds.inline || commentKinds.page)
   const getSchema = useCallback(() => getBodyView()?.state.schema, [getBodyView])
   const commentCtx = useMemo<CommentCtx>(
     () => ({ readOnly: false, spaceId: page?.space_id ?? null, canModerate: spaceOwner, getSchema, tick: editorTick }),
@@ -462,6 +467,7 @@ export default function EditorPage({
         onExport={exportPage}
         fullWidth={fullWidth}
         onFullWidth={readOnly ? undefined : setFullWidth}
+        commentSwitches={readOnly || page?.kind !== 'doc' ? undefined : commentKinds}
         getWordCount={getWordCount}
       />
       {/* 右轨（文档导航）：直出 .main 里，它是视口级 HUD（sticky 定位，见 styles/editor.css），
@@ -517,7 +523,7 @@ export default function EditorPage({
         )}
         {runDetail && <RunFoot detail={runDetail} />}
         {/* 整页讨论：正文下方、反向链接之上 */}
-        {commentsOn && <PageDiscussion pageId={id} ctx={commentCtx} />}
+        {commentsOn && commentKinds.page && <PageDiscussion pageId={id} ctx={commentCtx} />}
         {/* 反向链接：哪些页面 / 块引用了本页（过程页没有；没有反链时整块不画） */}
         {id && !chatMode && page && page.kind !== 'run' && <BacklinksPanel pageId={id} onNavigate={navigate} />}
         {chatMode && id && (
@@ -540,7 +546,16 @@ export default function EditorPage({
       <FindBar />
       {/* 划词评论的浮层与评论抽屉（视口级 fixed，挂在正文列外） */}
       {commentsOn && (
-        <CommentsHost pageId={id} mode="auth" getView={getBodyView} ctx={commentCtx} deepLink={commentParam} ready={commentsReady} />
+        <CommentsHost
+          key={`${commentKinds.inline}:${commentKinds.page}`}
+          pageId={id}
+          mode="auth"
+          getView={getBodyView}
+          ctx={commentCtx}
+          deepLink={commentParam}
+          ready={commentsReady}
+          kinds={commentKinds}
+        />
       )}
       {historyOpen && id && (
         <HistoryDrawer

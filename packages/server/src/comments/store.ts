@@ -103,18 +103,23 @@ type CommentRow = {
   deleted_at: Date | null
 }
 
+/** 串所属的那种评论在页面上开着（t = comment_threads、p = pages 的别名）。关掉的那种：列表、公开页、收件箱都不出，写入 403 */
+export const KIND_ENABLED = `((t.kind = 'inline' AND p.inline_comments) OR (t.kind = 'page' AND p.page_comments))`
+
 // $2 = 读者（取他的已读时刻，公开页传 NULL）；$3 = 只取这一个串（NULL = 全部）；$4 = 只要未解决的
 const SELECT_THREADS = `SELECT t.id, t.kind, t.anchor, t.created_at, t.resolved_at, t.resolved_by, ru.username AS resolved_by_name, r.read_at
   FROM comment_threads t
+  JOIN pages p ON p.id = t.page_id
   LEFT JOIN users ru ON ru.id = t.resolved_by
   LEFT JOIN comment_reads r ON r.thread_id = t.id AND r.user_id = $2
-  WHERE t.page_id = $1 AND ($3::text IS NULL OR t.id = $3) AND (NOT $4 OR t.resolved_at IS NULL)
+  WHERE t.page_id = $1 AND ${KIND_ENABLED} AND ($3::text IS NULL OR t.id = $3) AND (NOT $4 OR t.resolved_at IS NULL)
   ORDER BY t.created_at, t.id`
 const SELECT_COMMENTS = `SELECT c.id, c.thread_id, c.author_id, u.username, c.body, c.created_at, c.edited_at, c.deleted_at
   FROM comments c
   JOIN comment_threads t ON t.id = c.thread_id
+  JOIN pages p ON p.id = t.page_id
   LEFT JOIN users u ON u.id = c.author_id
-  WHERE t.page_id = $1 AND ($2::text IS NULL OR t.id = $2) AND (NOT $3 OR t.resolved_at IS NULL)
+  WHERE t.page_id = $1 AND ${KIND_ENABLED} AND ($2::text IS NULL OR t.id = $2) AND (NOT $3 OR t.resolved_at IS NULL)
   ORDER BY c.created_at, c.id`
 
 const author = (id: string | null, name: string | null): CommentAuthor => (id && name !== null ? { id, name } : null)
@@ -275,27 +280,44 @@ export async function deleteComment(pool: Pool, commentId: string, threadId: str
   })
 }
 
-export type ThreadContext = { threadId: string; pageId: string; spaceId: string; pageKind: string }
+export type ThreadContext = { threadId: string; pageId: string; spaceId: string; pageKind: string; kindEnabled: boolean }
 export type CommentContext = ThreadContext & { commentId: string; authorId: string | null; deleted: boolean }
 
 /** 串属于哪个页面（基表：活不活、能不能读由调用方的 pageAccess 判） */
 export async function threadContext(pool: Pool, threadId: string): Promise<ThreadContext | null> {
-  const { rows } = await pool.query<{ page_id: string; space_id: string; kind: string }>(
-    'SELECT t.page_id, p.space_id, p.kind FROM comment_threads t JOIN pages p ON p.id = t.page_id WHERE t.id = $1',
+  const { rows } = await pool.query<{ page_id: string; space_id: string; kind: string; enabled: boolean }>(
+    `SELECT t.page_id, p.space_id, p.kind, ${KIND_ENABLED} AS enabled FROM comment_threads t JOIN pages p ON p.id = t.page_id WHERE t.id = $1`,
     [threadId],
   )
   const r = rows[0]
-  return r ? { threadId, pageId: r.page_id, spaceId: r.space_id, pageKind: r.kind } : null
+  return r ? { threadId, pageId: r.page_id, spaceId: r.space_id, pageKind: r.kind, kindEnabled: r.enabled } : null
 }
 
 export async function commentContext(pool: Pool, commentId: string): Promise<CommentContext | null> {
-  const { rows } = await pool.query<{ thread_id: string; author_id: string | null; deleted: boolean; page_id: string; space_id: string; kind: string }>(
-    `SELECT c.thread_id, c.author_id, c.deleted_at IS NOT NULL AS deleted, t.page_id, p.space_id, p.kind
+  const { rows } = await pool.query<{
+    thread_id: string
+    author_id: string | null
+    deleted: boolean
+    page_id: string
+    space_id: string
+    kind: string
+    enabled: boolean
+  }>(
+    `SELECT c.thread_id, c.author_id, c.deleted_at IS NOT NULL AS deleted, t.page_id, p.space_id, p.kind, ${KIND_ENABLED} AS enabled
      FROM comments c JOIN comment_threads t ON t.id = c.thread_id JOIN pages p ON p.id = t.page_id WHERE c.id = $1`,
     [commentId],
   )
   const r = rows[0]
   return r
-    ? { commentId, threadId: r.thread_id, pageId: r.page_id, spaceId: r.space_id, pageKind: r.kind, authorId: r.author_id, deleted: r.deleted }
+    ? {
+        commentId,
+        threadId: r.thread_id,
+        pageId: r.page_id,
+        spaceId: r.space_id,
+        pageKind: r.kind,
+        kindEnabled: r.enabled,
+        authorId: r.author_id,
+        deleted: r.deleted,
+      }
     : null
 }

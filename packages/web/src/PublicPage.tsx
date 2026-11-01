@@ -95,6 +95,8 @@ export default function PublicPage() {
   const [icon, setIcon] = useState<PageIconValue | null>(null)
   // 全宽（页面属性）：换页加载期间沿用上一页的列宽，取到新页再按它（不先缩回窄栏再弹开）
   const [fullWidth, setFullWidth] = useState(false)
+  // 两种评论的页面开关：关掉的那种不画（服务端也不给那种串）；都关了整套不挂
+  const [commentKinds, setCommentKinds] = useState({ inline: true, page: false })
   const [cover, setCover] = useState<PageCoverValue | null>(null)
   const [run, setRun] = useState<RunDetail | null>(null)
   // 登录探测：undefined = 探测中，null = 匿名（401 即匿名，本组件外无 AuthProvider）
@@ -163,6 +165,7 @@ export default function PublicPage() {
         setIcon(tree.icon)
         setKind(tree.kind)
         setFullWidth(detail.full_width === true)
+        setCommentKinds({ inline: detail.inline_comments !== false, page: detail.page_comments === true })
         setCover(detail.cover ?? null)
         const host = hostRef.current
         if (!host) return
@@ -357,12 +360,14 @@ export default function PublicPage() {
             </h1>
             {run && <RunHead detail={run} replyHref={(parentId, replyId) => `/p/${parentId}${replyId ? `?block=${replyId}` : ''}`} />}
             <div className="public-body" ref={hostRef} />
-            {kind === 'doc' && id && <PageDiscussion pageId={id} ctx={commentCtx} />}
+            {kind === 'doc' && commentKinds.page && id && <PageDiscussion pageId={id} ctx={commentCtx} />}
             {run && <RunFoot detail={run} />}
           </>
         )}
       </main>
-      {kind === 'doc' && id && <CommentsHost pageId={id} mode="public" getView={getView} ctx={commentCtx} />}
+      {kind === 'doc' && (commentKinds.inline || commentKinds.page) && id && (
+        <CommentsHost key={`${commentKinds.inline}:${commentKinds.page}`} pageId={id} mode="public" getView={getView} ctx={commentCtx} kinds={commentKinds} />
+      )}
     </div>
   )
 }

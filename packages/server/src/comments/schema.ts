@@ -39,3 +39,24 @@ CREATE TABLE IF NOT EXISTS comment_reads (
   PRIMARY KEY (user_id, thread_id)
 );
 `
+
+// 评论开关(两种评论各一个):inline_comments = 划词评论,默认开;page_comments = 正文下方的整页讨论,默认关。
+// 关掉的那种不显示、不收新评论,已有的串保留,重新打开即恢复。
+// 存量库里的 allow_comments 列就是划词评论开关,改名过去(已有 inline_comments 就直接丢掉它);
+// 视图按列位置绑定着旧列名,动列前先拆掉;变更日志触发器的 WHEN 也引用着它,丢列前同样先拆(两者 db.ts 随后都会重建)
+// 由 db.ts 拼在 pages 加列段、live_pages 视图重建之前（视图的列集合在创建时固定）
+export const COMMENT_SWITCHES_DDL = `
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'pages' AND column_name = 'allow_comments') THEN
+    DROP VIEW IF EXISTS live_pages;
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'pages' AND column_name = 'inline_comments') THEN
+      DROP TRIGGER IF EXISTS page_changes_upd ON pages;
+      ALTER TABLE pages DROP COLUMN allow_comments;
+    ELSE
+      ALTER TABLE pages RENAME COLUMN allow_comments TO inline_comments;
+    END IF;
+  END IF;
+END $$;
+ALTER TABLE pages ADD COLUMN IF NOT EXISTS inline_comments BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE pages ADD COLUMN IF NOT EXISTS page_comments BOOLEAN NOT NULL DEFAULT false;
+`

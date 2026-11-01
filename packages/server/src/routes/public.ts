@@ -39,7 +39,7 @@ const SELECT_CHILDREN_META =
 const SELECT_RUN = `SELECT p.title, p.parent_id, r.record FROM runs r JOIN live_pages p ON p.id = r.page_id
   WHERE r.page_id = $1`
 const SELECT_PARENT_TITLE = 'SELECT id, title FROM live_pages WHERE id = $1'
-const SELECT_LAYOUT = 'SELECT full_width, cover_kind, cover_value, cover_y FROM live_pages WHERE id = $1'
+const SELECT_LAYOUT = 'SELECT full_width, inline_comments, page_comments, cover_kind, cover_value, cover_y FROM live_pages WHERE id = $1'
 
 type PageMetaRow = { id: string; title: string; kind: string; icon_emoji: string | null; icon_file_id: string | null }
 
@@ -125,17 +125,20 @@ export function publicRoutes(
       ? ((await pool.query<{ id: string; title: string }>(SELECT_PARENT_TITLE, [run.parent_id])).rows[0] ?? null)
       : null
     // 全宽与封面是页面版式:公开页与编辑页同一列宽、同一张封面(封面只在这里带,子树节点不带,省字节)
-    const layout = (await pool.query<{ full_width: boolean } & CoverColumns>(SELECT_LAYOUT, [id])).rows[0]
+    const layout = (await pool.query<{ full_width: boolean; inline_comments: boolean; page_comments: boolean } & CoverColumns>(SELECT_LAYOUT, [id])).rows[0]
     return c.json({
       title: extractTitle(doc),
       data: Buffer.from(Y.encodeStateAsUpdate(doc)).toString('base64'),
       full_width: layout?.full_width ?? false,
+      inline_comments: layout?.inline_comments ?? true,
+      page_comments: layout?.page_comments ?? false,
       cover: layout ? pageCoverOf(layout) : null,
       ...(run ? { run: run.record, parent } : {}),
     })
   })
 
-  // 公开页的评论：只读、只给未解决的串；作者只有名字，正文里的 @ 记号降成纯文字（user id 不出公开接口）
+  // 公开页的评论：只读、只给未解决的串；作者只有名字，正文里的 @ 记号降成纯文字（user id 不出公开接口）。
+  // 页面关掉的那种评论不给（publicThreads 里按开关滤），收起的评论不能从公开接口漏出去
   app.get('/api/public/pages/:id/comments', async (c) => {
     const id = c.req.param('id')
     if (!(await isPublic(id))) return c.json({ error: 'page not found' }, 404)

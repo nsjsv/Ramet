@@ -3,9 +3,10 @@
 //   mention    C @了我（mentions 是落库时过滤过的本空间成员）
 //   reply      我在这个串里发过言（未删的）——我之后才发言的话，发言时已读，比我早的评论自然不算
 //   new_thread C 是串的首条，而我是页面创建者
-// 只列活页面（live_pages）且我仍是其空间成员的（列举类：全局 admin 也不例外）。只是视图，按钮走评论接口自己的判定
+// 只列活页面（live_pages）且我仍是其空间成员的（列举类：全局 admin 也不例外）。只是视图，按钮走评论接口自己的判定。
+// 页面关掉的那种评论不列：页面上已收起，点进去看不到、也读不掉这条
 import type { Pool } from 'pg'
-import { plainMentions } from './store.js'
+import { KIND_ENABLED, plainMentions } from './store.js'
 
 export type CommentInboxItem = {
   type: 'comment'
@@ -38,6 +39,7 @@ const SELECT_COMMENT_ITEMS = `SELECT * FROM (
     SELECT 1 FROM comments o WHERE o.thread_id = t.id AND o.author_id = $1 AND o.deleted_at IS NULL
   ) AS yes) mine
   WHERE c.deleted_at IS NULL
+    AND ${KIND_ENABLED}
     AND c.author_id IS DISTINCT FROM $1
     AND c.created_at > now() - interval '${WINDOW_DAYS} days'
     AND (r.read_at IS NULL OR c.created_at > r.read_at)

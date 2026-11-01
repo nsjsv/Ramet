@@ -35,6 +35,9 @@ export interface Page {
   is_template?: boolean
   /** true = 全宽：正文铺满画面、不收 720 列；旧缓存缺字段 = 否 */
   full_width?: boolean
+  /** 评论开关：划词评论（旧缓存缺字段 = 开）/ 正文下方的整页讨论（缺字段 = 关）。关掉的那种不显示、不收新评论 */
+  inline_comments?: boolean
+  page_comments?: boolean
   /** 同父子页的顺序（侧栏拖拽，小数可插中间）；null = 没排过，排在有值之后。
    *  增量同步合并后按它重排（@ramet/shared/page-tree 的 comparePages）；旧缓存缺字段按 null */
   position?: number | null
@@ -241,6 +244,9 @@ export interface PublicPageDoc {
   data: string
   /** 页面全宽（与编辑页同一列宽）；旧服务端缺字段 = 否 */
   full_width?: boolean
+  /** 评论开关；旧服务端缺字段 = 划词评论开、整页讨论关 */
+  inline_comments?: boolean
+  page_comments?: boolean
   /** 页面封面；旧服务端缺字段 = 没有 */
   cover?: PageCover | null
   run?: RunRecord
@@ -575,6 +581,9 @@ export const api = {
   /** 全宽开关（页面属性：协作者与公开页同看；viewer 403） */
   setFullWidth: (id: string, on: boolean) =>
     request<Page>(`/api/pages/${id}`, { method: 'PATCH', body: JSON.stringify({ full_width: on }) }),
+  /** 评论开关（页面属性：关掉的那种全员都看不到、发不了；viewer 403） */
+  setCommentSwitch: (id: string, col: 'inline_comments' | 'page_comments', on: boolean) =>
+    request<Page>(`/api/pages/${id}`, { method: 'PATCH', body: JSON.stringify({ [col]: on }) }),
   renamePage: (id: string, title: string) =>
     request<Page>(`/api/pages/${id}`, { method: 'PATCH', body: JSON.stringify({ title }) }),
   /** 挪父级/排序（树上拖拽）：同空间 + 防环校验在服务端（parent 不可见/跨空间 400，自环 400）；

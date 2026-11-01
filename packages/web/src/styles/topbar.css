@@ -292,3 +292,30 @@ button.crumb:hover {
     display: none;
   }
 }
+
+/* ⋮ 菜单里带子菜单的项（评论开关）：右侧箭头，子菜单贴着主菜单左缘飞出、与该项顶对齐
+   （⋮ 菜单贴视口右缘，往右没地方）。子菜单复用 .page-menu 卡片，只改位置 */
+.page-menu-flyout {
+  position: relative;
+}
+
+.page-menu .menu-chevron {
+  margin-left: auto;
+  color: var(--ink-3);
+}
+
+.page-menu .page-menu-sub {
+  top: -4px;
+  right: calc(100% + 8px);
+  min-width: 140px;
+}
+
+/* 主菜单与子菜单之间留了缝：伸一块透明区垫上，鼠标横穿时不算移出 */
+.page-menu-sub::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 100%;
+  width: 10px;
+}

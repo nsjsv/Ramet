@@ -30,7 +30,9 @@ async function world(): Promise<World> {
 const post = (path: string, cookie: string, body: unknown = {}): Promise<Response> =>
   fetch(`${base}${path}`, { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify(body) })
 
+// 整页讨论默认关：发之前先打开（开关本身的行为在 routes/comments.test.ts）
 async function open(w: World, who: Who, body: string, pageId = w.pageId): Promise<Thread> {
+  await pool.query('UPDATE pages SET page_comments = true WHERE id = $1', [pageId])
   const res = await post(`/api/pages/${pageId}/comments`, w.cookie[who], { kind: 'page', body })
   expect(res.status).toBe(201)
   return ((await res.json()) as { thread: Thread }).thread
