@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // ---------- 把 connector 发到 npm（包名 @nsjsv/ramet）：.github/workflows/npm.yml 在每次推送时调，内容没变就跳过 ----------
-// 用法（仓库根目录）：node scripts/publish-connector.mjs [--dry-run]
+// 用法（仓库根目录）：node scripts/publish-connector.mjs [--dry-run] [--force]
+//   --force：内容没变也发新版（npm 新登记的 Trusted Publisher 要实际发布一次才算验证通过，平时用不到）
 //   打包（pack-connector.mjs 的 packConnector）→ 拉 npm 上的最新版逐文件比对（package.json 不比 version / gitHead）
 //   → 一样就跳过；不一样就版本 patch +1（npm 上低于 0.1.0 或还没有这个包时从 0.1.0 起）、npm publish。
 // 认证走 npm 的 Trusted Publishing（GitHub Actions 的 OIDC，npm 自己识别），仓库里和 CI 里都没有令牌；
@@ -15,6 +16,7 @@ import { PACKAGE_NAME, packConnector } from './pack-connector.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const dryRun = process.argv.includes('--dry-run')
+const force = process.argv.includes('--force')
 const FIRST = '0.1.0'
 
 function npm(args, cwd) {
@@ -70,7 +72,7 @@ async function publish(work) {
   if (latest) {
     npm(['pack', `${PACKAGE_NAME}@${latest}`, '--silent', '--pack-destination', work], work)
     execFileSync('tar', ['-xzf', join(work, `${PACKAGE_NAME.replace(/^@/, '').replace('/', '-')}-${latest}.tgz`), '-C', work])
-    if (!differs(stage, join(work, 'package'))) {
+    if (!force && !differs(stage, join(work, 'package'))) {
       console.log(`== connector 与 npm 上的 ${PACKAGE_NAME}@${latest} 相同，跳过发布`)
       return
     }
