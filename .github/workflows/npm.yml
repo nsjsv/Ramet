@@ -9,12 +9,8 @@ on:
   push:
     branches: [main]
     tags: ['v*']
+  # 手动运行 = 内容没变也发新版（新登记的 Trusted Publisher 要实际发布一次才算验证通过）
   workflow_dispatch:
-    inputs:
-      force:
-        description: 内容没变也发新版（新登记的 Trusted Publisher 要实际发布一次才算验证通过）
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -41,4 +37,4 @@ jobs:
 
       - run: npm ci --no-audit --no-fund
 
-      - run: node scripts/publish-connector.mjs ${{ inputs.force && '--force' || '' }}
+      - run: node scripts/publish-connector.mjs ${{ github.event_name == 'workflow_dispatch' && '--force' || '' }}
