@@ -1,0 +1,39 @@
+# 把 connector 发到 npm（@nsjsv/ramet，命令 ramet）：scripts/publish-connector.mjs 与 npm 上的最新版逐文件比对，
+# connector 的代码（含打进去的 server / shared 代码）变了才发 patch +1 的新版，没变就跳过。
+# 认证用 npm Trusted Publishing（OIDC），不需要任何令牌。npmjs.com 上的配置（包 → Settings → Trusted Publisher）：
+#   GitHub Actions，用户 nsjsv，仓库 Ramet，工作流文件名 npm.yml，并允许直接 npm publish
+# 文件名就是那条配置的一部分，改名要同步改 npm 上的设置。
+name: npm
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # npm Trusted Publishing 靠它拿 OIDC 令牌
+
+# 不取消、不并行：两次发布同时算版本号会撞上同一个号
+concurrency:
+  group: npm-publish
+  cancel-in-progress: false
+
+jobs:
+  connector:
+    # 只在公开仓库发布：Trusted Publishing 只认这个仓库，别处跑了也只会失败
+    if: github.repository == 'nsjsv/Ramet'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Trusted Publishing 要 npm 11.5.1 以上，Node 24 自带
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+
+      - run: npm ci --no-audit --no-fund
+
+      - run: node scripts/publish-connector.mjs
