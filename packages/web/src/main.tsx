@@ -4,6 +4,7 @@ import App from './App'
 import { diagnosticsEnabled, initClientDiagnostics } from './debug-log'
 import { installFileFallback } from './file-fallback'
 import './styles.css'
+import { installTips } from './tip'
 import UpdateNotice from './UpdateNotice'
 import { trackKeyboardInset } from './viewport'
 
@@ -12,6 +13,9 @@ if (diagnosticsEnabled()) initClientDiagnostics()
 
 // 图床回退：站内图片从图床加载失败时改走源站（见 file-fallback.ts）
 installFileFallback()
+
+// 悬停提示：带 data-tip 的元素悬停 / 键盘聚焦时在上方出提示（见 tip.ts）
+installTips()
 
 // 软键盘：把被键盘盖住的高度写进 --kb（iOS Safari 键盘不改布局视口，见 viewport.ts）
 trackKeyboardInset()

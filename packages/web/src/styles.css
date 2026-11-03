@@ -15,6 +15,7 @@
 @import './styles/colors.css';
 @import './styles/blocks.css';
 @import './styles/menus.css';
+@import './styles/tip.css';
 @import './styles/topbar.css';
 @import './styles/admin.css';
 @import './styles/workspace-switcher.css';

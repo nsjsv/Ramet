@@ -1,5 +1,6 @@
 /* ---------- 视图工具栏：筛选 / 排序 / 分组 / 属性 ----------
- * 按钮上带当前条数；viewer 全部禁用（服务端那条连接本就只读，入口在这里关掉）。
+ * 只出图标，名字与当前状态（条数、按哪个属性分组）放悬停提示里；生效中的按钮转强调色，不看提示也知道开着。
+ * 标签多时工具栏不跟视图标签抢宽度。viewer 全部禁用（服务端那条连接本就只读，入口在这里关掉）。
  * 不分组的布局（画廊、日历、时间线，见 layoutGroups）分组按钮禁用，悬停说明原因：写了 groupBy 解析时也会被忽略。
  * 日历 / 时间线的条目只画标题，不出「属性」（选了显示哪些属性也看不到）。 */
 import type * as Y from 'yjs'
@@ -22,20 +23,23 @@ export default function Toolbar({ doc, schema, view, readOnly, spaceId }: Props)
   const which = anchor?.dataset.menu as Which | undefined
   const groupName = view.groupBy ? findProp(schema, view.groupBy)?.name : undefined
   const groupOff = !layoutGroups(view.layout)
-  const button = (id: Which, icon: IconName, label: string, on: boolean) => (
-    <button
-      type="button"
-      data-menu={id}
-      className={'cl-bar-btn' + (on ? ' is-on' : '')}
-      disabled={readOnly || (id === 'group' && groupOff)}
-      title={id === 'group' && groupOff ? C.noGroup(COPY.collection.views.layouts[view.layout]) : undefined}
-      aria-expanded={which === id}
-      onClick={(e) => open(e.currentTarget)}
-    >
-      <Icon name={icon} size={14} />
-      <span>{label}</span>
-    </button>
-  )
+  const button = (id: Which, icon: IconName, label: string, on: boolean) => {
+    const tip = id === 'group' && groupOff ? C.noGroup(COPY.collection.views.layouts[view.layout]) : label
+    return (
+      <button
+        type="button"
+        data-menu={id}
+        className={'cl-bar-btn is-icon' + (on ? ' is-on' : '')}
+        disabled={readOnly || (id === 'group' && groupOff)}
+        data-tip={tip}
+        aria-label={tip}
+        aria-expanded={which === id}
+        onClick={(e) => open(e.currentTarget)}
+      >
+        <Icon name={icon} size={16} />
+      </button>
+    )
+  }
   return (
     <div className="cl-bar">
       {button('filter', 'filter', C.count(C.filter, view.filter.all.length), view.filter.all.length > 0)}

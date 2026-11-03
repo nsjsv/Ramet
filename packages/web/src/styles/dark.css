@@ -60,6 +60,8 @@
     --find-hit: rgba(255, 170, 0, 0.35);
     --shadow-1: 0 0 0 1px var(--line);
     --shadow-2: 0 12px 36px rgba(0, 0, 0, 0.5);
+    --tip-bg: #3a3a38;
+    --tip-ink: #ecebe8;
   }
 }
 

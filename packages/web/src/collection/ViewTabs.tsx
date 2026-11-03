@@ -47,7 +47,7 @@ export default function ViewTabs({ doc, schema, activeId, onSelect, readOnly: vi
           data-view={v.id}
           aria-selected={v.id === activeId}
           className={'cl-tab' + (v.id === activeId ? ' is-active' : '')}
-          title={v.id === activeId && !readOnly ? C.more : undefined}
+          data-tip={v.id === activeId && !readOnly ? C.more : undefined}
           onClick={(e) => {
             if (v.id !== activeId) onSelect(v.id)
             else if (!readOnly) open(e.currentTarget)
@@ -62,7 +62,7 @@ export default function ViewTabs({ doc, schema, activeId, onSelect, readOnly: vi
         <button
           type="button"
           className="cl-tab cl-tab-add"
-          title={C.add}
+          data-tip={C.add}
           aria-label={C.add}
           aria-expanded={addAnchor !== null}
           onClick={(e) => openAdd(e.currentTarget)}

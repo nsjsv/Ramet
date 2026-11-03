@@ -120,6 +120,14 @@
   color: var(--ink-2);
 }
 
+/* 只有图标的工具栏按钮：方形，与视图标签同高 */
+.cl-bar-btn.is-icon {
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+}
+
 .cl-bar-btn.is-on {
   color: var(--accent);
 }

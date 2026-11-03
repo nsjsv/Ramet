@@ -1,0 +1,32 @@
+/* 悬停提示（tip.ts）：挂在 body 上的单个浮层，left / top 由 JS 逐帧写入，所以只做淡入淡出、不做位移动画。
+ * width: max-content 让宽度只看文字，不随上一次停的位置（离右缘多近）变窄折行。
+ * z-index 90 压过所有浮层（最高的 80），菜单里的按钮也能出提示。 */
+.tip {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 90;
+  width: max-content;
+  max-width: min(280px, calc(100vw - 16px));
+  padding: 4px 8px;
+  border-radius: var(--r-sm);
+  background: var(--tip-bg);
+  color: var(--tip-ink);
+  font-size: var(--t-xs);
+  font-weight: 500;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  box-shadow: 0 2px 8px rgba(15, 15, 15, 0.16);
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity var(--d-1) var(--ease-out),
+    visibility 0s linear var(--d-1);
+}
+
+.tip.is-on {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity var(--d-1) var(--ease-out);
+}

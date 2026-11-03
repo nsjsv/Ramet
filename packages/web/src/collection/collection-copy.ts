@@ -131,7 +131,7 @@ export const COLLECTION_COPY = {
     sort: '排序',
     group: '分组',
     props: '属性',
-    count: (label: string, n: number) => (n > 0 ? `${label} ${n}` : label),
+    count: (label: string, n: number) => (n > 0 ? `${label}（${n} 条）` : label),
     noGroup: (layout: string) => `${layout}视图不分组`,
   },
   filter: {
