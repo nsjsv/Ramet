@@ -1,5 +1,5 @@
 // 集合的界面文案，并进 copy.ts 的 COPY.collection；单独成文件是为了让 copy.ts 不超过 800 行
-import type { FilterOp, PropType, StatusGroup } from '@ramet/shared/collection-model'
+import type { CardSize, CollectionLayout, FilterOp, FunctionGroup, PropType, RollupFn, StatusGroup } from '@ramet/shared/collection-model'
 import type { ColorName } from '@ramet/shared/md-dialect'
 
 const TYPES: Record<PropType, string> = {
@@ -14,6 +14,15 @@ const TYPES: Record<PropType, string> = {
   person: '人员',
   created_time: '创建时间',
   edited_time: '编辑时间',
+  email: '邮箱',
+  phone: '电话',
+  created_by: '创建者',
+  edited_by: '最后编辑者',
+  unique_id: '自动编号',
+  files: '文件与媒体',
+  relation: '关联',
+  rollup: '汇总',
+  formula: '公式',
 }
 
 /** 筛选运算的叫法（按类型有不同说法的在 opLabel 里换） */
@@ -35,6 +44,32 @@ const OPS: Record<FilterOp, string> = {
   not_empty: '不为空',
   checked: '已勾选',
   unchecked: '未勾选',
+}
+
+/** 汇总的计算方式（设置菜单里的叫法） */
+const ROLLUP_FN_NAMES: Record<RollupFn, string> = {
+  show_original: '显示原值',
+  show_unique: '显示去重值',
+  count: '计数',
+  count_values: '计数（值）',
+  count_unique: '计数（去重）',
+  count_empty: '为空数',
+  count_not_empty: '非空数',
+  percent_empty: '为空占比',
+  percent_not_empty: '非空占比',
+  sum: '求和',
+  average: '平均值',
+  median: '中位数',
+  min: '最小值',
+  max: '最大值',
+  range: '范围',
+  earliest: '最早日期',
+  latest: '最晚日期',
+  date_range: '日期范围',
+  checked: '已勾选数',
+  unchecked: '未勾选数',
+  percent_checked: '已勾选占比',
+  percent_unchecked: '未勾选占比',
 }
 
 const GROUPS: Record<StatusGroup, string> = { todo: '未开始', doing: '进行中', done: '已完成' }
@@ -73,17 +108,22 @@ export const COLLECTION_COPY = {
   colors: COLORS,
   /** 视图标签 */
   views: {
-    newTable: '表格',
-    newBoard: '看板',
     add: '新建视图',
     layout: '布局',
-    layouts: { table: '表格', board: '看板' },
+    /** 布局名，也是新视图的默认名 */
+    layouts: { table: '表格', board: '看板', list: '列表', gallery: '画廊', calendar: '日历', timeline: '时间线' } satisfies Record<CollectionLayout, string>,
     rename: '重命名',
     name: '视图名称',
     remove: '删除视图',
     lastOne: '至少要保留一个视图',
     confirmRemove: (name: string) => `删除视图「${name}」？行和属性不受影响。`,
     more: '视图设置',
+    /** 画廊的专属设置 */
+    cover: '卡片预览',
+    coverPage: '页面封面',
+    coverNone: '不显示',
+    cardSize: '卡片大小',
+    cardSizes: { s: '小', m: '中', l: '大' } satisfies Record<CardSize, string>,
   },
   /** 工具栏 */
   bar: {
@@ -92,6 +132,7 @@ export const COLLECTION_COPY = {
     group: '分组',
     props: '属性',
     count: (label: string, n: number) => (n > 0 ? `${label} ${n}` : label),
+    noGroup: (layout: string) => `${layout}视图不分组`,
   },
   filter: {
     add: '添加筛选条件',
@@ -139,6 +180,9 @@ export const COLLECTION_COPY = {
     remove: '删除属性',
     confirmRemove: (name: string) => `删除属性「${name}」？各行里的值会保留，恢复集合页的版本可以找回。`,
     readonlyType: '自动生成，不能编辑',
+    /** 自动编号的前缀（显示成「前缀-编号」） */
+    prefix: '前缀',
+    prefixHint: '如 TASK',
   },
   /** 单元格 */
   cell: {
@@ -149,6 +193,20 @@ export const COLLECTION_COPY = {
     clear: '清空',
     noMembers: '没有可选的成员',
     badNumber: '要填数字',
+    /** 计算类格子的悬停提示 */
+    readonly: '自动生成，不能编辑',
+    /** 日期编辑弹层 */
+    date: { start: '开始', end: '结束', range: '结束日期', today: '今天' },
+    /** 文件与媒体编辑弹层 */
+    files: {
+      upload: '上传',
+      hint: '拖文件到这里，或点上传（单个不超过 10MB）',
+      remove: '移除',
+      unavailable: '文件不可用',
+      unnamed: '未命名文件',
+      tooMany: (n: number) => `一格最多放 ${n} 个文件`,
+      failed: (name: string, why: string) => `${name}：${why}`,
+    },
   },
   /** 行的选择与删除 */
   select: {
@@ -174,6 +232,39 @@ export const COLLECTION_COPY = {
   drag: '拖动排序',
   /** 行手柄：点开菜单，拖动排序（无排序时） */
   handle: { tip: '点击打开菜单', tipDrag: '点击打开菜单，拖动排序', open: '打开', openTab: '在新标签页打开', copyLink: '复制链接' },
+  /** 日历与时间线（collection/calendar/、collection/timeline/、date-setup.tsx） */
+  date: {
+    /** 视图设置里的小标题 */
+    dateBy: '按哪个日期排',
+    needDate: '日历和时间线按一个日期属性排布',
+    noDateProp: '这个集合还没有日期属性',
+    pick: '选一个日期属性',
+    create: '新建日期属性',
+    today: '今天',
+    prevMonth: '上个月',
+    nextMonth: '下个月',
+    monthTitle: (year: number, month: number) => `${year}年${month}月`,
+    /** 每月 1 号的格子写全「M月D日」，跨月的几格一眼分得清 */
+    firstDay: (month: number, day: number) => `${month}月${day}日`,
+    weekdays: ['一', '二', '三', '四', '五', '六', '日'],
+    dayTitle: (month: number, day: number, weekday: string) => `${month}月${day}日 周${weekday}`,
+    /** 一格放不下时收起的条数：正文集合块里格子很窄，写成「还有 N 条」会被截成「还有…」看不到数 */
+    more: (n: number) => `+${n}`,
+    moreTip: (n: number) => `还有 ${n} 条，点开看当天全部`,
+    add: '在这一天新建',
+    capped: (n: number) => `这段时间的行太多，只显示前 ${n} 条`,
+    /** 按创建 / 编辑时间排的条目悬停说明 */
+    locked: '按创建 / 编辑时间排布，不能拖动',
+    scales: { day: '日', week: '周', month: '月', quarter: '季' },
+    year: (year: number) => `${year}年`,
+    month: (month: number) => `${month}月`,
+    quarter: (q: number) => `第${q}季`,
+    unscheduled: '未排期',
+    schedule: '排到今天',
+    noUnscheduled: '没有未排期的行',
+    resizeStart: '拖动改开始日期',
+    resizeEnd: '拖动改结束日期',
+  },
   /** 看板视图 */
   board: {
     needGroup: '看板按状态或单选分列',
@@ -181,6 +272,72 @@ export const COLLECTION_COPY = {
     add: '在这一列新建',
   },
   rowProps: '属性',
+  /** 关联（collection/cells/Relation*.tsx、relation-settings.tsx） */
+  relation: {
+    broken: '关联已失效',
+    /** 历史流水 / 复制里不在对方集合的行（进了回收站、挪走了） */
+    missing: '已不在的行',
+    search: '搜索行…',
+    more: (n: number) => `还有 ${n} 行，输入名字搜索`,
+    empty: '对方集合还没有行',
+    noMatch: '没有匹配的行',
+    pickTarget: '关联到哪个集合',
+    noTargets: '这个空间还没有集合',
+    self: '本集合',
+    target: '关联到',
+    twoWay: (name: string) => `在「${name}」里显示`,
+    reverseName: '对方的属性名',
+    single: '只能关联一行',
+    create: '添加关联',
+    creating: '添加中…',
+    from: (collection: string, prop: string) => `由「${collection}」的「${prop}」反向显示`,
+    /** paired = 现在双向时对方集合的名字：换目标会删掉那边的反向属性，在新集合里另建一个 */
+    confirmRetarget: (paired: string | null) =>
+      (paired ? `「${paired}」里对应的反向属性会被删掉，改在新集合里显示。` : '') +
+      '换成别的集合后，现有的关联会读成空（值留在行里，换回来还在）。继续？',
+    confirmOneWay: (name: string) => `关掉后「${name}」里对应的反向属性会被删掉。继续？`,
+    confirmRetype: (name: string) => `改成别的类型会删掉「${name}」里对应的反向属性。继续？`,
+    confirmRemove: (prop: string, other: string) =>
+      `删除关联「${prop}」？「${other}」里对应的属性也会一并删掉。各行里的值会保留，恢复集合页的版本可以找回。`,
+    reverseType: '反向关联不能改类型，可以删除',
+    tooMany: (n: number) => `一次最多改 ${n} 个`,
+  },
+  /** 汇总 */
+  rollup: {
+    relation: '沿哪个关联',
+    prop: '统计对方的哪个属性',
+    fn: '计算方式',
+    pick: '选择…',
+    loading: '加载中…',
+    noRelation: '先建一个关联属性',
+    broken: '汇总已失效',
+    unset: '未设置',
+    days: (n: string) => `${n} 天`,
+    fns: ROLLUP_FN_NAMES,
+  },
+  /** 公式（FormulaEditor.tsx、cells/FormulaCell.tsx；函数说明在 formula-docs.ts） */
+  formula: {
+    edit: '编辑公式',
+    none: '还没有写公式',
+    bad: '公式有误',
+    title: (name: string) => `编辑公式：${name}`,
+    placeholder: '如 [单价] * [数量]',
+    emptyHint: '[属性名] 引用属性，"文本" 写文本，& 把文字接起来',
+    resultType: (type: string) => `结果类型：${type}`,
+    preview: '预览',
+    previewOf: (title: string) => `第一行「${title}」`,
+    previewEmpty: '（空）',
+    noRow: '没有可预览的行',
+    searchFn: '搜索函数…',
+    noFn: '没有匹配的函数',
+    groups: { logic: '逻辑', math: '数学', text: '文本', date: '日期', list: '列表' } satisfies Record<FunctionGroup, string>,
+    insert: '点击插入到光标处',
+    save: '保存',
+    cancel: '取消',
+    close: '关闭',
+    cantSave: '先改好公式里的错误才能保存',
+    keys: '⌘ / Ctrl + Enter 保存，Esc 取消',
+  },
   /** 正文里的「集合」块与「链接视图」块（collection/block-view.tsx、editor/collection-block.ts） */
   embed: {
     publicHint: '集合暂不支持公开查看',

@@ -40,7 +40,13 @@
 @import './styles/skills.css';
 @import './styles/collection.css';
 @import './styles/collection-board.css';
+@import './styles/collection-list.css';
+@import './styles/collection-gallery.css';
+@import './styles/collection-calendar.css';
+@import './styles/collection-timeline.css';
 @import './styles/collection-bulk.css';
+@import './styles/collection-cells.css';
+@import './styles/collection-formula.css';
 @import './styles/collection-block.css';
 @import './styles/inbox.css';
 @import './styles/comments.css';

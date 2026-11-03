@@ -57,3 +57,34 @@
   line-height: 1.6;
   color: var(--ink-3);
 }
+
+/* 确认成功页：停留几秒后自动关（ConnectMachine 的倒数） */
+.connect-done {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.connect-done-mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  margin: 4px 0 12px;
+  border-radius: 50%;
+  color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 12%, transparent);
+}
+
+.connect-done-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.connect-done .join-line {
+  margin: 8px 0 10px;
+  font-size: 14px;
+}

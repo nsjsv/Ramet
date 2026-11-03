@@ -1,0 +1,193 @@
+/* 集合的列表视图（collection/list/）。
+ * 一行 = 行首槽（手柄 + 勾选框；能悬停的宽屏溢出到列表左外侧，同表格）+ 内容（图标、标题，属性紧凑排在右侧）。
+ * 动效只动 opacity / transform；折叠段、拖行落下的重排由 motion.ts 的 flip() 做。落点提示是伪元素横线，不改 margin。 */
+
+.cl-list {
+  --cl-gutter-w: 44px;
+  font-size: var(--t-sm);
+}
+
+@media (hover: hover) and (min-width: 769px) {
+  /* 行首槽溢出到左外侧：把那一段并进自己的盒子，从那里按下也能起框选 */
+  .cl-list-wrap {
+    margin-left: -44px;
+    padding-left: 44px;
+  }
+
+  .cl-list {
+    --cl-gutter-w: 0px;
+  }
+
+  /* 列宽 0 时内边距会挤进内容：改成整体左挪 */
+  .cl-list-gutter {
+    position: relative;
+    right: 6px;
+    padding-right: 0;
+  }
+}
+
+.cl-list-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--cl-gutter-w) minmax(0, 1fr);
+  align-items: center;
+}
+
+/* 宽度为 0 时靠 flex-end 把手柄与勾选框溢出到左边 */
+.cl-list-gutter {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  min-width: 0;
+  padding-right: 6px;
+}
+
+.cl-list-row:hover .cl-handle,
+.cl-list-row:hover .cl-pick,
+.cl-list-row:hover .cl-open,
+.cl-list-main:focus-within .cl-open {
+  opacity: 1;
+}
+
+.cl-list-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 34px;
+  padding: 4px 6px;
+  border-radius: var(--r-sm);
+  line-height: 1.5; /* 定死行高：line-height: normal 下中文行比输入框（按西文字体算）高，进编辑会跳 */
+  cursor: pointer;
+  outline: none;
+}
+
+.cl-list-main:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.cl-list-row:hover .cl-list-main {
+  background: var(--hover);
+}
+
+.cl-list-row.is-picked .cl-list-main {
+  background: var(--accent-tint);
+}
+
+.cl-list-name {
+  flex: 0 1 auto;
+  min-width: 40px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.cl-list-name.is-empty {
+  color: var(--ink-3);
+}
+
+.cl-list-row.is-editable .cl-list-name {
+  cursor: text;
+}
+
+/* 改名的输入框和文字一样高、铺满标题后面的空：边框 / 内边距用负外边距抵掉，进编辑文字不挪位、行不变高 */
+.cl-list-main > .cl-input {
+  flex: 1 1 200px;
+  height: calc(1lh + 2px);
+  margin: -1px -4px;
+  padding: 0 3px;
+}
+
+/* 属性紧凑排在右侧；标题长了两边按比例收，属性最多占六成宽 */
+.cl-list-props {
+  display: flex;
+  flex: 0 1 auto;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  min-width: 0;
+  max-width: 60%;
+  margin-left: auto;
+  overflow: hidden;
+  color: var(--ink-2);
+}
+
+.cl-list-props:empty {
+  display: none;
+}
+
+.cl-list-prop {
+  display: flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 240px;
+}
+
+.cl-list-prop.is-editing {
+  flex: none;
+}
+
+.cl-list-prop .cl-text.is-num {
+  margin-left: 0;
+}
+
+.cl-list-prop .cl-input {
+  width: 160px;
+  height: calc(1lh + 2px);
+  margin: -1px -4px;
+  padding: 0 3px;
+}
+
+/* 可编辑的行：属性点了就地改，悬停给个底色提示可点 */
+.cl-list-row.is-editable .cl-list-prop:not(.is-locked) {
+  margin: -1px -4px;
+  padding: 1px 4px;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+
+.cl-list-row.is-editable .cl-list-prop:not(.is-locked):hover {
+  background: var(--hover);
+}
+
+/* 落点提示：行上 / 下沿的横线（绝对定位不占位） */
+.cl-list-row.is-drop-before::before,
+.cl-list-row.is-drop-after::after {
+  content: '';
+  position: absolute;
+  left: var(--cl-gutter-w);
+  right: 0;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+  pointer-events: none;
+}
+
+.cl-list-row.is-drop-before::before {
+  top: -1px;
+}
+
+.cl-list-row.is-drop-after::after {
+  bottom: -1px;
+}
+
+.cl-list-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 6px 4px calc(var(--cl-gutter-w) + 6px);
+  border-radius: var(--r-sm);
+  color: var(--ink-3);
+  font-size: var(--t-sm);
+  text-align: left;
+}
+
+.cl-list-foot:hover {
+  background: var(--hover);
+  color: var(--ink-2);
+}

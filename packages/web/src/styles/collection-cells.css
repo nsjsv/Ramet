@@ -1,0 +1,336 @@
+/* 集合单元格里的新类型展示与编辑弹层（collection/cells/：file-item.tsx、DateEditor.tsx、FilesEditor.tsx） */
+
+/* 文件格：图片缩略图 + 其余文件的文件名小块，一行放不下就截掉 */
+.cl-files {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.cl-file-thumb {
+  display: inline-flex;
+  flex: none;
+  padding: 0;
+  border-radius: 3px;
+  overflow: hidden;
+  background: var(--hover);
+}
+
+button.cl-file-thumb {
+  cursor: zoom-in;
+}
+
+.cl-file-thumb img {
+  display: block;
+  height: 22px;
+  width: auto;
+  max-width: 44px;
+  object-fit: cover;
+}
+
+.cl-file-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  max-width: 160px;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: var(--mk-bg-gray);
+  color: var(--ink-2);
+  font-size: var(--t-xs);
+  line-height: 20px;
+  text-decoration: none;
+}
+
+a.cl-file-chip:hover {
+  color: var(--ink);
+}
+
+.cl-file-chip.is-broken {
+  color: var(--ink-3);
+  text-decoration: line-through;
+}
+
+.cl-file-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cl-card-prop .cl-files {
+  flex-wrap: wrap;
+}
+
+/* 最后编辑者是 agent 时排在人名前面的 agent 名 */
+.cl-agent {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  min-width: 0;
+  color: var(--ink-2);
+}
+
+/* 日期弹层 */
+.cl-date-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 240px;
+  padding: 6px;
+}
+
+.cl-date-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink-2);
+}
+
+.cl-date-row > span {
+  flex: none;
+  width: 2.5em;
+}
+
+.cl-date-row .cl-input {
+  flex: 1;
+}
+
+.cl-date-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+.cl-date-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--line);
+}
+
+/* 文件弹层：列表（拖动调顺序）+ 上传进度 + 底部上传按钮；整块可以接住拖进来的文件 */
+.cl-files-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 320px;
+  max-width: calc(100vw - 32px);
+  border-radius: var(--r-sm);
+}
+
+.cl-files-editor.is-over {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.cl-files-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.cl-files-row,
+.cl-files-up {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 2px 4px;
+  border-radius: var(--r-sm);
+}
+
+.cl-files-row:hover {
+  background: var(--hover);
+}
+
+.cl-files-row[data-drop='before'] {
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+
+.cl-files-row[data-drop='after'] {
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.cl-files-row .cl-file-chip {
+  max-width: 96px;
+}
+
+.cl-files-icon {
+  flex: none;
+  color: var(--ink-3);
+}
+
+.cl-files-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+a.cl-files-name:hover {
+  text-decoration: underline;
+}
+
+.cl-files-size {
+  flex: none;
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 上传进度：用 transform 画（不做宽度过渡） */
+.cl-files-bar {
+  flex: none;
+  width: 80px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--hover);
+  overflow: hidden;
+}
+
+.cl-files-bar > i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transform-origin: left center;
+  transition: transform var(--d-1) var(--ease-out);
+}
+
+.cl-files-error {
+  padding: 2px 6px;
+  color: var(--danger);
+  font-size: var(--t-xs);
+}
+
+.cl-files-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 2px 2px;
+  border-top: 1px solid var(--line);
+}
+
+.cl-files-hint {
+  min-width: 0;
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+}
+
+/* 自动编号的前缀输入 */
+.cl-prefix-input {
+  width: 120px;
+}
+
+/* 关联格：对方行的图标 + 标题（可点，打开那一行）；选择器的候选行同一个样子 */
+.cl-rel {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  max-width: 200px;
+  min-width: 0;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  line-height: 22px;
+}
+
+.cl-rel.is-link {
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: var(--line-strong);
+  text-underline-offset: 2px;
+}
+
+.cl-rel.is-link:hover {
+  background: var(--hover);
+}
+
+.cl-rel-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 选择器里某一项后面的小字说明（新建关联时的「本集合」） */
+.cl-picker-note {
+  margin-left: auto;
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+}
+
+/* 关联 / 汇总的属性设置、新建关联 */
+.cl-rel-settings,
+.cl-rollup-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.cl-rel-settings > *,
+.cl-rollup-settings > * {
+  flex: 0 0 auto;
+}
+
+.cl-rel-settings .cl-name-input {
+  margin: 0 8px;
+}
+
+.cl-rel-target {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cl-rel-target.is-dim {
+  color: var(--ink-3);
+}
+
+.cl-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 8px;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+.cl-check input {
+  margin: 0;
+}
+
+.cl-rel-add {
+  align-self: flex-end;
+  margin: 4px 8px;
+}
+
+.cl-hint.is-error {
+  color: var(--danger);
+}
+
+/* 筛选条件里关联的比较值：显示选中的那一行，点开选 */
+.cl-rel-value {
+  display: inline-flex;
+  align-items: center;
+  flex: 1;
+  width: 120px;
+  min-height: 26px;
+  overflow: hidden;
+  text-align: left;
+  cursor: pointer;
+}

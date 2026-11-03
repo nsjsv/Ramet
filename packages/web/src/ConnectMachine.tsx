@@ -2,23 +2,30 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api, ApiError, type ConnectPreview, type Space } from './api'
 import { COPY } from './copy'
+import { Icon } from './icons'
 
 type Done = { kind: 'approved' | 'pending'; space: string } | { kind: 'rejected' }
 
-/** 机器接入确认页（路由 /connect/:code，挂在登录后的 Routes 里；connector start 在终端打印这条链接）：
- * - 展示机器自报的信息与校验码，选空间（默认当前打开的空间），确认后 token 经机器自己的连接下发，浏览器不经手
+/** 成功页停留几秒再关：直接关掉会让人以为没点上 / 出错了 */
+const CLOSE_AFTER_SEC = 4
+
+/** 机器接入确认页（路由 /connect/:code，登录后由 Root 单独渲染，不进主应用外壳；connector start 在终端打印这条链接）：
+ * - 展示机器自报的信息与校验码，选空间（默认上次打开的空间），确认后 token 经机器自己的连接下发，浏览器不经手
  * - 链接一次性：确认 / 拒绝 / 过期 / 机器上的命令退出都会作废，之后预览 404，显示「链接已失效」
+ * - 确认成功后先停在成功页倒数几秒再尝试关掉标签页；浏览器不让关（这页经登录跳转来的，历史不止一条）就提示手动关
  * - 未登录打开时预览 401，回登录页；路径已由 Root 记入 sessionStorage，登录后跳回本页 */
-export default function ConnectMachine({ spaces, selectedSpaceId }: { spaces: Space[] | null; selectedSpaceId: string | null }) {
+export default function ConnectMachine({ selectedSpaceId }: { selectedSpaceId: string | null }) {
   const C = COPY.connect
   const { code } = useParams<{ code: string }>()
   const navigate = useNavigate()
   const [preview, setPreview] = useState<ConnectPreview | null>(null)
+  const [spaces, setSpaces] = useState<Space[] | null>(null)
   const [invalid, setInvalid] = useState(false)
   const [spaceId, setSpaceId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [done, setDone] = useState<Done | null>(null)
+  const [closeIn, setCloseIn] = useState(CLOSE_AFTER_SEC)
 
   useEffect(() => {
     if (!code) return
@@ -42,9 +49,37 @@ export default function ConnectMachine({ spaces, selectedSpaceId }: { spaces: Sp
     }
   }, [code])
 
+  useEffect(() => {
+    let cancelled = false
+    api
+      .listSpaces()
+      .then((list) => {
+        if (!cancelled) setSpaces(list)
+      })
+      .catch((err: unknown) => {
+        console.error(err)
+        if (!cancelled) setSpaces([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // 成功后倒数；到 0 调 window.close()，能关的话页面就没了，关不掉就停在 0 显示手动关闭的提示
+  const succeeded = done !== null && done.kind !== 'rejected'
+  useEffect(() => {
+    if (!succeeded) return
+    if (closeIn <= 0) {
+      window.close()
+      return
+    }
+    const timer = window.setTimeout(() => setCloseIn((n) => n - 1), 1000)
+    return () => window.clearTimeout(timer)
+  }, [succeeded, closeIn])
+
   // 只读成员不能接入机器：只列我是所有者 / 成员的空间
   const eligible = useMemo(() => (spaces ?? []).filter((s) => s.my_role === 'owner' || s.my_role === 'member'), [spaces])
-  // 默认选中当前打开的空间；它不能接入时退到个人空间 / 第一个能接入的。用户手动选过就不再改
+  // 默认选中上次打开的空间；它不能接入时退到个人空间 / 第一个能接入的。用户手动选过就不再改
   useEffect(() => {
     setSpaceId((cur) => {
       if (cur && eligible.some((s) => s.id === cur)) return cur
@@ -95,11 +130,18 @@ export default function ConnectMachine({ spaces, selectedSpaceId }: { spaces: Sp
     <div className="login-page">
       <div className="login-card join-card connect-card">
         <h1 className="login-logo">{C.title}</h1>
-        {done ? (
+        {done && done.kind !== 'rejected' ? (
+          <div className="connect-done">
+            <span className="connect-done-mark">
+              <Icon name="check" size={28} />
+            </span>
+            <p className="connect-done-title">{done.kind === 'approved' ? C.approvedTitle : C.pendingTitle}</p>
+            <p className="join-line">{done.kind === 'approved' ? C.approved(done.space) : C.pending(done.space)}</p>
+            <p className="connect-warn">{closeIn > 0 ? C.closing(closeIn) : C.closeManually}</p>
+          </div>
+        ) : done ? (
           <>
-            <p className="join-line">
-              {done.kind === 'rejected' ? C.rejected : done.kind === 'approved' ? C.approved(done.space) : C.pending(done.space)}
-            </p>
+            <p className="join-line">{C.rejected}</p>
             {home}
           </>
         ) : invalid ? (

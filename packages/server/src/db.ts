@@ -2,6 +2,7 @@ import { Pool, type PoolClient } from 'pg'
 import { COVER_COLUMNS } from './page-cover.js'
 import { API_PAGE_FIELDS } from './page-icon.js'
 import { COMMENT_SWITCHES_DDL, COMMENTS_DDL } from './comments/schema.js'
+import { COLLECTION_NUMBERS_DDL } from './collections/schema.js'
 
 // 页面变更日志（page-sync.ts）的 UPDATE 触发列：对外字段（API_PAGE_FIELDS，含 position）+ 图标两列 + 封面三列 + deleted_at。
 // 由白名单拼出，不另抄一份列清单，对外字段加列时触发条件跟着变。content_text / agent_session /
@@ -627,6 +628,7 @@ CREATE TABLE IF NOT EXISTS agent_session_files (
   updated_at TEXT NOT NULL DEFAULT (now()::text),
   PRIMARY KEY (page_id, tool, name)
 );
+${COLLECTION_NUMBERS_DDL}
 `
 
 // 存量数据迁移(幂等,可重复执行):

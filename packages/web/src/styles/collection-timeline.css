@@ -1,0 +1,363 @@
+/* 集合的时间线视图（collection/timeline/）。
+ * 一个滚动层（横竖都滚）：表头吸顶，左栏（行标题）吸左，右边是时间轴；行按行高绝对定位（竖向只画看得见的行）。
+ * 横条、表头格子、网格线的位置都是 transform: translateX + width（timeline-model 算好写在行内样式里），拖动中的预览不做过渡。
+ * 左栏宽、行高、表头高经 CSS 变量从 TimelineView 传进来（--tl-left / --tl-row / --tl-head）。
+ * 正文里的集合块：滚动层向右伸出正文列（collection-block.css），左栏仍与正文左缘对齐。
+ * 动效只动 opacity / transform；落下后行换位置由 motion.ts 的 flip() 做。 */
+
+.cl-tl {
+  padding-bottom: 12px;
+  font-size: var(--t-sm);
+}
+
+.cl-tl-bar-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 8px;
+}
+
+.cl-tl-scales {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--r-sm);
+  background: var(--bg-sunk);
+}
+
+.cl-tl-scroll {
+  position: relative;
+  max-height: 70vh;
+  overflow: auto;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  overscroll-behavior-x: contain;
+}
+
+.cl-tl-scroll.is-loading .cl-tl-rows {
+  opacity: 0.7;
+}
+
+.cl-tl-canvas {
+  position: relative;
+  min-width: 100%;
+}
+
+.cl-tl-head {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  height: var(--tl-head);
+  border-bottom: 1px solid var(--line);
+  background: var(--bg);
+}
+
+.cl-tl-corner {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  display: flex;
+  flex: 0 0 var(--tl-left);
+  align-items: flex-end;
+  padding: 0 12px 6px;
+  border-right: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+}
+
+.cl-tl-ticks {
+  position: relative;
+  flex: none;
+  height: 100%;
+  overflow: hidden;
+}
+
+.cl-tl-tick {
+  position: absolute;
+  left: 0;
+  display: flex;
+  align-items: center;
+  height: 50%;
+  padding: 0 6px;
+  overflow: hidden;
+  border-left: 1px solid var(--line);
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+  white-space: nowrap;
+}
+
+.cl-tl-tick.is-top {
+  top: 0;
+  color: var(--ink-2);
+}
+
+.cl-tl-tick.is-bottom {
+  bottom: 0;
+}
+
+.cl-tl-tick.is-today > span {
+  padding: 0 5px;
+  border-radius: var(--r-pill);
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.cl-tl-rows {
+  position: relative;
+}
+
+.cl-tl-grid {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--tl-left);
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.cl-tl-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 1px;
+  background: var(--line);
+}
+
+.cl-tl-today {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -1px;
+  width: 2px;
+  background: var(--accent);
+  opacity: 0.6;
+}
+
+.cl-tl-row {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: var(--tl-row);
+}
+
+/* 左栏要不透明：横条滚到它下面时被盖住 */
+.cl-tl-name {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: var(--tl-left);
+  height: 100%;
+  padding: 0 12px;
+  overflow: hidden;
+  border-right: 1px solid var(--line);
+  background: var(--bg);
+  cursor: pointer;
+  outline: none;
+}
+
+.cl-tl-name:hover {
+  background: color-mix(in srgb, var(--ink) 4.5%, var(--bg));
+}
+
+.cl-tl-name:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.cl-tl-name > .cl-input {
+  flex: 1;
+  height: calc(1lh + 2px);
+  padding: 0 4px;
+}
+
+.cl-tl-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cl-tl-title.is-empty {
+  color: var(--ink-3);
+}
+
+.cl-tl-lane {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--tl-left);
+  overflow: hidden;
+}
+
+.cl-tl-bar {
+  position: absolute;
+  top: 6px;
+  left: 0;
+  display: flex;
+  align-items: center;
+  height: calc(var(--tl-row) - 12px);
+  border-radius: var(--r-sm);
+  background: var(--accent-tint);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent);
+  color: var(--ink);
+  font-size: var(--t-xs);
+  cursor: pointer;
+}
+
+.cl-tl-bar.is-draggable {
+  cursor: grab;
+  touch-action: none;
+}
+
+.cl-tl-bar.is-dragging {
+  box-shadow: inset 0 0 0 1px var(--accent), var(--shadow-2);
+  cursor: grabbing;
+}
+
+.cl-tl-bar-name {
+  flex: 1;
+  min-width: 0;
+  padding: 0 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 两端手柄：改开始 / 结束 */
+.cl-tl-grip {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 1;
+  width: 8px;
+  cursor: ew-resize;
+  touch-action: none;
+}
+
+.cl-tl-grip.is-start {
+  left: 0;
+}
+
+.cl-tl-grip.is-end {
+  right: 0;
+}
+
+.cl-tl-grip::after {
+  content: '';
+  position: absolute;
+  top: 25%;
+  bottom: 25%;
+  left: 3px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+  opacity: 0;
+}
+
+.cl-tl-bar:hover .cl-tl-grip::after,
+.cl-tl-bar.is-dragging .cl-tl-grip::after {
+  opacity: 0.7;
+}
+
+/* 横条太窄放不下标题：标题画在横条右边 */
+.cl-tl-after {
+  position: absolute;
+  top: 0;
+  left: 0;
+  color: var(--ink-2);
+  font-size: var(--t-xs);
+  line-height: var(--tl-row);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.cl-tl-empty {
+  position: sticky;
+  left: 0;
+  width: var(--tl-left);
+  padding: 8px 12px;
+  color: var(--ink-3);
+}
+
+.cl-tl-new {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: var(--tl-left);
+  padding: 6px 12px;
+  border-right: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--ink-3);
+  text-align: left;
+}
+
+.cl-tl-new:hover {
+  color: var(--ink-2);
+}
+
+/* 未排期 */
+.cl-tl-none {
+  margin-top: 8px;
+}
+
+.cl-tl-none-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 4px;
+  color: var(--ink-2);
+}
+
+.cl-tl-none-head .chev {
+  display: block;
+}
+
+.cl-tl-none-head .chev.open {
+  transform: rotate(90deg);
+}
+
+.cl-tl-none-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 0 4px 0 24px;
+  border-radius: var(--r-sm);
+}
+
+.cl-tl-none-row:hover {
+  background: var(--hover);
+}
+
+.cl-tl-none-name {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  text-align: left;
+}
+
+.cl-tl-none-row .cl-bar-btn {
+  opacity: 0;
+}
+
+.cl-tl-none-row:hover .cl-bar-btn,
+.cl-tl-none-row .cl-bar-btn:focus-visible {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .cl-tl-none-row .cl-bar-btn {
+    opacity: 1;
+  }
+}

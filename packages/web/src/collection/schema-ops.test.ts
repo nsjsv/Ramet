@@ -5,23 +5,29 @@ import {
   addOption,
   addProp,
   addView,
+  dateChoices,
   deleteOption,
   deleteProp,
   deleteView,
   moveOption,
   moveProp,
   moveView,
+  newPropId,
   posAt,
   renameProp,
   renameView,
   restoreCollection,
   restoreRowProps,
+  setCardSize,
+  setDateBy,
   setFilter,
   setGroupBy,
   setLayout,
+  setPropCfg,
   setPropType,
   setShown,
   setSorts,
+  setViewCover,
   setWidth,
   toggleShown,
   updateOption,
@@ -60,6 +66,7 @@ function newDoc(): Y.Doc {
 }
 
 const read = (doc: Y.Doc) => parseCollection(doc.getMap('collection').toJSON())
+const viewRaw = (doc: Y.Doc, id: string) => (doc.getMap('collection').get('views') as Y.Map<unknown>).get(id) as Y.Map<unknown>
 
 describe('posAt', () => {
   test('两端外扩 1，中间取中点', () => {
@@ -85,6 +92,20 @@ describe('属性', () => {
     // 属性本身是 Y.Map（并发改名 / 改类型各自后写为准）
     expect(doc.getMap('collection').get('props')).toBeInstanceOf(Y.Map)
     expect((doc.getMap('collection').get('props') as Y.Map<unknown>).get(sel)).toBeInstanceOf(Y.Map)
+  })
+
+  test('先定好 id 再建（新建公式写好才建）：id 与配置同一笔写入；id 已被占用 / 不合法就另取', () => {
+    const doc = newDoc()
+    const id = newPropId(doc)
+    expect(read(doc).props.some((p) => p.id === id)).toBe(false)
+    const updates: Uint8Array[] = []
+    doc.on('update', (u: Uint8Array) => updates.push(u))
+    expect(addProp(doc, '公式', 'formula', { id, cfg: { expr: `[@${id}] + 1` } })).toBe(id)
+    expect(updates).toHaveLength(1)
+    expect(read(doc).props.find((p) => p.id === id)).toMatchObject({ type: 'formula', cfg: { expr: `[@${id}] + 1` } })
+    const again = addProp(doc, '公式', 'formula', { id })
+    expect(again).not.toBe(id)
+    expect(addProp(doc, 'x', 'text', { id: '__proto__' })).toMatch(/^[0-9a-z]+$/)
   })
 
   test('改名、删属性', () => {
@@ -131,6 +152,37 @@ describe('属性', () => {
     expect(read(doc).props.map((p) => p.id)).toEqual([b, 'sts001', a])
     moveProp(doc, 'sts001', 99)
     expect(read(doc).props.map((p) => p.id)).toEqual([b, a, 'sts001'])
+  })
+})
+
+describe('属性配置 cfg', () => {
+  const rawCfg = (doc: Y.Doc, id: string): unknown => ((doc.getMap('collection').get('props') as Y.Map<Y.Map<unknown>>).get(id)!).get('cfg')
+
+  test('编号前缀：写进 cfg（普通值），按当前类型解析；同值不写', () => {
+    const doc = newDoc()
+    const num = addProp(doc, '编号', 'unique_id')
+    expect(read(doc).props.find((p) => p.id === num)?.cfg).toEqual({ prefix: '' })
+    setPropCfg(doc, num, { prefix: 'TASK' })
+    expect(read(doc).props.find((p) => p.id === num)?.cfg).toEqual({ prefix: 'TASK' })
+    expect(rawCfg(doc, num)).not.toBeInstanceOf(Y.AbstractType)
+    let n = 0
+    doc.on('update', () => n++)
+    setPropCfg(doc, num, { prefix: 'TASK' })
+    expect(n).toBe(0)
+    setPropCfg(doc, 'gone01', { prefix: 'X' })
+    expect(n).toBe(0)
+  })
+
+  test('改类型不清 cfg：改回编号前缀还在；别的字段在合并写时保留', () => {
+    const doc = newDoc()
+    const num = addProp(doc, '编号', 'unique_id')
+    setPropCfg(doc, num, { prefix: 'BUG' })
+    setPropType(doc, num, 'text')
+    expect(read(doc).props.find((p) => p.id === num)?.cfg).toEqual({})
+    setPropCfg(doc, num, { other: 1 })
+    setPropType(doc, num, 'unique_id')
+    expect(read(doc).props.find((p) => p.id === num)?.cfg).toEqual({ prefix: 'BUG' })
+    expect(rawCfg(doc, num)).toEqual({ prefix: 'BUG', other: 1 })
   })
 })
 
@@ -209,6 +261,88 @@ describe('视图', () => {
     expect(pickView(read(doc), 'tbl001')).toMatchObject({ layout: 'board', groupBy: sel })
     setLayout(doc, 'tbl001', 'table')
     expect(pickView(read(doc), 'tbl001')).toMatchObject({ layout: 'table', groupBy: sel })
+  })
+
+  test('换布局：切到画廊清掉分组（文档里也清掉），换回表格不会冒出旧分组；列表照常分组', () => {
+    const doc = newDoc()
+    setGroupBy(doc, 'tbl001', 'sts001')
+    setLayout(doc, 'tbl001', 'list')
+    expect(pickView(read(doc), 'tbl001')).toMatchObject({ layout: 'list', groupBy: 'sts001' })
+    setLayout(doc, 'tbl001', 'gallery')
+    expect(pickView(read(doc), 'tbl001')).toMatchObject({ layout: 'gallery', groupBy: null })
+    expect(viewRaw(doc, 'tbl001').get('groupBy')).toBeNull()
+    setLayout(doc, 'tbl001', 'table')
+    expect(pickView(read(doc), 'tbl001')).toMatchObject({ layout: 'table', groupBy: null })
+    // 新建画廊不分组
+    const gallery = addView(doc, '画廊', 'gallery')
+    expect(pickView(read(doc), gallery)).toMatchObject({ layout: 'gallery', groupBy: null, cover: 'page', cardSize: 'm' })
+  })
+
+  test('画廊卡片预览与大小：写进视图；与读到的一样不写（不白出一条版本）', () => {
+    const doc = newDoc()
+    const files = addProp(doc, '图片', 'files')
+    const gallery = addView(doc, '画廊', 'gallery')
+    let updates = 0
+    doc.on('update', () => updates++)
+    setViewCover(doc, gallery, 'page')
+    setCardSize(doc, gallery, 'm')
+    expect(updates).toBe(0)
+    setViewCover(doc, gallery, files)
+    setCardSize(doc, gallery, 'l')
+    expect(pickView(read(doc), gallery)).toMatchObject({ cover: files, cardSize: 'l' })
+    setViewCover(doc, gallery, files)
+    setCardSize(doc, gallery, 'l')
+    expect(updates).toBe(2)
+    setViewCover(doc, gallery, 'none')
+    expect(pickView(read(doc), gallery).cover).toBe('none')
+    // 文件属性删了：读回页面封面
+    setViewCover(doc, gallery, files)
+    deleteProp(doc, files)
+    expect(pickView(read(doc), gallery).cover).toBe('page')
+    setViewCover(doc, 'nope00', 'none')
+    setCardSize(doc, 'nope00', 's')
+  })
+
+  test('日历 / 时间线：新建与切过去时补第一个日期类属性、清掉分组；已选的不动；没有日期类属性时留空（画空状态）', () => {
+    const doc = newDoc()
+    const empty = addView(doc, '日历', 'calendar')
+    expect(pickView(read(doc), empty)).toMatchObject({ layout: 'calendar', dateBy: null, groupBy: null })
+    expect(dateChoices(read(doc))).toEqual([])
+    const made = addProp(doc, '创建时间', 'created_time')
+    addProp(doc, '备注', 'text')
+    const due = addProp(doc, '截止', 'date')
+    expect(dateChoices(read(doc)).map((p) => p.id)).toEqual([made, due])
+    const timeline = addView(doc, '时间线', 'timeline')
+    expect(pickView(read(doc), timeline)).toMatchObject({ layout: 'timeline', dateBy: made, groupBy: null })
+    setGroupBy(doc, 'tbl001', 'sts001')
+    setLayout(doc, 'tbl001', 'calendar')
+    expect(pickView(read(doc), 'tbl001')).toMatchObject({ layout: 'calendar', dateBy: made, groupBy: null })
+    expect(viewRaw(doc, 'tbl001').get('groupBy')).toBeNull()
+    setDateBy(doc, 'tbl001', due)
+    setLayout(doc, 'tbl001', 'table')
+    setLayout(doc, 'tbl001', 'timeline')
+    expect(pickView(read(doc), 'tbl001').dateBy).toBe(due)
+    // 空的日历视图在有了日期属性后切到时间线：补上
+    setLayout(doc, empty, 'timeline')
+    expect(pickView(read(doc), empty).dateBy).toBe(made)
+  })
+
+  test('setDateBy：同值不写；别的类型写进去读成 null；属性删了读成 null', () => {
+    const doc = newDoc()
+    const due = addProp(doc, '截止', 'date')
+    const cal = addView(doc, '日历', 'calendar')
+    let updates = 0
+    doc.on('update', () => updates++)
+    setDateBy(doc, cal, due)
+    expect(updates).toBe(0)
+    setDateBy(doc, cal, null)
+    expect(pickView(read(doc), cal).dateBy).toBeNull()
+    setDateBy(doc, cal, 'sts001')
+    expect(pickView(read(doc), cal).dateBy).toBeNull()
+    setDateBy(doc, cal, due)
+    deleteProp(doc, due)
+    expect(pickView(read(doc), cal).dateBy).toBeNull()
+    setDateBy(doc, 'nope00', due)
   })
 
   test('换布局：没有可分组的属性时看板不分组（画空状态）', () => {
@@ -373,6 +507,31 @@ describe('restoreCollection：恢复集合页的某个版本（字段级同步�
     expect(read(doc)).toEqual(parseCollection(version))
   })
 
+  test('属性配置随版本恢复：编号前缀回到那个版本的；没变不写；版本里是别的类型时 cfg 不动', () => {
+    const doc = newDoc()
+    const num = addProp(doc, '编号', 'unique_id')
+    setPropCfg(doc, num, { prefix: 'TASK' })
+    const version = snap(doc)
+    setPropCfg(doc, num, { prefix: 'BUG' })
+    restoreCollection(doc, version)
+    expect(read(doc).props.find((p) => p.id === num)?.cfg).toEqual({ prefix: 'TASK' })
+    expect(updatesDuring(doc, () => restoreCollection(doc, version))).toBe(0)
+
+    // 删掉再恢复：新建的条目带上配置
+    deleteProp(doc, num)
+    restoreCollection(doc, version)
+    expect(read(doc)).toEqual(parseCollection(version))
+
+    // 版本里它是文本：恢复改回类型，前缀留在 cfg 里，改回编号还在
+    setPropType(doc, num, 'text')
+    const asText = snap(doc)
+    setPropType(doc, num, 'unique_id')
+    restoreCollection(doc, asText)
+    expect(read(doc).props.find((p) => p.id === num)?.type).toBe('text')
+    setPropType(doc, num, 'unique_id')
+    expect(read(doc).props.find((p) => p.id === num)?.cfg).toEqual({ prefix: 'TASK' })
+  })
+
   test('脏快照不崩：坏条目跳过，读回与 parseCollection(快照) 一致', () => {
     for (const dirty of [null, 42, 'x', { props: 5, views: [] }, { props: { __proto__: 1, 'BAD!': {}, ok0001: { name: 'x', type: 'weird' }, ok0002: { name: 3, type: 'number' } } }]) {
       const doc = newDoc()
@@ -398,5 +557,16 @@ describe('restoreRowProps：恢复行页面的某个版本时写回属性值', (
     restoreRowProps(doc, {})
     expect(map.toJSON()).toEqual({})
     expect(n).toBe(1)
+  })
+})
+
+describe('新建列表视图', () => {
+  test('默认只显示前三个属性（一行放不下全部），其余布局仍显示全部', () => {
+    const doc = newDoc()
+    const ids = ['sts001', addProp(doc, '甲', 'text'), addProp(doc, '乙', 'number'), addProp(doc, '丙', 'date')]
+    const list = addView(doc, '列表', 'list')
+    const table = addView(doc, '表格', 'table')
+    expect(pickView(read(doc), list).shown).toEqual(ids.slice(0, 3))
+    expect(pickView(read(doc), table).shown).toBeNull()
   })
 })

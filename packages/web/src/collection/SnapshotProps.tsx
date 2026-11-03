@@ -2,12 +2,12 @@
 // 按当前属性定义列（顺序同行页面属性区），值用 CellView 只读展示。
 // 那个版本读不出值且与当前相同的属性不画；那个版本是空、现在有值的画一个「空」（恢复会清掉它，要看得见）。
 import type * as Y from 'yjs'
-import { readValue, type CollectionRow } from '@ramet/shared/collection-model'
+import { isComputedProp, readValue, type CollectionRow } from '@ramet/shared/collection-model'
 import { COPY } from '../copy'
 import { Icon } from '../icons'
 import { CellView } from './cells/CellView'
 import { useCollection, useCollectionSchema } from './collection-store'
-import { isComputed, TYPE_ICON } from './prop-meta'
+import { TYPE_ICON } from './prop-meta'
 import { useRowProps } from './RowProperties'
 
 const C = COPY.collection
@@ -29,10 +29,10 @@ export default function SnapshotProps({ collectionId, spaceId, props, getDoc }: 
   const schema = useCollectionSchema(useCollection(collectionId))
   const current = useRowProps(getDoc())
   if (!schema) return null
-  // CellView 要的「行」：只有 props 有意义（创建 / 编辑时间是现算的，这里不画）
+  // CellView 要的「行」：只有 props 有意义（系统生成的值不在行文档里，这里不画）
   const row: CollectionRow = { id: '', title: '', icon: null, props, position: null, created_at: '', edited_at: '', has_body: false }
   const items = schema.props.flatMap((prop) => {
-    if (isComputed(prop.type)) return []
+    if (isComputedProp(prop)) return []
     const then = own(props, prop.id)
     const now = own(current, prop.id)
     const differs = !same(then, now)

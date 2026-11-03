@@ -1,10 +1,26 @@
 // ---------- 单元格的展示（表格、看板卡片与行页面属性区共用） ----------
 // 读值一律经 rowValue（→ readValue）：类型对不上、选项已删的读成空，原值不动。
+// 链接类（链接、邮箱、电话、文件）点了不进编辑：表格 / 卡片的点击判定见到 a / button 就放过。
 import { useEffect, useState } from 'react'
-import { findOption, rowValue, type CollectionOption, type CollectionProp, type CollectionRow } from '@ramet/shared/collection-model'
+import {
+  fileList,
+  findOption,
+  formatNumber,
+  idList,
+  rowValue,
+  type CollectionOption,
+  type CollectionProp,
+  type CollectionRow,
+} from '@ramet/shared/collection-model'
 import { Avatar } from '../../Avatar'
+import { Icon } from '../../icons'
 import { personOf, subscribePeople } from '../../people'
-import { formatStamp, hrefOf } from '../prop-meta'
+import { agentLabel } from '../../default-agent'
+import { formatDate, formatStamp, hrefOf } from '../prop-meta'
+import { FileItem } from './file-item'
+import { FormulaCell } from './FormulaCell'
+import { RelationCell } from './RelationCell'
+import { RollupCell } from './RollupCell'
 
 /** 选项的小色块（颜色 = 选项色；状态多一个圆点） */
 export function OptionChip({ option, status = false }: { option: CollectionOption; status?: boolean }) {
@@ -47,6 +63,13 @@ function PersonChip({ spaceId, userId }: { spaceId: string | null; userId: strin
 
 type Props = { prop: CollectionProp; row: CollectionRow; spaceId: string | null }
 
+const stop = (e: React.MouseEvent): void => e.stopPropagation()
+
+/** 邮箱 / 电话：mailto: / tel: 链接（电话去掉空白，拨号程序不认） */
+function contactHref(prop: CollectionProp, value: string): string {
+  return prop.type === 'email' ? `mailto:${value}` : `tel:${value.replace(/\s+/g, '')}`
+}
+
 export function CellView({ prop, row, spaceId }: Props) {
   const value = rowValue(row, prop)
   switch (prop.type) {
@@ -59,22 +82,64 @@ export function CellView({ prop, row, spaceId }: Props) {
       const option = typeof value === 'string' ? findOption(prop, value) : undefined
       return option ? <OptionChip option={option} status={prop.type === 'status'} /> : null
     }
-    case 'multi_select':
-      return Array.isArray(value) ? (
+    case 'multi_select': {
+      const ids = idList(value)
+      return ids ? (
         <span className="cl-chips">
-          {value.map((id) => {
+          {ids.map((id) => {
             const option = findOption(prop, id)
             return option ? <OptionChip key={id} option={option} /> : null
           })}
         </span>
       ) : null
+    }
     case 'person':
-      return Array.isArray(value) ? <PersonList spaceId={spaceId} ids={value} /> : null
+    case 'created_by': {
+      const ids = idList(value)
+      return ids ? <PersonList spaceId={spaceId} ids={ids} /> : null
+    }
+    case 'edited_by': {
+      const ids = idList(value)
+      if (!ids) return null
+      // agent 改的：agent 名在前，后面是让它改的人
+      return row.edited_agent ? (
+        <span className="cl-chips">
+          <span className="cl-agent" title={agentLabel(row.edited_agent)}>
+            <Icon name="bot" size={14} />
+            <span className="cl-person-name">{agentLabel(row.edited_agent)}</span>
+          </span>
+          <PersonList spaceId={spaceId} ids={ids} />
+        </span>
+      ) : (
+        <PersonList spaceId={spaceId} ids={ids} />
+      )
+    }
+    case 'email':
+    case 'phone':
+      return typeof value === 'string' ? (
+        <a className="cl-link" href={contactHref(prop, value)} onClick={stop}>
+          {value}
+        </a>
+      ) : null
+    case 'files': {
+      const files = fileList(value)
+      return files ? (
+        <span className="cl-files">
+          {files.map((file) => (
+            <FileItem key={file.id} file={file} />
+          ))}
+        </span>
+      ) : null
+    }
+    case 'unique_id':
+      return typeof value === 'number' ? <span className="cl-text">{formatNumber(prop, value)}</span> : null
+    case 'date':
+      return typeof value === 'string' ? <span className="cl-text">{formatDate(value)}</span> : null
     case 'url': {
       if (typeof value !== 'string') return null
       const href = hrefOf(value)
       return href ? (
-        <a className="cl-link" href={href} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>
+        <a className="cl-link" href={href} target="_blank" rel="noopener noreferrer" onClick={stop}>
           {value}
         </a>
       ) : (
@@ -86,6 +151,12 @@ export function CellView({ prop, row, spaceId }: Props) {
       return typeof value === 'string' ? <span className="cl-text is-dim">{formatStamp(value)}</span> : null
     case 'number':
       return typeof value === 'number' ? <span className="cl-text is-num">{String(value)}</span> : null
+    case 'relation':
+      return <RelationCell prop={prop} row={row} />
+    case 'rollup':
+      return <RollupCell prop={prop} row={row} spaceId={spaceId} />
+    case 'formula':
+      return <FormulaCell prop={prop} row={row} />
     default:
       return typeof value === 'string' ? <span className="cl-text">{value}</span> : null
   }

@@ -18,9 +18,12 @@ export default function Modal({
   className,
   label,
   overlayCloses = true,
+  overlayRef,
   children,
 }: {
   onClose: () => void
+  /** 遮罩元素（从集合的弹层里打开时要登记进弹层栈，见 collection/popover.tsx 的 usePopoverLayer） */
+  overlayRef?: (el: HTMLDivElement | null) => void
   /** false = 点遮罩不关（多步填写的弹窗：误点一下不该丢掉填到一半的内容；Esc / 关闭按钮照常） */
   overlayCloses?: boolean
   /** 加在 .modal 上的修饰类（尺寸 / 布局） */
@@ -49,6 +52,7 @@ export default function Modal({
 
   return createPortal(
     <div
+      ref={overlayRef}
       className="modal-overlay"
       onPointerDown={(e) => {
         downOnOverlay.current = e.target === e.currentTarget

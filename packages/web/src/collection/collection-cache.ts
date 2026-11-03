@@ -6,12 +6,13 @@
 //   （provider 2.15.3 的 destroy() 不销毁传进去的 document，同步只走差量），schema 与旧窗口先画，同步后重取。
 // 被拒绝（denied）的不保活也不进冷缓存；reset（登出 / 换账号）清空两层，之前建的连接释放时也不再进缓存。
 import type * as Y from 'yjs'
-import type { CollectionStatus, WindowState } from './collection-store'
+import type { CollectionStatus } from './collection-store'
+import type { ColdWin } from './collection-windows'
 
 /** 拆掉的集合留下来的东西：文档（同步过的）+ 各窗口最后一份 */
 export type ColdCollection = {
   doc: Y.Doc
-  wins: { viewId: string; group: string | undefined; state: WindowState }[]
+  wins: ColdWin[]
 }
 
 export type PooledCore = {

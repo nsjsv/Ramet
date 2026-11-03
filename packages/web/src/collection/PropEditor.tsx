@@ -1,10 +1,16 @@
-// ---------- 属性定义编辑：改名、改类型、选项、隐藏、左右移、删除 ----------
+// ---------- 属性定义编辑：改名、改类型、选项、编号前缀、关联 / 汇总设置、公式、隐藏、左右移、删除 ----------
 // 直接写集合文档（schema-ops.ts），经协同连接同步给所有人；viewer 不会打开它（入口在界面上禁用）。
-// 名字与选项名在失焦 / Enter 时才写，不是每个键一笔协同增量。
+// 名字、选项名与编号前缀在失焦 / Enter 时才写，不是每个键一笔协同增量。
+// 关联例外：定义跨两份集合文档，改成关联（先选目标集合）、从关联改走、删关联都经服务端（relation-settings.tsx 的口径），
+// 两侧一起改；反向关联不能改类型（它的类型是对方那边的正向关联定的），只能删。
 import { useEffect, useState } from 'react'
 import type * as Y from 'yjs'
 import { COLOR_NAMES, type ColorName } from '@ramet/shared/md-dialect'
 import {
+  cleanPrefix,
+  isComputedProp,
+  isReverseRelation,
+  NUMBER_PREFIX_MAX,
   STATUS_GROUPS,
   typeHasOptions,
   type CollectionOption,
@@ -16,7 +22,16 @@ import {
 } from '@ramet/shared/collection-model'
 import { COPY } from '../copy'
 import { Icon } from '../icons'
-import { isComputed, moveTo, nextColor, TYPE_ICON, TYPE_ORDER } from './prop-meta'
+import { collectionApi } from './collection-api'
+import { useCollectionPages } from './collection-store'
+import { CollectionChooser } from './CollectionPicker'
+import { FormulaField } from './FormulaEditor'
+import { NameInput } from './name-input'
+import { usePopover } from './popover'
+import { moveTo, nextColor, TYPE_ICON, TYPE_ORDER } from './prop-meta'
+import { useRelationCtx } from './relation-ctx'
+import { relatableCollections } from './relation-model'
+import { collectionName, RelationSettings, RollupSettings } from './relation-settings'
 import { useReorder, type ReorderProps } from './reorder'
 import {
   addOption,
@@ -24,6 +39,7 @@ import {
   deleteProp,
   moveOption,
   renameProp,
+  setPropCfg,
   setPropType,
   setShown,
   shownProps,
@@ -32,21 +48,11 @@ import {
 } from './schema-ops'
 
 const C = COPY.collection
+const R = C.relation
 
-/** 失焦或 Enter 才提交的名字输入；外部值变了（别人改了名）且自己没在打字时跟着变 */
-export function NameInput({
-  value,
-  onCommit,
-  placeholder,
-  autoFocus,
-  className,
-}: {
-  value: string
-  onCommit: (name: string) => void
-  placeholder?: string
-  autoFocus?: boolean
-  className?: string
-}) {
+/** 自动编号的前缀：只收 [A-Za-z0-9_-]（打别的字直接不进框），失焦 / Enter 写；可以清空 */
+function PrefixField({ doc, prop }: { doc: Y.Doc; prop: CollectionProp }) {
+  const value = prop.cfg.prefix ?? ''
   const [draft, setDraft] = useState(value)
   const [editing, setEditing] = useState(false)
   useEffect(() => {
@@ -54,28 +60,30 @@ export function NameInput({
   }, [value, editing])
   const commit = (): void => {
     setEditing(false)
-    if (draft.trim() && draft !== value) onCommit(draft)
-    else setDraft(value)
+    if (draft !== value) setPropCfg(doc, prop.id, { prefix: cleanPrefix(draft) })
   }
   return (
-    <input
-      className={'cl-name-input' + (className ? ` ${className}` : '')}
-      value={draft}
-      placeholder={placeholder}
-      autoFocus={autoFocus}
-      onFocus={() => setEditing(true)}
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={commit}
-      onKeyDown={(e) => {
-        e.stopPropagation()
-        if (e.nativeEvent.isComposing) return
-        if (e.key === 'Enter') e.currentTarget.blur()
-        else if (e.key === 'Escape') {
-          setDraft(value)
-          setEditing(false)
-        }
-      }}
-    />
+    <label className="cl-field">
+      <span>{C.prop.prefix}</span>
+      <input
+        className="cl-input cl-prefix-input"
+        value={draft}
+        placeholder={C.prop.prefixHint}
+        maxLength={NUMBER_PREFIX_MAX}
+        onFocus={() => setEditing(true)}
+        onChange={(e) => setDraft(cleanPrefix(e.target.value))}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          e.stopPropagation()
+          if (e.nativeEvent.isComposing) return
+          if (e.key === 'Enter') e.currentTarget.blur()
+          else if (e.key === 'Escape') {
+            setDraft(value)
+            setEditing(false)
+          }
+        }}
+      />
+    </label>
   )
 }
 
@@ -157,17 +165,52 @@ type Props = {
 }
 
 export default function PropEditor({ doc, schema, prop, view, onClose }: Props) {
+  const ctx = useRelationCtx()
+  const pages = useCollectionPages()
+  const [retarget, openRetarget, closeRetarget] = usePopover()
+  const [error, setError] = useState<string | null>(null)
   const shown = view ? shownProps(schema, view) : []
   const at = shown.indexOf(prop.id)
   const move = (delta: number): void => {
     if (view && at >= 0) setShown(doc, view.id, moveTo(shown, prop.id, at + delta))
+  }
+  const name = prop.name || C.types[prop.type]
+  const reverse = isReverseRelation(prop)
+  /** 对方集合里有对应的属性（双向关联的两侧）：改走 / 删除要说明那边也会少一个属性 */
+  const paired = prop.type === 'relation' && (reverse || !!prop.cfg.reverse)
+  const other = collectionName(pages, prop.cfg.target) ?? R.broken
+  const call = (fn: () => Promise<unknown>, then: () => void): void =>
+    void fn().then(then, (err: unknown) => setError(err instanceof Error && err.message ? err.message : C.writeFailed))
+  const changeType = (type: PropType, el: HTMLElement): void => {
+    if (type === prop.type) return
+    // 改成关联要先有目标：选好集合后经服务端改（PATCH 带 target），取消就什么都不变
+    if (type === 'relation') {
+      if (ctx) openRetarget(el)
+      return
+    }
+    if (paired && ctx) {
+      if (!window.confirm(R.confirmRetype(other))) return
+      call(() => collectionApi.patchRelation(ctx.cid, prop.id, { two_way: false }), () => setPropType(doc, prop.id, type))
+      return
+    }
+    setPropType(doc, prop.id, type)
+  }
+  const remove = (): void => {
+    if (prop.type === 'relation' && ctx) {
+      if (!window.confirm(paired ? R.confirmRemove(name, other) : C.prop.confirmRemove(name))) return
+      call(() => collectionApi.deleteRelation(ctx.cid, prop.id), onClose)
+      return
+    }
+    if (!window.confirm(C.prop.confirmRemove(name))) return
+    deleteProp(doc, prop.id)
+    onClose()
   }
   return (
     <div className="cl-prop-editor">
       <NameInput value={prop.name} placeholder={C.prop.name} autoFocus onCommit={(name) => renameProp(doc, prop.id, name)} />
       <label className="cl-field">
         <span>{C.prop.type}</span>
-        <select value={prop.type} onChange={(e) => setPropType(doc, prop.id, e.target.value as PropType)}>
+        <select value={prop.type} disabled={reverse} title={reverse ? R.reverseType : undefined} onChange={(e) => changeType(e.target.value as PropType, e.currentTarget)}>
           {TYPE_ORDER.map((t) => (
             <option key={t} value={t}>
               {C.types[t]}
@@ -176,7 +219,25 @@ export default function PropEditor({ doc, schema, prop, view, onClose }: Props) 
         </select>
         <Icon name={TYPE_ICON[prop.type]} size={14} />
       </label>
-      {isComputed(prop.type) && <div className="cl-hint">{C.prop.readonlyType}</div>}
+      {prop.type === 'unique_id' && <PrefixField doc={doc} prop={prop} />}
+      {isComputedProp(prop) && prop.type !== 'relation' && prop.type !== 'rollup' && prop.type !== 'formula' && <div className="cl-hint">{C.prop.readonlyType}</div>}
+      {prop.type === 'relation' && <RelationSettings prop={prop} schema={schema} />}
+      {prop.type === 'rollup' && <RollupSettings doc={doc} schema={schema} prop={prop} />}
+      {prop.type === 'formula' && <FormulaField doc={doc} schema={schema} prop={prop} view={view} />}
+      {error && <div className="cl-hint is-error">{error}</div>}
+      {retarget && ctx && (
+        <CollectionChooser
+          anchor={retarget}
+          collections={relatableCollections(pages, ctx.spaceId)}
+          title={R.pickTarget}
+          empty={R.noTargets}
+          onClose={closeRetarget}
+          onPick={(page) => {
+            closeRetarget()
+            call(() => collectionApi.patchRelation(ctx.cid, prop.id, { target: page.id }), () => setError(null))
+          }}
+        />
+      )}
       {typeHasOptions(prop.type) && (
         <div className="cl-options">
           <div className="pop-section">{C.prop.options}</div>
@@ -211,15 +272,7 @@ export default function PropEditor({ doc, schema, prop, view, onClose }: Props) 
           </button>
         </>
       )}
-      <button
-        type="button"
-        className="pop-row is-danger"
-        onClick={() => {
-          if (!window.confirm(C.prop.confirmRemove(prop.name || C.types[prop.type]))) return
-          deleteProp(doc, prop.id)
-          onClose()
-        }}
-      >
+      <button type="button" className="pop-row is-danger" onClick={remove}>
         <Icon name="trash" size={14} />
         {C.prop.remove}
       </button>

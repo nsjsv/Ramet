@@ -1,18 +1,19 @@
 // ---------- 批量操作栏：选中行以后出现在视图上方（表格与看板共用） ----------
-// 值编辑器复用单元格的：单选、状态点一下即应用；多选、人员先勾好再「应用」（整体替换）；文本类输入框 Enter 应用。
+// 值编辑器就是单元格的 CellEditor：单选、状态点一下即应用；多选、人员、文件、日期先改好草稿再「应用」（整体替换）；
+// 输入框 Enter 应用。系统生成的属性与反向关联不在「改哪个属性」里（editor-kind.ts 的 bulkEditable）。
 // 写都走 store：改值乐观，复制 / 移动 / 删除随后重取页面列表窗口。
 import { useState } from 'react'
 import type { Page } from '../api'
 import type { CollectionProp, CollectionSchema, PropValue } from '@ramet/shared/collection-model'
 import { COPY } from '../copy'
 import { Icon } from '../icons'
-import { InlineInput } from './cells/InlineInput'
-import { OptionPicker, PersonPicker } from './cells/Pickers'
+import { CellEditor } from './cells/CellEditor'
+import { bulkEditable, editorKind, pickOnce } from './cells/editor-kind'
 import type { CollectionHandle } from './collection-store'
 import { useCollectionPages } from './collection-store'
 import { CollectionChooser } from './CollectionPicker'
 import { Popover, usePopover } from './popover'
-import { isComputed, TYPE_ICON } from './prop-meta'
+import { TYPE_ICON } from './prop-meta'
 import { moveRowsConfirmed, moveTargets, trashRowsConfirmed, type Animate } from './row-actions'
 
 const C = COPY.collection
@@ -28,10 +29,13 @@ type Props = {
   animate?: Animate
 }
 
-/** 一个属性的批量值编辑器；底部按钮按下时不抢焦点（输入框失焦会先提交一次） */
+/** 一个属性的批量值编辑器；底部按钮按下时不抢焦点（输入框失焦会先提交一次）。
+ *  一次要改很多行，只有明确的动作才写：输入框 Enter、单选 / 状态点选、底部「清空」「应用」。
+ *  其余弹层编辑器（多选、人员、文件、日期）报来的值一律只是草稿，它们自己的「清空」「今天」也只改草稿 */
 function ValueEditor({ prop, handle, spaceId, onApply }: { prop: CollectionProp; handle: CollectionHandle; spaceId: string | null; onApply: (value: PropValue | null) => void }) {
+  const kind = editorKind(prop)
   const [draft, setDraft] = useState<PropValue | null>(null)
-  if (prop.type === 'checkbox') {
+  if (kind === 'toggle') {
     return (
       <div className="cl-menu">
         <button type="button" className="pop-row" onClick={() => onApply(true)}>
@@ -44,27 +48,28 @@ function ValueEditor({ prop, handle, spaceId, onApply }: { prop: CollectionProp;
       </div>
     )
   }
-  const multi = prop.type === 'multi_select' || prop.type === 'person'
-  const body =
-    prop.type === 'person' ? (
-      <PersonPicker value={draft ?? undefined} spaceId={spaceId} onChange={setDraft} />
-    ) : prop.type === 'multi_select' ? (
-      <OptionPicker prop={prop} value={draft ?? undefined} doc={handle.doc} onChange={setDraft} onDone={() => {}} />
-    ) : prop.type === 'select' || prop.type === 'status' ? (
-      <OptionPicker prop={prop} value={undefined} doc={handle.doc} onChange={onApply} onDone={() => {}} />
-    ) : (
-      <div className="cl-bulk-input">
-        <InlineInput prop={prop} initial="" onCommit={onApply} onCancel={() => {}} />
-      </div>
-    )
+  const inline = kind === 'inline'
+  const direct = inline || pickOnce(prop)
+  const editor = (
+    <CellEditor
+      prop={prop}
+      value={draft ?? undefined}
+      doc={handle.doc}
+      spaceId={spaceId}
+      live
+      onCommit={direct ? onApply : setDraft}
+      // onDone 只是编辑器自己收尾（输入框取消、选择器里的「清空」、日期 Enter），不写任何行
+      onDone={() => undefined}
+    />
+  )
   return (
     <div className="cl-bulk-editor">
-      {body}
+      {inline ? <div className="cl-bulk-input">{editor}</div> : editor}
       <div className="cl-bulk-foot">
         <button type="button" className="cl-bar-btn" onMouseDown={(e) => e.preventDefault()} onClick={() => onApply(null)}>
           {C.cell.clear}
         </button>
-        {multi && (
+        {!direct && (
           <button type="button" className="cl-bar-btn is-on" onMouseDown={(e) => e.preventDefault()} onClick={() => onApply(draft)}>
             {S.apply}
           </button>
@@ -80,7 +85,7 @@ export default function BulkBar({ handle, schema, spaceId, picked, onClear, anim
   const pages = useCollectionPages()
   const which = anchor?.dataset.menu
   const ids = [...picked]
-  const editable = schema.props.filter((p) => !isComputed(p.type))
+  const editable = schema.props.filter(bulkEditable)
   const targets = moveTargets(pages, handle, spaceId)
 
   const shut = (): void => {

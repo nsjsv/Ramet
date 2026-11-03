@@ -21,6 +21,8 @@ import { importRoutes } from './routes/import.js'
 import { boardsRoutes } from './routes/boards.js'
 import { collectionRoutes } from './routes/collections.js'
 import { createProjector } from './collections/projector.js'
+import { createFanout } from './collections/fanout.js'
+import { collectionRelationRoutes } from './routes/collection-relations.js'
 import { publicRoutes } from './routes/public.js'
 import { filesRoutes } from './routes/files.js'
 import { searchRoutes } from './routes/search.js'
@@ -171,12 +173,14 @@ export function startServer(
   }
   app.route('/', connectorGrantRoutes(pool, { disconnect, reduce: (connectorId, userId, lost) => agentManager.reduceMachineAccess(connectorId, userId, lost), notify: notifyAgents }))
   // 集合的行属性投影器（collections/projector.ts）：挂在协同实例上，行文档的 Y.Map('props') 一变就写可查询副本，
-  // 增量只发给正连着集合文档的连接。找集合文档惰性取，hocuspocus 随后才建好
-  const projector = createProjector(pool, (name) => hocuspocus.documents.get(name))
+  // 增量只发给正连着集合文档的连接。找集合文档惰性取，hocuspocus 随后才建好。
+  // 扇出（collections/fanout.ts）登记加载着的集合文档：增量发出前补关联 / 汇总的计算值，并让依赖它的集合跟着重算
+  const fanout = createFanout(pool, (name) => hocuspocus.documents.get(name), () => projector)
+  const projector = createProjector(pool, (name) => hocuspocus.documents.get(name), fanout.enrich)
   // AI 按行读页面 / 取图 / 写回文档（凭证走 Authorization: Bearer，不是 cookie）：必须挂在
   // files/search/pages 这些 `use('*', requireAuth)` 的子应用之前，否则请求先到它们就被 401 了。
   // 活文档查找与 blocksRoutes 一样用惰性引用
-  const hocuspocus = createHocuspocus(pool, [projector.extension])
+  const hocuspocus = createHocuspocus(pool, [projector.extension, fanout.extension])
   // 收件箱刷新信号：300ms 去抖合并，经 control:global 广播 'inbox'（不带内容，前端收到后重拉 GET /api/inbox）
   const inbox = new InboxPoke(() => notifyInboxChanged(hocuspocus))
   const offFirstUse = onMachineFirstUse(() => inbox.poke())
@@ -266,6 +270,15 @@ export function startServer(
       getLiveDoc: (name) => hocuspocus.documents.get(name),
       notify: () => notifyPagesChanged(hocuspocus),
       projector,
+    }),
+  )
+  // 关联的定义（跨两份集合文档）、单行取数、属性定义：同样每条路由各自挂 requireAuth
+  app.route(
+    '/',
+    collectionRelationRoutes({
+      pool,
+      write: createDocWriter(() => hocuspocus),
+      getLiveDoc: (name) => hocuspocus.documents.get(name),
     }),
   )
   // 导入（markdown / Obsidian zip）与从模板新建：各自挂 requireAuth，不挂 '*' 中间件

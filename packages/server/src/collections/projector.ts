@@ -4,7 +4,9 @@
 // 最后都是这张 map 变了。所以投影挂在文档上而不是挂在各条写路径上：
 //   · afterLoadDocument：每个 page: 文档加载完挂一个 observeDeep（普通页面这张 map 一直是空的，不触发），并校准一次副本
 //     （崩溃窗口：增量已落库、副本还没写进程就挂了，下次加载时按文档补上）
-//   · 观察者：按行攒约 100ms 写一次副本；行在集合里，就把 { row, prev } 交给增量批次（只发给正看着这个集合的连接）
+//   · 观察者：按行攒约 100ms 写一次副本；行在集合里，就把 { row, prev } 交给增量批次（只发给正看着这个集合的连接）。
+//     同时记下这批里最后一笔有归属的事务是谁写的（edit-marks.ts 的 editorOf，同一条归属规则）：库里的最后编辑者
+//     要等存储钩子约 2s 后才落，增量里的行按这里记下的覆盖，看着的人立刻看到是谁改的
 //   · beforeUnloadDocument：卸载前把没刷的写完；关停时 drain 等全部在途写入
 //   · afterStoreDocument：正文索引（content_text）已落库；集合的行「正文有没有字」变了就发一条整行增量（has_body，
 //     表格据此决定画不画通用文档图标）。正文不是属性，不写副本
@@ -16,7 +18,8 @@ import type { Pool } from 'pg'
 import type * as Y from 'yjs'
 import type { RowUpdate } from '@ramet/shared/collection-model'
 import { PAGE_DOC_NAME } from '../collab.js'
-import { RowsDeltas, type DeltaSink } from './delta.js'
+import { editorOf, type Editor } from '../edit-marks.js'
+import { RowsDeltas, type BatchEnrich, type DeltaSink } from './delta.js'
 import { memberRow, propsDiff, readHasBody, readReplica, replicaProps, sameProps, writeEmptyReplica, writeReplica } from './store.js'
 
 /** 一行属性变了之后多久写副本（这段里的连续改动并成一次） */
@@ -26,7 +29,7 @@ type Tracker = {
   rowId: string
   doc: Y.Doc
   props: Y.Map<unknown>
-  observer: () => void
+  observer: (events: Y.YEvent<any>[], tr: Y.Transaction) => void
   timer: NodeJS.Timeout | null
   /** 这一行的写副本按序排队（每一步都自己接住错误，链不会断） */
   chain: Promise<void>
@@ -36,6 +39,8 @@ type Tracker = {
   member: boolean
   /** 上次知道的「正文有没有字」；null = 还没校准 */
   body: boolean | null
+  /** 还没发出去的属性改动里最后一笔有归属的事务是谁写的；发增量时用掉 */
+  editor: Editor | null
 }
 
 export type Projector = {
@@ -45,18 +50,21 @@ export type Projector = {
   flushRow(rowId: string): Promise<void>
   /** 不是属性变化的增量（PATCH after / before 改的手动顺序）也走同一个批次 */
   publish(collectionId: string, update: RowUpdate): void
-  /** 手动顺序重编号了整个集合：这一批只发 reset，观看者重取窗口 */
+  /** 手动顺序重编号了整个集合 / 依赖的集合改了定义：这一批只发 reset，观看者重取窗口 */
   reset(collectionId: string): void
+  /** 这些行只是计算值要重算（别的集合的改动扇出来的，见 fanout.ts） */
+  touch(collectionId: string, rowIds: Iterable<string>): void
   /** 关停：在 hocuspocus.destroy 之后调，等全部在途的副本写入落库 */
   drain(): Promise<void>
 }
 
 const errText = (rowId: string): string => `[collections] 行属性副本写入失败(page:${rowId}):`
 
-export function createProjector(pool: Pool, sink: DeltaSink): Projector {
+/** enrich：批次发出前补计算值、往依赖的集合扇出（fanout.ts）；不给就原样发 */
+export function createProjector(pool: Pool, sink: DeltaSink, enrich?: BatchEnrich): Projector {
   const trackers = new Map<string, Tracker>()
   const inflight = new Set<Promise<void>>()
-  const deltas = new RowsDeltas(sink)
+  const deltas = new RowsDeltas(sink, undefined, enrich)
 
   function enqueue(t: Tracker, step: (t: Tracker) => Promise<void>): Promise<void> {
     const run = t.chain.then(() => step(t))
@@ -85,11 +93,15 @@ export function createProjector(pool: Pool, sink: DeltaSink): Projector {
     t.timer.unref()
   }
 
-  /** 行在活集合里：把改后的行和 prev 交给增量批次 */
-  async function announce(rowId: string, prev: Record<string, unknown>): Promise<void> {
+  /** 行在活集合里：把改后的行和 prev 交给增量批次。这批改动是谁写的覆盖进行里（库里的还是上一位） */
+  async function announce(t: Tracker, prev: Record<string, unknown>): Promise<void> {
+    const editor = t.editor
+    t.editor = null
     if (Object.keys(prev).length === 0) return
-    const found = await memberRow(pool, rowId)
-    if (found) deltas.push(found.collectionId, { row: found.row, prev })
+    const found = await memberRow(pool, t.rowId)
+    if (!found) return
+    const row = editor ? { ...found.row, edited_by: editor.userId, edited_agent: editor.actor === 'agent' ? editor.agent : null } : found.row
+    deltas.push(found.collectionId, { row, prev })
   }
 
   /** 加载时校准：副本与文档不一致就按文档重写；集合的行还没有副本就补一行空的 */
@@ -112,7 +124,7 @@ export function createProjector(pool: Pool, sink: DeltaSink): Projector {
       }
       if (!(await writeReplica(pool, t.rowId, next, true))) return
       t.last = next
-      await announce(t.rowId, propsDiff(replicaProps(stored.props ?? {}), next))
+      await announce(t, propsDiff(replicaProps(stored.props ?? {}), next))
     } catch (err) {
       // last 仍是 null：下一次写副本前会再校准
       console.error(errText(t.rowId), err)
@@ -125,11 +137,15 @@ export function createProjector(pool: Pool, sink: DeltaSink): Projector {
     if (t.last === null) return calibrate(t)
     try {
       const next = replicaProps(t.props.toJSON())
-      if (sameProps(next, t.last)) return
+      if (sameProps(next, t.last)) {
+        // 改了又改回去：没有增量要发，记下的编辑者也不该留给下一批
+        t.editor = null
+        return
+      }
       if (!(await writeReplica(pool, t.rowId, next, true))) return
       const prev = propsDiff(t.last, next)
       t.last = next
-      await announce(t.rowId, prev)
+      await announce(t, prev)
     } catch (err) {
       console.error(errText(t.rowId), err)
     }
@@ -171,12 +187,16 @@ export function createProjector(pool: Pool, sink: DeltaSink): Projector {
           rowId,
           doc: document,
           props: document.getMap<unknown>('props'),
-          observer: () => schedule(t),
+          observer: (_events, tr) => {
+            t.editor = editorOf(tr.origin) ?? t.editor
+            schedule(t)
+          },
           timer: null,
           chain: Promise.resolve(),
           last: null,
           member: false,
           body: null,
+          editor: null,
         }
         t.props.observeDeep(t.observer)
         trackers.set(rowId, t)
@@ -223,10 +243,15 @@ export function createProjector(pool: Pool, sink: DeltaSink): Projector {
     reset(collectionId) {
       deltas.reset(collectionId)
     },
+    touch(collectionId, rowIds) {
+      deltas.touch(collectionId, rowIds)
+    },
     async drain() {
       for (const t of trackers.values()) retire(t)
       trackers.clear()
       while (inflight.size > 0) await Promise.allSettled([...inflight])
+      // 正在补计算值的批次还在用连接池
+      await deltas.idle()
       deltas.dispose()
     },
   }

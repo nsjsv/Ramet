@@ -12,7 +12,8 @@ import { Avatar } from './Avatar'
 import { COPY } from './copy'
 import { Icon, iconSvg } from './icons'
 import { fillAvatar, type Person } from './people'
-import { agentLabel, relativeTime } from './UpdatesFeed'
+import { agentLabel } from './default-agent'
+import { relativeTime } from './UpdatesFeed'
 
 interface Look {
   name: string

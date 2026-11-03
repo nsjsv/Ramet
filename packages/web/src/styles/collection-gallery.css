@@ -1,0 +1,84 @@
+/* 集合的画廊视图（collection/gallery/）。
+ * 卡片网格：auto-fill，最小卡片宽 --card-w（GalleryView 按卡片大小写），剩余宽度均分给每一列；
+ * 正文里的集合块同样按正文列宽排，不伸出正文列（只有看板伸出，见 collection-block.css）。
+ * 卡片本体是看板卡片（collection-board.css 的 .cl-card），这里只补预览区、落点竖线与「新建」卡片。
+ * 动效只动 opacity / transform；拖动落下的重排由 motion.ts 的 flip() 做。 */
+
+.cl-gallery {
+  display: grid;
+  /* 容器比一张卡片还窄（手机）时一列铺满，不横向撑出去 */
+  grid-template-columns: repeat(auto-fill, minmax(min(var(--card-w, 260px), 100%), 1fr));
+  gap: 14px;
+  padding: 4px 0 12px;
+}
+
+.cl-gallery .cl-card {
+  min-width: 0;
+}
+
+/* 预览区：贴着卡片的上、左、右边（负外边距抵掉卡片内边距），高 = 宽 × 0.6 */
+.cl-card-preview {
+  position: relative;
+  aspect-ratio: 5 / 3;
+  margin: -8px -10px 4px;
+  overflow: hidden;
+  border-bottom: 1px solid var(--line);
+  border-radius: calc(var(--r-sm) - 1px) calc(var(--r-sm) - 1px) 0 0;
+  background: var(--bg-sunk);
+}
+
+.cl-card-preview > img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.cl-card-placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 「打开」按钮在预览图上，标题行不必给它让位 */
+.cl-card-preview ~ .cl-card-title {
+  padding-right: 0;
+}
+
+/* 落点提示：卡片左 / 右边的竖线（在 14px 的间隙正中，绝对定位不占位），盖掉看板的横线 */
+.cl-gallery .cl-card.is-drop-before::before,
+.cl-gallery .cl-card.is-drop-after::after {
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  height: auto;
+}
+
+.cl-gallery .cl-card.is-drop-before::before {
+  left: -8px;
+  right: auto;
+}
+
+.cl-gallery .cl-card.is-drop-after::after {
+  right: -8px;
+  left: auto;
+}
+
+.cl-gallery-add {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 72px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--r-sm);
+  color: var(--ink-3);
+  font-size: var(--t-sm);
+}
+
+.cl-gallery-add:hover {
+  background: var(--hover);
+  color: var(--ink-2);
+}

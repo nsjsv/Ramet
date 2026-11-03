@@ -5,35 +5,56 @@
 // 顺序是确定的全序：[分组（不按组取窗口时，组序在前）]、视图的多级排序、手动顺序（position NULLS LAST, created_at, id）。
 // 空值不论升降序都排最后；文本用固定参数的 Collator，相等再按码点；最后按行 id，任何两行都分得出先后。
 // 窗口是排好序的列表的一段前缀，游标是末行的序号 + 行 id；客户端套增量时维持前缀这一性质，游标就一直对得上。
+// 窗口可以限定范围：按组（看板的一列）、按日期范围（日历 / 时间线只取看得到的那段时间），两者与筛选同时成立才在窗口里。
+// 公式在这里算（collection-formula/fill.ts 的 fillFormulas）：窗口查询开头给全部行算一遍，套增量前给增量里的行算一遍，
+// 之后筛选排序读 row.computed，与关联 / 汇总同一条路。服务端增量里带来的公式值不用，客户端按本机时区重算。
 
 import {
   conditionValue,
-  FILTER_OPS,
+  dateSpan,
+  daysBetween,
+  fileList,
+  filterOps,
   findOption,
   findProp,
+  idList,
+  isCalendarDate,
+  isDateType,
   isShortId,
   opNeedsValue,
+  rollupDateMs,
+  rollupOutput,
   rowValue,
   timeMs,
   TITLE_PROP_ID,
+  tzMinutes,
   type CollectionProp,
+  type CollectionRefs,
   type CollectionRow,
   type CollectionSchema,
   type CollectionView,
   type Condition,
+  type DateSpan,
   type Filter,
   type FilterOp,
   type PropValue,
   type RowsDelta,
   type Sort,
 } from './collection-model.js'
+import { fillFormulas, formulaFiller } from './collection-formula/fill.js'
+
+export { fillFormulas }
 
 export type QueryCtx = {
   /** 用户所在时区比 UTC 快多少分钟（东八区 480）：创建 / 编辑时间按它折成日期再和条件比。缺省 0（UTC）；
    *  服务端由请求带来，两端给同一个值才算得一样 */
   tzOffset?: number
-  /** 人员排序用的显示名（没给或查不到就按用户 id） */
+  /** 人员 / 创建者 / 最后编辑者排序用的显示名，也是公式里人员类属性的值（没给或查不到就按用户 id） */
   nameOf?: (userId: string) => string | undefined
+  /** 公式里 TODAY() / NOW() 的此刻（毫秒）；缺省取当前时间（测试固定它） */
+  now?: number
+  /** 窗口附带的 refs：公式读「逐个显示」的汇总时，按目标属性的选项把选项 id 换成名字 */
+  refs?: CollectionRefs
 }
 
 /** 一个窗口：服务端窗口查询的结果，也是客户端维护的已加载状态（applyRowsDelta 的入参与返回） */
@@ -48,11 +69,17 @@ export type RowsWindow = {
   groups?: Record<string, number>
   /** 按组取的窗口（看板的一列）：是哪一组 */
   group?: string
+  /** 按日期范围取的窗口（日历 / 时间线）：是哪个范围，写法见 parseRange */
+  range?: string
+  /** 关联 / 汇总属性指向哪里（服务端窗口查询附带；集合没有这两类属性时不给） */
+  refs?: CollectionRefs
 }
 
 export type WindowOpts = {
   /** 只取这一组（视图有分组时才生效；'' = 无值组） */
   group?: string
+  /** 只取这段日期里的行（视图的 dateBy 是日期类属性时才生效），写法见 parseRange */
+  range?: string
   cursor?: string | null
   /** 缺省 WINDOW_LIMIT，上限 WINDOW_LIMIT_MAX（数字或查询串里的字符串都收） */
   limit?: number | string | null
@@ -60,6 +87,31 @@ export type WindowOpts = {
 
 export const WINDOW_LIMIT = 50
 export const WINDOW_LIMIT_MAX = 100
+
+/** 日期范围最长多少天（两端都算）：日历一屏 42 天，时间线一块至多一年；再长就不是「看得到的那段时间」了 */
+export const RANGE_DAYS_MAX = 1100
+/** 「视图的日期属性为空」的那些行（时间线的「未排期」） */
+export const RANGE_NONE = 'none'
+
+export type DayRange = { from: string; to: string }
+
+const RANGE_RE = /^(\d{4}-\d{2}-\d{2})\.\.(\d{4}-\d{2}-\d{2})$/
+
+/** 日期范围的写法：'YYYY-MM-DD..YYYY-MM-DD'（两端含）或 RANGE_NONE。
+ *  认不出、开始晚于结束、跨度超过 RANGE_DAYS_MAX 都是 null（服务端回 400，queryWindow 当没给） */
+export function parseRange(raw: unknown): DayRange | 'none' | null {
+  if (raw === RANGE_NONE) return 'none'
+  const m = typeof raw === 'string' ? RANGE_RE.exec(raw) : null
+  const from = m?.[1]
+  const to = m?.[2]
+  if (!from || !to || !isCalendarDate(from) || !isCalendarDate(to) || from > to) return null
+  return daysBetween(from, to) + 1 > RANGE_DAYS_MAX ? null : { from, to }
+}
+
+/** 起止 → 范围的写法（调用方保证是日历日、from ≤ to） */
+export function joinRange(from: string, to: string): string {
+  return `${from}..${to}`
+}
 
 export function clampLimit(raw: unknown): number {
   const n = typeof raw === 'number' ? raw : typeof raw === 'string' && raw.trim() !== '' ? Number(raw) : NaN
@@ -73,11 +125,9 @@ type RowTest = (row: CollectionRow) => boolean
 
 const str = (value: PropValue | undefined): string | undefined => (typeof value === 'string' ? value : undefined)
 const num = (value: PropValue | undefined): number | undefined => (typeof value === 'number' ? value : undefined)
-const list = (value: PropValue | undefined): string[] | undefined => (Array.isArray(value) ? value : undefined)
 
 function tzOffsetOf(ctx: QueryCtx): number {
-  const offset = ctx.tzOffset
-  return typeof offset === 'number' && Number.isFinite(offset) ? Math.max(-14 * 60, Math.min(14 * 60, offset)) : 0
+  return tzMinutes(ctx.tzOffset)
 }
 
 const pad = (n: number, width: number): string => String(n).padStart(width, '0')
@@ -92,14 +142,34 @@ function dayOf(stamp: string, offset: number): string | undefined {
   return `${pad(year, 4)}-${pad(date.getUTCMonth() + 1, 2)}-${pad(date.getUTCDate(), 2)}`
 }
 
-/** 日期类属性在一行上的「哪一天」：日期就是值本身，创建 / 编辑时间按时区折算 */
-function dayGetter(prop: CollectionProp, ctx: QueryCtx): (row: CollectionRow) => string | undefined {
-  if (prop.type === 'date') return (row) => str(rowValue(row, prop))
+/** 日期输出的汇总 / 公式：值是日期写法（单日、区间）或时间戳 */
+const isComputedDate = (prop: CollectionProp): boolean =>
+  (prop.type === 'rollup' && rollupOutput(prop.cfg.fn) === 'date') || (prop.type === 'formula' && prop.output === 'date')
+
+/** 日期类属性在一行上占的日子：日期是值本身的起止（单日 start = end），创建 / 编辑时间按时区折成那一天；
+ *  日期输出的汇总 / 公式是日期写法或时间戳，各按上面两种的口径 */
+function spanGetter(prop: CollectionProp, ctx: QueryCtx): (row: CollectionRow) => DateSpan | undefined {
+  if (!isDateType(prop.type) && !isComputedDate(prop)) return () => undefined
+  if (prop.type === 'date') return (row) => dateSpan(rowValue(row, prop))
   const offset = tzOffsetOf(ctx)
   return (row) => {
     const stamp = str(rowValue(row, prop))
-    return stamp === undefined ? undefined : dayOf(stamp, offset)
+    const span = stamp === undefined ? undefined : dateSpan(stamp)
+    if (span) return span
+    const day = stamp === undefined ? undefined : dayOf(stamp, offset)
+    return day === undefined ? undefined : { start: day, end: day }
   }
+}
+
+/** 一行在日期类属性上占的日子（日历 / 时间线排版用，与窗口的范围判定同一口径）；没有值 / 不是日期类 = undefined */
+export function rowSpan(row: CollectionRow, prop: CollectionProp, ctx: QueryCtx = {}): DateSpan | undefined {
+  return spanGetter(prop, ctx)(row)
+}
+
+/** 视图排布用的日期属性（dateBy 指的属性还在、仍是日期类）；没有 = undefined */
+export function dateByProp(view: CollectionView, schema: CollectionSchema): CollectionProp | undefined {
+  const prop = view.dateBy ? findProp(schema, view.dateBy) : undefined
+  return prop && isDateType(prop.type) ? prop : undefined
 }
 
 // ---------- 筛选 ----------
@@ -107,34 +177,18 @@ function dayGetter(prop: CollectionProp, ctx: QueryCtx): (row: CollectionRow) =>
 /** 一条条件 → 行判定；运算不适用于属性当前类型、或该带值却没值（还没填完）的条件不参与筛选，返回 null */
 function conditionTest(cond: Condition, prop: CollectionProp, ctx: QueryCtx): RowTest | null {
   const op = cond.op
-  if (!(FILTER_OPS[prop.type] as readonly FilterOp[]).includes(op)) return null
+  if (!filterOps(prop).includes(op)) return null
   const value = conditionValue(prop, op, cond.value)
   if (opNeedsValue(op) && value === undefined) return null
   switch (prop.type) {
     case 'text':
-    case 'url': {
-      const get = (row: CollectionRow): string | undefined => str(rowValue(row, prop))?.toLowerCase()
-      const q = typeof value === 'string' ? value.toLowerCase() : ''
-      if (op === 'contains') return (row) => get(row)?.includes(q) === true
-      if (op === 'eq') return (row) => get(row) === q
-      if (op === 'empty') return (row) => get(row) === undefined
-      return (row) => get(row) !== undefined
-    }
-    case 'number': {
-      const get = (row: CollectionRow): number | undefined => num(rowValue(row, prop))
-      if (op === 'empty') return (row) => get(row) === undefined
-      const n = value as number
-      if (op === 'eq') return (row) => get(row) === n
-      if (op === 'neq') return (row) => get(row) !== n
-      const cmp = (row: CollectionRow, test: (v: number) => boolean): boolean => {
-        const v = get(row)
-        return v !== undefined && test(v)
-      }
-      if (op === 'gt') return (row) => cmp(row, (v) => v > n)
-      if (op === 'lt') return (row) => cmp(row, (v) => v < n)
-      if (op === 'gte') return (row) => cmp(row, (v) => v >= n)
-      return (row) => cmp(row, (v) => v <= n)
-    }
+    case 'url':
+    case 'email':
+    case 'phone':
+      return textTest(prop, op, value)
+    case 'number':
+    case 'unique_id':
+      return numberTest(prop, op, value)
     case 'select':
     case 'status': {
       const get = (row: CollectionRow): string | undefined => str(rowValue(row, prop))
@@ -148,8 +202,10 @@ function conditionTest(cond: Condition, prop: CollectionProp, ctx: QueryCtx): Ro
       return (row) => get(row) === undefined
     }
     case 'multi_select':
-    case 'person': {
-      const get = (row: CollectionRow): string[] | undefined => list(rowValue(row, prop))
+    case 'person':
+    case 'created_by':
+    case 'edited_by': {
+      const get = (row: CollectionRow): string[] | undefined => idList(rowValue(row, prop))
       const id = value as string
       if (op === 'contains') return (row) => get(row)?.includes(id) === true
       if (op === 'not_contains') return (row) => get(row)?.includes(id) !== true
@@ -157,25 +213,98 @@ function conditionTest(cond: Condition, prop: CollectionProp, ctx: QueryCtx): Ro
     }
     case 'date':
     case 'created_time':
-    case 'edited_time': {
-      const get = dayGetter(prop, ctx)
-      if (op === 'empty') return (row) => get(row) === undefined
-      const day = value as string
-      if (op === 'eq') return (row) => get(row) === day
-      if (op === 'before')
-        return (row) => {
-          const d = get(row)
-          return d !== undefined && d < day
-        }
-      return (row) => {
-        const d = get(row)
-        return d !== undefined && d > day
-      }
-    }
+    case 'edited_time':
+      return dateTest(prop, op, value, ctx)
     case 'checkbox':
       // 复选框没有「空」：没勾就是否
       return op === 'checked' ? (row) => rowValue(row, prop) === true : (row) => rowValue(row, prop) !== true
+    case 'files':
+      return op === 'empty' ? (row) => fileList(rowValue(row, prop)) === undefined : (row) => fileList(rowValue(row, prop)) !== undefined
+    case 'relation': {
+      const get = (row: CollectionRow): string[] | undefined => idList(rowValue(row, prop))
+      const id = value as string
+      if (op === 'contains') return (row) => get(row)?.includes(id) === true
+      if (op === 'not_contains') return (row) => get(row)?.includes(id) !== true
+      if (op === 'empty') return (row) => get(row) === undefined
+      return (row) => get(row) !== undefined
+    }
+    // 汇总按输出类型：数字同数字，日期同日期，列表只有为空 / 不为空
+    case 'rollup': {
+      const output = rollupOutput(prop.cfg.fn)
+      if (output === 'number') return numberTest(prop, op, value)
+      if (output === 'date') return dateTest(prop, op, value, ctx)
+      return presenceTest(prop, op)
+    }
+    case 'formula':
+      return formulaTest(prop, op, value, ctx)
   }
+}
+
+function presenceTest(prop: CollectionProp, op: FilterOp): RowTest {
+  return op === 'empty' ? (row) => rowValue(row, prop) === undefined : (row) => rowValue(row, prop) !== undefined
+}
+
+/** 公式按输出类型：数字 / 日期同那两种属性，文本同文本，是否同复选框，列表的「包含」= 有一项的文字等于比较值 */
+function formulaTest(prop: CollectionProp, op: FilterOp, value: string | number | undefined, ctx: QueryCtx): RowTest {
+  switch (prop.output) {
+    case 'number':
+      return numberTest(prop, op, value)
+    case 'date':
+      return dateTest(prop, op, value, ctx)
+    case 'text':
+      return textTest(prop, op, value)
+    case 'boolean':
+      return op === 'checked' ? (row) => rowValue(row, prop) === true : (row) => rowValue(row, prop) !== true
+    case 'list':
+      if (op === 'contains') {
+        return (row) => {
+          const items = rowValue(row, prop)
+          return Array.isArray(items) && items.some((item) => (typeof item === 'object' ? item.name : String(item)) === value)
+        }
+      }
+      return presenceTest(prop, op)
+    default:
+      return presenceTest(prop, op)
+  }
+}
+
+function textTest(prop: CollectionProp, op: FilterOp, value: string | number | undefined): RowTest {
+  const get = (row: CollectionRow): string | undefined => str(rowValue(row, prop))?.toLowerCase()
+  const q = typeof value === 'string' ? value.toLowerCase() : ''
+  if (op === 'contains') return (row) => get(row)?.includes(q) === true
+  if (op === 'eq') return (row) => get(row) === q
+  if (op === 'empty') return (row) => get(row) === undefined
+  return (row) => get(row) !== undefined
+}
+
+function numberTest(prop: CollectionProp, op: FilterOp, value: string | number | undefined): RowTest {
+  const get = (row: CollectionRow): number | undefined => num(rowValue(row, prop))
+  if (op === 'empty') return (row) => get(row) === undefined
+  const n = value as number
+  if (op === 'eq') return (row) => get(row) === n
+  if (op === 'neq') return (row) => get(row) !== n
+  const cmp = (row: CollectionRow, test: (v: number) => boolean): boolean => {
+    const v = get(row)
+    return v !== undefined && test(v)
+  }
+  if (op === 'gt') return (row) => cmp(row, (v) => v > n)
+  if (op === 'lt') return (row) => cmp(row, (v) => v < n)
+  if (op === 'gte') return (row) => cmp(row, (v) => v >= n)
+  return (row) => cmp(row, (v) => v <= n)
+}
+
+/** 区间按与比较日的关系判：「是」= 比较日落在区间里，「早于」= 整段都在它之前，「晚于」= 整段都在它之后；单日就是逐日比较 */
+function dateTest(prop: CollectionProp, op: FilterOp, value: string | number | undefined, ctx: QueryCtx): RowTest {
+  const get = spanGetter(prop, ctx)
+  if (op === 'empty') return (row) => get(row) === undefined
+  const day = value as string
+  const test = (row: CollectionRow, hit: (span: DateSpan) => boolean): boolean => {
+    const span = get(row)
+    return span !== undefined && hit(span)
+  }
+  if (op === 'eq') return (row) => test(row, (span) => span.start <= day && day <= span.end)
+  if (op === 'before') return (row) => test(row, (span) => span.end < day)
+  return (row) => test(row, (span) => span.start > day)
 }
 
 function compileFilter(filter: Filter, schema: CollectionSchema, ctx: QueryCtx): RowTest {
@@ -224,13 +353,19 @@ function comparePart(a: Key, b: Key, dir: 1 | -1): number {
   return dir * compareKey(a, b)
 }
 
-function sortPart(prop: CollectionProp, dir: 1 | -1, ctx: QueryCtx): Part {
+const dayNumber = (day: string): number => Number(day.slice(0, 4) + day.slice(5, 7) + day.slice(8, 10))
+
+/** 一级排序的键；排不了的属性（关联、列表输出的汇总，见 sortable）= null，不参与排序 */
+function sortPart(prop: CollectionProp, dir: 1 | -1, ctx: QueryCtx): Part | null {
   const get = (row: CollectionRow): PropValue | undefined => rowValue(row, prop)
   switch (prop.type) {
     case 'text':
     case 'url':
+    case 'email':
+    case 'phone':
       return { dir, key: (row) => str(get(row)) }
     case 'number':
+    case 'unique_id':
       return { dir, key: (row) => num(get(row)) }
     case 'select':
     case 'status':
@@ -242,19 +377,24 @@ function sortPart(prop: CollectionProp, dir: 1 | -1, ctx: QueryCtx): Part {
         key: (row) => {
           const v = get(row)
           if (typeof v === 'string') return index.get(v)
-          return Array.isArray(v) ? v.map((id) => index.get(id) ?? 0) : undefined
+          return idList(v)?.map((id) => index.get(id) ?? 0)
         },
       }
     }
     case 'person':
-      return { dir, key: (row) => list(get(row))?.map((id) => ctx.nameOf?.(id) ?? id) }
+    case 'created_by':
+    case 'edited_by':
+      return { dir, key: (row) => idList(get(row))?.map((id) => ctx.nameOf?.(id) ?? id) }
+    case 'files':
+      // 按第一个文件的文件名
+      return { dir, key: (row) => fileList(get(row))?.[0]?.name }
     case 'date':
-      // 'YYYY-MM-DD' → 20261025：数字比较即日期先后
+      // 'YYYY-MM-DD' → 20261025：数字比较即日期先后。先比开始日，同一天开始的再比结束日（单日排在从这天开始的区间前面）
       return {
         dir,
         key: (row) => {
-          const day = str(get(row))
-          return day === undefined ? undefined : Number(day.slice(0, 4) + day.slice(5, 7) + day.slice(8, 10))
+          const span = dateSpan(get(row))
+          return span === undefined ? undefined : [dayNumber(span.start), dayNumber(span.end)]
         },
       }
     case 'checkbox':
@@ -269,6 +409,57 @@ function sortPart(prop: CollectionProp, dir: 1 | -1, ctx: QueryCtx): Part {
           return Number.isFinite(ms) ? ms : undefined
         },
       }
+    case 'relation':
+      return null
+    case 'rollup': {
+      const output = rollupOutput(prop.cfg.fn)
+      if (output === 'number') return { dir, key: (row) => num(get(row)) }
+      // 日历日与时间戳都折成毫秒比（同一个汇总的值只会是其中一种）
+      if (output !== 'date') return null
+      return {
+        dir,
+        key: (row) => {
+          const v = str(get(row))
+          return v === undefined ? undefined : rollupDateMs(v)
+        },
+      }
+    }
+    case 'formula':
+      return formulaSortPart(prop, dir, get)
+  }
+}
+
+/** 公式按输出类型排：数字、文本同那两种属性（文本键经 compareKey 走 compareText，与文本列同一个 Collator，
+ *  不是公式里比较运算用的码点序）；是否：是在前（升序时否在前），算不出的排最后；
+ *  日期按 [开始, 结束] 的毫秒（日历日取那天的 UTC 零点，时间戳原样）；列表不排 */
+function formulaSortPart(prop: CollectionProp, dir: 1 | -1, get: (row: CollectionRow) => PropValue | undefined): Part | null {
+  switch (prop.output) {
+    case 'number':
+      return { dir, key: (row) => num(get(row)) }
+    case 'text':
+      return { dir, key: (row) => str(get(row)) }
+    case 'boolean':
+      return {
+        dir,
+        key: (row) => {
+          const v = get(row)
+          return typeof v === 'boolean' ? (v ? 1 : 0) : undefined
+        },
+      }
+    case 'date':
+      return {
+        dir,
+        key: (row) => {
+          const v = str(get(row))
+          if (v === undefined) return undefined
+          const span = dateSpan(v)
+          if (span) return [rollupDateMs(span.start)!, rollupDateMs(span.end)!]
+          const ms = rollupDateMs(v)
+          return ms === undefined ? undefined : [ms, ms]
+        },
+      }
+    default:
+      return null
   }
 }
 
@@ -279,7 +470,8 @@ function sortParts(sorts: Sort[], schema: CollectionSchema, ctx: QueryCtx): Part
     const prop = findProp(schema, sort.prop)
     if (!prop || seen.has(prop.id)) continue
     seen.add(prop.id)
-    parts.push(sortPart(prop, sort.dir === 'desc' ? -1 : 1, ctx))
+    const part = sortPart(prop, sort.dir === 'desc' ? -1 : 1, ctx)
+    if (part) parts.push(part)
   }
   return parts
 }
@@ -360,6 +552,51 @@ function bump(groups: Record<string, number>, key: string, delta: number): void 
 
 // ---------- 窗口 ----------
 
+type RangeScope = { raw: string; test: RowTest }
+
+/** 窗口的日期范围：与范围有交集（start ≤ to 且 end ≥ from）就在范围里，RANGE_NONE = 没有值。
+ *  视图没有日期属性、或范围认不出时不限定（同 group 在没有分组时的口径） */
+function rangeScope(view: CollectionView, schema: CollectionSchema, raw: unknown, ctx: QueryCtx): RangeScope | null {
+  const range = parseRange(raw)
+  const prop = dateByProp(view, schema)
+  if (range === null || !prop || typeof raw !== 'string') return null
+  const get = spanGetter(prop, ctx)
+  if (range === 'none') return { raw, test: (row) => get(row) === undefined }
+  return {
+    raw,
+    test: (row) => {
+      const span = get(row)
+      return span !== undefined && span.start <= range.to && span.end >= range.from
+    },
+  }
+}
+
+/** 一行在不在这样取的窗口里：筛选 ∧ 组 ∧ 日期范围（queryWindow / applyRowsDelta 的 inScope，客户端乐观插行也按它判）。
+ *  公式先按这份定义重算（乐观新建的行还没有公式值） */
+export function matchScope(
+  row: CollectionRow,
+  view: CollectionView,
+  schema: CollectionSchema,
+  opts: Pick<WindowOpts, 'group' | 'range'>,
+  ctx: QueryCtx = {},
+): boolean {
+  row = formulaFiller(schema, ctx)?.(row) ?? row
+  if (!matchFilter(row, view.filter, schema, ctx)) return false
+  const grouping = groupingOf(view.groupBy, schema)
+  if (grouping && typeof opts.group === 'string' && grouping.keyOf(row) !== opts.group) return false
+  const range = rangeScope(view, schema, opts.range, ctx)
+  return !range || range.test(row)
+}
+
+/** 按视图的顺序排（不按组取时组序在前，再是排序与手动顺序），不改入参。几个窗口合起来显示（时间线的各块）时用 */
+export function sortRows(rows: readonly CollectionRow[], view: CollectionView, schema: CollectionSchema, ctx: QueryCtx = {}): CollectionRow[] {
+  const order = viewOrdering(view, schema, ctx, groupingOf(view.groupBy, schema), false)
+  return rows
+    .map(order.keyed)
+    .sort(order.compare)
+    .map((keyed) => keyed.row)
+}
+
 /** 视图的完整顺序：不按组取时组序在前（同组的行连在一起，表格能直接分段），再是排序与手动顺序 */
 function viewOrdering(view: CollectionView, schema: CollectionSchema, ctx: QueryCtx, grouping: Grouping | null, scoped: boolean): Ordering {
   const parts: Part[] = []
@@ -383,7 +620,7 @@ function cursorStart(sorted: CollectionRow[], cursor: unknown): number {
   return sorted[index]?.id === cursor.slice(sep + 1) ? index + 1 : 0
 }
 
-/** 窗口查询：筛选 → 分组计数 →（按组取时只留这一组）→ 排序 → 从游标处截 limit 行 */
+/** 窗口查询：算公式 → 筛选 → 分组计数 →（按组 / 日期范围取时只留范围里的）→ 排序 → 从游标处截 limit 行 */
 export function queryWindow(
   rows: CollectionRow[],
   view: CollectionView,
@@ -391,11 +628,14 @@ export function queryWindow(
   opts: WindowOpts = {},
   ctx: QueryCtx = {},
 ): RowsWindow {
+  const filled = fillFormulas(rows, schema, ctx)
   const test = compileFilter(view.filter, schema, ctx)
   const grouping = groupingOf(view.groupBy, schema)
   const scope = grouping && typeof opts.group === 'string' ? opts.group : undefined
-  const matched = rows.filter(test)
-  const inScope = scope === undefined ? matched : matched.filter((row) => grouping!.keyOf(row) === scope)
+  const range = rangeScope(view, schema, opts.range, ctx)
+  const matched = filled.filter(test)
+  const inScope =
+    scope === undefined && !range ? matched : matched.filter((row) => (scope === undefined || grouping!.keyOf(row) === scope) && (!range || range.test(row)))
   const order = viewOrdering(view, schema, ctx, grouping, scope !== undefined)
   const sorted = inScope
     .map(order.keyed)
@@ -411,6 +651,7 @@ export function queryWindow(
     total: sorted.length,
     ...(grouping ? { groups: countGroups(matched, grouping) } : {}),
     ...(scope !== undefined ? { group: scope } : {}),
+    ...(range ? { range: range.raw } : {}),
   }
 }
 
@@ -458,9 +699,10 @@ function insertSorted(rows: CollectionRow[], row: CollectionRow, compare: (a: Co
  *  · 行在窗口里就摘掉再按新值判定：还命中、且没排到已加载末行之后（或窗口已到底）就插回排好的位置
  *  · 不在窗口里的：命中且排在已加载末行之前（或窗口已到底）就插入；排在后面的等翻页时取
  *  · total 与各组计数按旧行、新行精确增减；已到底的窗口直接按行数校正
- *  这样窗口始终是服务端排好序的列表的前缀，游标接着对得上。
+ *  这样窗口始终是服务端排好序的列表的前缀，游标接着对得上。按日期范围取的窗口同理：行改了日期自然进 / 出范围。
  *  乐观更新也要经这里（合成一条增量），计数才不会重复增减。各列（按组取的窗口）各套一次。
- *  已知余量：prev 里没有旧的编辑时间，按编辑时间筛选时，不在窗口里的行计数可能偏一，下次查询自然校正 */
+ *  已知余量：prev 里没有旧的编辑时间与旧的计算值（关联解析、反向关联、汇总变了的行按 prev: {} 发），按它们筛选时，
+ *  不在窗口里的行计数可能偏一，下次查询自然校正 */
 export function applyRowsDelta(
   window: RowsWindow,
   delta: RowsDelta,
@@ -470,12 +712,16 @@ export function applyRowsDelta(
 ): RowsWindow {
   // 顺序基准变了：窗口里的 position 全是旧的，套不上 —— 原样返回，由调用方丢掉窗口重取（见 RowsDelta.reset）
   if (delta.reset) return window
+  // 增量里的行（含按 prev 还原出的旧行）先按本机的定义与时区算公式：服务端带来的公式值不用
+  const fill = formulaFiller(schema, ctx) ?? ((row: CollectionRow): CollectionRow => row)
   const test = compileFilter(view.filter, schema, ctx)
   const grouping = groupingOf(view.groupBy, schema)
   const scope = grouping && typeof window.group === 'string' ? window.group : undefined
+  const range = rangeScope(view, schema, window.range, ctx)
   const order = viewOrdering(view, schema, ctx, grouping, scope !== undefined)
   const compare = (a: CollectionRow, b: CollectionRow): number => order.compare(order.keyed(a), order.keyed(b))
-  const inScope = (row: CollectionRow): boolean => test(row) && (scope === undefined || grouping!.keyOf(row) === scope)
+  const inRange = (row: CollectionRow): boolean => !range || range.test(row)
+  const inScope = (row: CollectionRow): boolean => test(row) && (scope === undefined || grouping!.keyOf(row) === scope) && inRange(row)
   const complete = window.next === null
   const rows = window.rows.slice()
   let groups = grouping ? { ...window.groups } : undefined
@@ -484,20 +730,23 @@ export function applyRowsDelta(
   const tally = (row: CollectionRow, sign: 1 | -1): void => {
     if (!test(row)) return
     const key = grouping ? grouping.keyOf(row) : ''
+    // 分组计数数的是全部命中筛选的行（同 queryWindow），不受组与日期范围限定
     if (groups) bump(groups, key, sign)
-    if (scope === undefined || key === scope) total += sign
+    if ((scope === undefined || key === scope) && inRange(row)) total += sign
   }
 
   for (const { row } of Array.isArray(delta.rm) ? delta.rm : []) {
     const i = rows.findIndex((r) => r.id === row.id)
-    tally(i >= 0 ? rows[i]! : row, -1)
+    tally(i >= 0 ? rows[i]! : fill(row), -1)
     if (i >= 0) rows.splice(i, 1)
   }
 
-  for (const { row, prev } of Array.isArray(delta.up) ? delta.up : []) {
+  for (const update of Array.isArray(delta.up) ? delta.up : []) {
+    const { prev } = update
+    const row = fill(update.row)
     const i = rows.findIndex((r) => r.id === row.id)
     const last = rows.at(-1)
-    const old = i >= 0 ? rows[i] : prev && typeof prev === 'object' ? restoreRow(row, prev) : undefined
+    const old = i >= 0 ? rows[i] : prev && typeof prev === 'object' ? fill(restoreRow(row, prev)) : undefined
     if (i >= 0) rows.splice(i, 1)
     if (old) tally(old, -1)
     tally(row, 1)
@@ -507,7 +756,8 @@ export function applyRowsDelta(
 
   if (complete) {
     total = rows.length
-    if (groups && grouping) {
+    // 按日期范围取的窗口里只有范围内的行，分组计数没法从它重数，留着上面精确增减的结果
+    if (groups && grouping && !range) {
       // 不按组取、又已到底：窗口里就是全部命中行，计数直接重数（顺带清掉已删选项的旧键）
       if (scope === undefined) groups = countGroups(rows, grouping)
       else groups[scope] = rows.length
@@ -521,5 +771,7 @@ export function applyRowsDelta(
     total,
     ...(groups ? { groups } : {}),
     ...(scope !== undefined ? { group: scope } : {}),
+    ...(range ? { range: range.raw } : {}),
+    ...(window.refs ? { refs: window.refs } : {}),
   }
 }

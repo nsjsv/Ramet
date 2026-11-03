@@ -13,8 +13,8 @@ import SnapshotListView from '../SnapshotListView'
 import { titleSchema } from '../title-schema'
 import { OptionChip } from './cells/CellView'
 import { useCollection, useCollectionSchema } from './collection-store'
+import { LAYOUT_ICON } from './layouts'
 import { TYPE_ICON } from './prop-meta'
-import { LAYOUT_ICON } from './ViewTabs'
 
 const C = COPY.collection
 const H = C.history

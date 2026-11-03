@@ -1,0 +1,234 @@
+/* 集合的日历视图（collection/calendar/）。
+ * 一周一行（6 行），每行是 7 格的网格，条目绝对定位在行里（横条跨格、跨周断开）：位置由 calendar-model 算好写在行内样式里，
+ * 格子高、日期号一行高、车道高经 CSS 变量从 CalendarView 传进来（--cal-cell / --cal-head / --cal-lane，与排版算的一致）。
+ * 格子最小宽 0、标题截断：正文里的集合块按正文列宽排，不伸出正文列。
+ * 动效只动 opacity / transform；拖动落下由 motion.ts 的 flip() 做，拖动中只给目标格子上底色。 */
+
+.cl-cal {
+  padding-bottom: 12px;
+  font-size: var(--t-sm);
+}
+
+.cl-cal-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding-bottom: 6px;
+}
+
+.cl-cal-title {
+  color: var(--ink);
+  font-size: var(--t-md);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.cl-cal-nav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.cl-flip-x {
+  transform: scaleX(-1);
+}
+
+.cl-cal-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  padding-bottom: 4px;
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+}
+
+.cl-cal-weekdays > span {
+  padding: 0 8px;
+  text-align: right;
+}
+
+.cl-cal-grid {
+  border-top: 1px solid var(--line);
+  border-left: 1px solid var(--line);
+}
+
+.cl-cal-grid.is-loading {
+  opacity: 0.7;
+}
+
+.cl-cal-week {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  height: var(--cal-cell);
+}
+
+.cl-cal-day {
+  position: relative;
+  min-width: 0;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.cl-cal-day.is-outside {
+  background: var(--bg-sunk);
+}
+
+.cl-cal-day.is-drop {
+  background: var(--accent-tint);
+}
+
+.cl-cal-num {
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  min-width: 20px;
+  padding: 0 5px;
+  border-radius: var(--r-pill);
+  color: var(--ink-2);
+  font-size: var(--t-xs);
+  line-height: 20px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.cl-cal-day.is-outside .cl-cal-num {
+  color: var(--ink-3);
+}
+
+.cl-cal-day.is-today .cl-cal-num {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+/* 悬停格子才出「＋」；触屏没有悬停，常显 */
+.cl-cal-add {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 22px;
+  height: 22px;
+  opacity: 0;
+}
+
+.cl-cal-day:hover .cl-cal-add,
+.cl-cal-add:focus-visible {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .cl-cal-add {
+    opacity: 1;
+  }
+}
+
+/* 放不下的条目：占最后一条车道的位置（--cal-more 由 CalendarView 按放得下几条算） */
+.cl-cal-more {
+  position: absolute;
+  top: var(--cal-more);
+  left: 3px;
+  right: 3px;
+  height: calc(var(--cal-lane) - 2px);
+  padding: 0 6px;
+  overflow: hidden;
+  border-radius: 4px;
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cl-cal-more:hover {
+  background: var(--hover);
+  color: var(--ink-2);
+}
+
+.cl-cal-item {
+  position: absolute;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: calc(var(--cal-lane) - 2px);
+  padding: 0 6px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+  color: var(--ink);
+  font-size: var(--t-xs);
+  text-align: left;
+}
+
+.cl-cal-item:hover {
+  background: var(--bg-sunk);
+}
+
+.cl-cal-item:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+/* 区间从上一周延续过来 / 延续到下一周：断口那边不圆角，贴着格子边 */
+.cl-cal-item.is-cut-left {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+.cl-cal-item.is-cut-right {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.cl-cal-item.is-draggable {
+  cursor: grab;
+  touch-action: none;
+}
+
+.cl-cal-item.is-dragging {
+  opacity: 0.45;
+}
+
+.cl-cal-item .page-icon-sm {
+  width: 14px;
+  height: 14px;
+  line-height: 14px;
+  font-size: 12px;
+}
+
+.cl-cal-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cl-cal-name.is-empty {
+  color: var(--ink-3);
+}
+
+/* 刚新建的行就地输入标题：盖在那一天的第一条车道上 */
+.cl-cal-naming {
+  position: absolute;
+  z-index: 2;
+  top: var(--cal-head);
+  left: 2px;
+  right: 2px;
+}
+
+.cl-cal-naming .cl-input {
+  width: 100%;
+  padding: 1px 5px;
+  font-size: var(--t-xs);
+}
+
+/* 「还有 N 条」弹层：当天全部条目 */
+.cl-cal-list {
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.cl-cal-list .pop-row {
+  gap: 8px;
+}

@@ -1,7 +1,9 @@
-/* ---------- 行的多选（表格与看板共用） ----------
+/* ---------- 行的多选（各视图共用） ----------
  * 选择只在组件里（不进 store / 文档）：勾选 / ⌘ 点 = 切换并设锚点；Shift = 从锚点连选到这一行（按调用方给的可见顺序）；
- * 框选 = 一次给出整批（additive = 并到已有选择上）。被删 / 挪走 / 不在已加载窗口里的行由调用方 prune 掉。 */
-import { useCallback, useRef, useState } from 'react'
+ * 框选 = 一次给出整批（additive = 并到已有选择上）。被删 / 挪走 / 不在已加载窗口里的行由调用方 prune 掉
+ * （只看一个窗口的视图用 usePruneToWindow）；选中时 Esc 清空（useEscapeClear）。 */
+import { useCallback, useEffect, useRef, useState } from 'react'
+import type { RowsWindow } from '@ramet/shared/collection-query'
 
 /** 锚点到 to 之间（含两端）的 id；锚点不在顺序里 = 只有 to */
 export function rangeIds(order: readonly string[], anchor: string | null, to: string): string[] {
@@ -64,4 +66,26 @@ export function useRowPicking(): RowPicking {
     setPicked((cur) => (cur.size === 0 ? cur : new Set()))
   }, [])
   return { picked, pick, setBox, replace, prune, clear }
+}
+
+/** 有选中时按 Esc 清空。焦点在输入框 / 可编辑区域里的 Esc 归它们（退出编辑），别处已处理过的也不管 */
+export function useEscapeClear(active: boolean, clear: () => void): void {
+  useEffect(() => {
+    if (!active) return
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== 'Escape' || e.defaultPrevented || (e.target as Element | null)?.closest?.('input, textarea, [contenteditable]')) return
+      clear()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [active, clear])
+}
+
+/** 只看一个窗口的视图：勾选的行被删了 / 挪出窗口就摘掉 */
+export function usePruneToWindow(win: RowsWindow | null, prune: (alive: (id: string) => boolean) => void): void {
+  useEffect(() => {
+    if (!win) return
+    const alive = new Set(win.rows.map((r) => r.id))
+    prune((id) => alive.has(id))
+  }, [win, prune])
 }

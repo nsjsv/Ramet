@@ -1,14 +1,18 @@
 /* ---------- 集合 store：一个集合在一页上只开一条协同连接，属性定义 / 视图 / 行窗口都从这里取 ----------
  * · 连接按集合 id 引用计数（整页、嵌入块、行页面属性区共用一条 page:<cid>）；最后一个使用者走了先保活一阵，
- *   拆掉后文档与窗口进冷缓存（collection-cache.ts）。窗口没人看了也留着（增量照常套），要重取时只记 stale、再看时才取。
+ *   拆掉后文档与窗口进冷缓存（collection-cache.ts）。窗口没人看了也留着（增量照常套；日期范围窗口只留最近的几个），
+ *   要重取时只记 stale、再看时才取。
  * · schema：观察 Y.Map('collection') → toJSON → parseCollection（服务端确认同步过才给，之前是 null）。
- * · 窗口：GET rows 取首屏 / 续取；收到集合文档的 stateless 增量（t = 'collection.rows'）用 applyRowsDelta 套上，
+ * · 窗口按范围区分（不限 / 按组 / 按日期范围，键与判定在 collection-windows.ts）：GET rows 取首屏 / 续取；
+ *   收到集合文档的 stateless 增量（t = 'collection.rows'）用 applyRowsDelta 套上，
  *   reset 表示顺序基准变了，全部窗口重取。视图的筛选 / 排序 / 分组（及它们引用的属性定义）一变就重取。
  * · 行的进出与改名服务端不推：App 每次拿到新页面列表就 syncPages，这里比较集合的子页集合，
  *   有进出就重取，只改了标题就本地改窗口里那一行。
  * · 写全走 REST，乐观更新合成一条增量经 applyRowsDelta 套上（计数按旧行 / 新行精确增减）；失败重取并给提示。
  *   新建也是乐观的：客户端定 id、先插行，确认之前对这一行的写排在确认之后发（pending）。
- *   服务端随后发来的同一改动（投影器的增量）里，prev 对已乐观套过的键改写成现值（echo），计数才不会重复增减。 */
+ *   服务端随后发来的同一改动（投影器的增量）里，prev 对已乐观套过的键改写成现值（回声，collection-echoes.ts），计数才不会重复增减。
+ * · 关联 / 汇总的值只由服务端算（row.computed）：窗口响应的 refs 记在 handle 上；写关联的换算与乐观行在 relation-write.ts，
+ *   关联到的集合有变要重取的判定在 collection-deps.ts，行页面属性区单独取的那一行在 row-watch.ts，这里只接线。 */
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
 import type { HocuspocusProvider } from '@hocuspocus/provider'
 import type * as Y from 'yjs'
@@ -17,28 +21,40 @@ import {
   pickView,
   TITLE_PROP_ID,
   validateValue,
+  type CollectionRefs,
   type CollectionRow,
   type CollectionSchema,
   type RowsDelta,
   type RowUpdate,
 } from '@ramet/shared/collection-model'
-import {
-  applyRowsDelta,
-  between,
-  clampLimit,
-  groupKey,
-  matchFilter,
-  WINDOW_LIMIT,
-  type QueryCtx,
-  type RowsWindow,
-} from '@ramet/shared/collection-query'
+import { applyRowsDelta, between, clampLimit, fillFormulas, type QueryCtx, type RowsWindow } from '@ramet/shared/collection-query'
 import type { Page, Space } from '../api'
 import { COPY } from '../copy'
+import { selfId } from '../people'
 import { randomUuid } from '../uuid'
-import { collectionTransport, type NewRowInput, type RowPatch, type RowSet } from './collection-api'
+import { collectionTransport, type NewRowInput, type RowPatch, type RowSet, type RowWithRefs } from './collection-api'
 import { createCorePool, type CacheOptions, type ColdCollection } from './collection-cache'
+import { createEchoes, ECHO_TTL } from './collection-echoes'
+import { depsChanged, depsSnapshot } from './collection-deps'
+import { hasReverse, normalizeRelation, splitWrite, withValues, type SplitWrite } from './relation-write'
+import { createRowWatch, type RowState } from './row-watch'
+import {
+  coldWins,
+  computedSig,
+  EMPTY_WINDOW,
+  fitsScope,
+  idleRangeOverflow,
+  newWin,
+  pageLimit,
+  querySig,
+  scopeKey,
+  viewUsesTitle,
+  warmWin,
+  type Win,
+  type WindowScope,
+} from './collection-windows'
 
-export type RowsQuery = { view: string; group?: string; cursor?: string | null; limit: number; tz: number }
+export type RowsQuery = { view: string; group?: string; range?: string; cursor?: string | null; limit: number; tz: number }
 
 /** 集合文档的协同连接（真实实现在 collection-api.ts；测试换成内存里的 Y.Doc） */
 export type CollectionLink = {
@@ -62,6 +78,8 @@ export type CollectionTransport = {
   setRows: (cid: string, ids: string[], set: RowSet) => Promise<unknown>
   duplicateRows: (cid: string, ids: string[]) => Promise<unknown>
   moveRows: (cid: string, ids: string[], to: string) => Promise<unknown>
+  /** 单行 + refs（行页面属性区）；不给 = 不取（测试） */
+  row?: (cid: string, rowId: string) => Promise<RowWithRefs>
   /** 人员排序用的显示名（与服务端按用户名排同一口径） */
   nameOf?: (spaceId: string | null, userId: string) => string | undefined
   /** 比 UTC 快多少分钟；缺省取本机时区 */
@@ -90,19 +108,27 @@ export type CollectionHandle = {
   clearError: () => void
   /** schema / 状态 / 窗口 / 提示任一变化都通知 */
   subscribe: (cb: () => void) => () => void
-  windowState: (viewId: string, group?: string) => WindowState
+  /** 窗口按范围区分（collection-windows.ts）：不给 = 不限范围 */
+  windowState: (viewId: string, scope?: WindowScope) => WindowState
   /** 开始看一个窗口（引用计数，返回退订） */
-  watchWindow: (viewId: string, group?: string) => () => void
-  loadMore: (viewId: string, group?: string) => void
-  /** 已加载窗口里这一行的最新一份 */
+  watchWindow: (viewId: string, scope?: WindowScope) => () => void
+  loadMore: (viewId: string, scope?: WindowScope) => void
+  /** 套增量用的时区与人员名（日历 / 时间线按它把创建 / 编辑时间折成日子、给几个窗口合起来排序） */
+  queryCtx: () => QueryCtx
+  /** 已加载窗口里（或属性区单独取的）这一行的最新一份 */
   findRow: (rowId: string) => CollectionRow | undefined
+  /** 窗口 / 单行响应里最近一份 refs（关联 / 汇总指向哪里、汇总目标的定义）；还没取到 = null */
+  refs: () => CollectionRefs | null
+  /** 行页面属性区：单独取一行的计算值（引用计数，返回退订；row-watch.ts） */
+  watchRow: (rowId: string) => () => void
+  rowState: (rowId: string) => RowState
   setValues: (rowId: string, set: RowSet) => Promise<boolean>
   renameRow: (rowId: string, title: string) => Promise<boolean>
   /** 手动排序（after / before = 落下后的前后邻居，null = 那一侧没有）；带 set = 同时改值（看板跨列） */
   moveRow: (rowId: string, after: string | null, before: string | null, set?: RowSet) => Promise<boolean>
   /** 乐观新建：行立即插进窗口，同步返回 id；ready = 服务端确认（失败 null，行已撤掉并提示）。
    *  at = 落在哪个窗口的末尾（手动排序且窗口没取完时请求带 after = 已加载的最后一行）。值非法 = null，什么都不做 */
-  createRow: (input?: NewRowInput, at?: { viewId: string; group?: string }) => NewRow | null
+  createRow: (input?: NewRowInput, at?: { viewId: string } & WindowScope) => NewRow | null
   trashRows: (ids: string[]) => Promise<boolean>
   /** 批量：改值（乐观）/ 复制（副本紧跟原行）/ 挪到同空间的另一个集合；行多了自动分批 */
   setValuesMany: (ids: string[], set: RowSet) => Promise<boolean>
@@ -113,25 +139,6 @@ export type CollectionHandle = {
 }
 
 export type NewRow = { id: string; ready: Promise<CollectionRow | null> }
-
-const EMPTY_WINDOW: WindowState = { window: null, loading: true, loadingMore: false, error: null }
-/** 乐观改值的回声多久内认（投影器约 100ms 去抖，留足网络余量） */
-const ECHO_TTL = 10_000
-
-type Win = {
-  viewId: string
-  group: string | undefined
-  refs: number
-  state: WindowState
-  /** 发起取数时视图的查询签名：筛选 / 排序 / 分组或它们引用的属性定义变了就重取 */
-  sig: string | null
-  seq: number
-  fetching: boolean
-  /** 取数期间来了增量：取完再取一次（取回的窗口不知道包没包含那次改动） */
-  dirty: boolean
-  /** 没人看时该重取了：再看时才取（空闲窗口不发请求） */
-  stale: boolean
-}
 
 /** 批量接口每次最多带多少行（与服务端 routes/collections.ts 的上限一致） */
 const BULK_SET_MAX = 500
@@ -144,28 +151,8 @@ function chunks<T>(list: readonly T[], size: number): T[][] {
   return out
 }
 
-const winKey = (viewId: string, group?: string): string => `${viewId}\u0000${group ?? '\u0001'}`
-
-const sameValue = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b)
-
-const own = (record: Record<string, unknown>, key: string): unknown => (Object.hasOwn(record, key) ? record[key] : null)
-
 function errorText(err: unknown): string {
   return err instanceof Error && err.message ? err.message : COPY.collection.writeFailed
-}
-
-/** 视图的查询签名：决定窗口内容的只有筛选、排序、分组，以及它们引用的属性当前的定义（类型、选项） */
-function querySig(schema: CollectionSchema, viewId: string): string {
-  const view = pickView(schema, viewId)
-  const used = new Set<string>([...view.filter.all.map((c) => c.prop), ...view.sorts.map((s) => s.prop)])
-  if (view.groupBy) used.add(view.groupBy)
-  return JSON.stringify([view.id, view.filter, view.sorts, view.groupBy, schema.props.filter((p) => used.has(p.id))])
-}
-
-/** 视图的筛选 / 排序用到了「名称」：别的行改名可能让它进出窗口、换位置 */
-function viewUsesTitle(schema: CollectionSchema, viewId: string): boolean {
-  const view = pickView(schema, viewId)
-  return view.filter.all.some((c) => c.prop === TITLE_PROP_ID) || view.sorts.some((s) => s.prop === TITLE_PROP_ID)
 }
 
 /** 页面列表里这个集合的行：父页是它的活 doc 页（id → 标题） */
@@ -206,14 +193,14 @@ function createCore(
   const root = link.doc.getMap<unknown>('collection')
   const listeners = new Set<() => void>()
   const wins = new Map<string, Win>()
+  let idleSeq = 0
   /** 在途的乐观新建：行 id → 是否建成（确认之前对这一行的写先等它） */
   const pending = new Map<string, Promise<boolean>>()
   /** 本地改过、服务端还没确认的标题：行 id → 标题 + 认到何时（null = 改名请求还在途）。
    *  页面列表里这一行若还是旧名（建行 / 别的改动触发的重拉早于改名落库），不拿它覆盖窗口，免得闪回旧标题 */
   const localTitles = new Map<string, { title: string; until: number | null }>()
-  /** 乐观改过的值：行 id → 属性 id → 依次写过、服务端还没回声的值（null = 清空）。
-   *  连着改同一格（多选连点几个选项）时服务端可能分几批回声，每批对上的是中间某一次 */
-  const echoes = new Map<string, { values: Record<string, unknown[]>; at: number }>()
+  /** 乐观改过、服务端还没回声的值（collection-echoes.ts） */
+  const echoes = createEchoes()
   let refs = 0
   let dead = false
   let synced = false
@@ -223,14 +210,21 @@ function createCore(
   let schema: CollectionSchema | null = null
   let lastError: string | null = null
   let children = childrenOf(cid, pagesNow())
+  let lastRefs: CollectionRefs | null = null
+  /** 关联到的集合的子页与标题（collection-deps.ts）、关联 / 汇总定义的签名：变了要重取 */
+  let deps = depsSnapshot(null, null)
+  let compSig: string | null = null
 
   const emit = (): void => listeners.forEach((l) => l())
+  const single = createRowWatch(transport.row && ((rowId) => transport.row!(cid, rowId)), emit, (next) => (lastRefs = next))
   const tz = (): number => transport.tzOffset?.() ?? -new Date().getTimezoneOffset()
+  // refs 给公式用（逐个显示的汇总按目标属性的选项换名字），与服务端窗口查询的口径一致
   const ctx = (): QueryCtx => {
+    const base: QueryCtx = lastRefs ? { tzOffset: tz(), refs: lastRefs } : { tzOffset: tz() }
     const nameOf = transport.nameOf
-    if (!nameOf) return { tzOffset: tz() }
+    if (!nameOf) return base
     const spaceId = pagesNow()?.find((p) => p.id === cid)?.space_id ?? null
-    return { tzOffset: tz(), nameOf: (userId) => nameOf(spaceId, userId) }
+    return { ...base, nameOf: (userId) => nameOf(spaceId, userId) }
   }
   const setState = (win: Win, patch: Partial<WindowState>): void => {
     win.state = { ...win.state, ...patch }
@@ -245,12 +239,13 @@ function createCore(
     win.stale = false
     win.sig = schema ? querySig(schema, win.viewId) : null
     // 重取时按已加载的行数取（不超过上限），滚动看过的那一段不至于一下子缩回首屏
-    const limit = clampLimit(Math.max(WINDOW_LIMIT, win.state.window?.rows.length ?? 0))
+    const limit = clampLimit(Math.max(pageLimit(win.scope), win.state.window?.rows.length ?? 0))
     setState(win, { loading: true })
-    transport.rows(cid, { view: win.viewId, group: win.group, limit, tz: tz() }).then(
+    transport.rows(cid, { view: win.viewId, ...win.scope, limit, tz: tz() }).then(
       (data) => {
         if (dead || seq !== win.seq) return
         win.fetching = false
+        if (data.refs) lastRefs = data.refs
         setState(win, { window: keepPending(win, data), loading: false, loadingMore: false, error: null })
         if (win.dirty) refresh(win)
       },
@@ -262,12 +257,7 @@ function createCore(
     )
   }
 
-  /** 行在不在这个窗口的范围里（筛选 + 按组取时的组） */
-  function fits(row: CollectionRow, viewId: string, group: string | undefined): boolean {
-    if (!schema) return false
-    const view = pickView(schema, viewId)
-    return matchFilter(row, view.filter, schema, ctx()) && (group === undefined || groupKey(row, view.groupBy, schema) === group)
-  }
+  const fits = (row: CollectionRow, viewId: string, scope: WindowScope): boolean => !!schema && fitsScope(row, schema, viewId, scope, ctx())
 
   /** 重取落下时，还没建好的乐观行服务端那份里没有：原来在这个窗口里的补回去（否则别的写失败 / reset 引起的重取
    *  会把正在命名的行冲掉）。先按增量口径套（计数加一），没取完的窗口不收排在末行之后的，就接在末尾（同 createRow） */
@@ -278,7 +268,7 @@ function createCore(
       const row = win.state.window?.rows.find((r) => r.id === id)
       if (!row || out.rows.some((r) => r.id === id)) continue
       const next = applyRowsDelta(out, { t: 'collection.rows', up: [{ row }], rm: [] }, pickView(schema, win.viewId), schema, ctx())
-      out = next.rows.some((r) => r.id === id) || !fits(row, win.viewId, win.group) ? next : { ...next, rows: [...next.rows, row] }
+      out = next.rows.some((r) => r.id === id) || !fits(row, win.viewId, win.scope) ? next : { ...next, rows: [...next.rows, row] }
     }
     return out
   }
@@ -289,7 +279,10 @@ function createCore(
     else win.stale = true
   }
 
-  const refetchAll = (): void => wins.forEach(refresh)
+  const refetchAll = (): void => {
+    wins.forEach(refresh)
+    single.refetch()
+  }
 
   /** 一条增量套到一个窗口上：取数在途就记下、取完重取；还没有 schema（套不了）就直接重取 */
   function applyToWin(win: Win, delta: RowsDelta): void {
@@ -312,58 +305,31 @@ function createCore(
       refetchAll()
       return
     }
+    single.apply(delta)
     wins.forEach((win) => applyToWin(win, delta))
-  }
-
-  /** 服务端增量里自己乐观套过的改动：prev 里那些键改写成「窗口里现在的值」（旧行 = 新行，计数不再增减一次）。
-   *  回声对上的是中间某一次写（后面还有没回声的）：行里这个键也保持最后一次乐观写的值，不闪回中间态 */
-  function absorbEchoes(delta: RowsDelta): RowsDelta {
-    if (echoes.size === 0 || delta.reset) return delta
-    const now = Date.now()
-    const up = delta.up.map((u): RowUpdate => {
-      const echo = echoes.get(u.row.id)
-      if (!echo || !u.prev) return u
-      if (now - echo.at > ECHO_TTL) {
-        echoes.delete(u.row.id)
-        return u
-      }
-      const prev = { ...u.prev }
-      let props = u.row.props
-      for (const [key, written] of Object.entries(echo.values)) {
-        if (!Object.hasOwn(prev, key)) continue
-        const hit = written.findIndex((value) => sameValue(own(u.row.props, key), value))
-        if (hit < 0) continue
-        const pending = written.slice(hit + 1)
-        const shown = pending.length > 0 ? pending[pending.length - 1] : own(u.row.props, key)
-        if (pending.length > 0) {
-          props = { ...props }
-          if (shown === null) delete props[key]
-          else props[key] = shown
-          echo.values[key] = pending
-        } else delete echo.values[key]
-        prev[key] = shown
-      }
-      if (Object.keys(echo.values).length === 0) echoes.delete(u.row.id)
-      return { row: props === u.row.props ? u.row : { ...u.row, props }, prev }
-    })
-    return { ...delta, up }
   }
 
   function recompute(): void {
     if ((!synced && !warm) || dead) return
     schema = parseCollection(root.toJSON())
+    // 属性区单独取的那一行：关联 / 汇总定义变了 computed 就旧了（窗口靠 querySig，含同一份签名）
+    if (compSig !== null && compSig !== computedSig(schema)) single.refetch()
+    compSig = computedSig(schema)
+    deps = depsSnapshot(schema, pagesNow())
     for (const win of wins.values()) {
       const sig = querySig(schema, win.viewId)
       // 首个窗口可能在 schema 到之前就取了：那份是服务端按同一份视图算的，记下签名即可
       if (win.sig === null) win.sig = sig
-      else if (win.sig !== sig) refresh(win)
+      else if (win.sig !== sig) {
+        // 公式两端都能算：定义一变先用手上的行算出来，不用空着等重取回来（重取到的是服务端同一个算法的结果）
+        const w = win.state.window
+        if (w) win.state = { ...win.state, window: { ...w, rows: fillFormulas(w.rows, schema, ctx()) } }
+        refresh(win)
+      }
     }
     emit()
   }
-  for (const w of cold?.wins ?? []) {
-    const state = { ...w.state, loading: false, loadingMore: false, error: null }
-    wins.set(winKey(w.viewId, w.group), { viewId: w.viewId, group: w.group, refs: 0, state, sig: null, seq: 0, fetching: false, dirty: false, stale: true })
-  }
+  for (const w of cold?.wins ?? []) wins.set(scopeKey(w.viewId, w.scope), warmWin(w))
   root.observeDeep(recompute)
   recompute()
   link.onSynced(() => {
@@ -383,15 +349,20 @@ function createCore(
   })
   link.onStateless((payload) => {
     const delta = parseDelta(payload)
-    if (delta) applyDelta(absorbEchoes(delta))
+    if (delta) applyDelta(echoes.absorb(delta))
   })
 
+  /** 先给跟得上增量的那份：空闲时错过 reset 的窗口（stale）、取数在途的窗口可能缺着改动，乐观写与反向关联的增删
+   *  都以这里为底，拿旧的那份换算会把别人刚加的当成要删的 */
   function findRow(rowId: string): CollectionRow | undefined {
+    let behind: CollectionRow | undefined
     for (const win of wins.values()) {
       const hit = win.state.window?.rows.find((r) => r.id === rowId)
-      if (hit) return hit
+      if (!hit) continue
+      if (!win.stale && !win.fetching) return hit
+      behind ??= hit
     }
-    return undefined
+    return single.find(rowId, behind)
   }
 
   /** 写入失败：提示 + 以服务端为准重取（子页基线也回到最近一次页面列表） */
@@ -415,7 +386,7 @@ function createCore(
         values[key] = raw
         continue
       }
-      const checked = validateValue(prop, raw)
+      const checked = prop.type === 'relation' ? normalizeRelation(prop, raw) : validateValue(prop, raw)
       if (!checked.ok) {
         lastError = checked.error
         emit()
@@ -426,43 +397,42 @@ function createCore(
     return values
   }
 
-  /** 乐观写：已加载的行套上新值（和新位置）合成一条增量，prev 只含改到的键；改了值就登记回声。
-   *  position 缺省 = 位置不变 */
-  function optimistic(rowId: string, values: RowSet | null, position?: number): void {
-    const up = optimisticUpdate(rowId, values, position)
+  /** 乐观写：已加载的行套上新值（和新位置；shown = 反向关联的新值，直接改 computed）合成一条增量，prev 只含改到的键；
+   *  改了值就登记回声。position 缺省 = 位置不变 */
+  function optimistic(rowId: string, values: RowSet | null, position?: number, shown?: Record<string, string[]>): void {
+    const up = optimisticUpdate(rowId, values, position, shown)
     if (up) local([up])
   }
 
   /** optimistic 的一行：算出增量条目并登记回声，不套（批量改值攒成一条增量再套） */
-  function optimisticUpdate(rowId: string, values: RowSet | null, position?: number): RowUpdate | null {
+  function optimisticUpdate(rowId: string, values: RowSet | null, position?: number, shown?: Record<string, string[]>): RowUpdate | null {
     const old = findRow(rowId)
     if (!old) return null
-    const props = { ...old.props }
-    const prev: Record<string, unknown> = {}
-    for (const [key, value] of Object.entries(values ?? {})) {
-      prev[key] = own(old.props, key)
-      if (value === null) delete props[key]
-      else props[key] = value
-    }
-    const up = { row: { ...old, props, ...(position === undefined ? {} : { position }) }, prev }
-    if (!values || Object.keys(values).length === 0) return up
-    const echo = echoes.get(rowId) ?? { values: {}, at: 0 }
-    for (const [key, value] of Object.entries(values)) echo.values[key] = [...(echo.values[key] ?? []), value]
-    echo.at = Date.now()
-    echoes.set(rowId, echo)
+    const up = withValues(old, values ?? {}, shown, position)
+    if (values && Object.keys(values).length > 0) echoes.record(rowId, values)
     return up
+  }
+
+  /** 反向关联按这一行现在的值换算成增删（relation-write.ts）；超出单次上限 = null（已记下提示） */
+  function splitOf(rowId: string, values: RowSet): SplitWrite | null {
+    const split = splitWrite(schema, values, findRow(rowId))
+    if (typeof split !== 'string') return split
+    lastError = split
+    emit()
+    return null
   }
 
   async function setValues(rowId: string, set: RowSet): Promise<boolean> {
     const values = normalize(set)
-    if (!values) return false
-    optimistic(rowId, values)
+    const split = values && splitOf(rowId, values)
+    if (!split) return false
+    optimistic(rowId, split.stored, undefined, split.shown)
     if (!(await created(rowId))) return false
     try {
-      await transport.patchRow(cid, rowId, { set: values })
+      await transport.patchRow(cid, rowId, { set: split.wire })
       return true
     } catch (err) {
-      echoes.delete(rowId)
+      echoes.drop(rowId)
       fail(err)
       return false
     }
@@ -516,7 +486,7 @@ function createCore(
       await transport.patchRow(cid, rowId, { ...(values ? { set: values } : {}), after, before })
       return true
     } catch (err) {
-      if (values) echoes.delete(rowId)
+      if (values) echoes.drop(rowId)
       fail(err)
       return false
     }
@@ -534,12 +504,12 @@ function createCore(
 
   /** 新行要落在这个窗口的末尾：只在手动排序（不分组，或窗口就是一组）且窗口没取完时 ——
    *  这时新行排在全局末尾会落进还没加载的那一段，用户看不见；改成紧跟已加载的最后一行 */
-  function tailOf(viewId: string, group: string | undefined): { win: Win; last: CollectionRow } | null {
-    const win = wins.get(winKey(viewId, group))
+  function tailOf(viewId: string, scope: WindowScope): { win: Win; last: CollectionRow } | null {
+    const win = wins.get(scopeKey(viewId, scope))
     const last = win?.state.window?.next ? win.state.window.rows.at(-1) : undefined
     if (!schema || !win || !last) return null
     const view = pickView(schema, viewId)
-    if (view.sorts.length > 0 || (view.groupBy && group === undefined)) return null
+    if (view.sorts.length > 0 || (view.groupBy && scope.group === undefined)) return null
     return { win, last }
   }
 
@@ -550,7 +520,7 @@ function createCore(
     return max + 1
   }
 
-  /** 服务端确认：只取服务端定的字段（位置、时间、图标）；标题与值留本地的 —— 确认之前可能已经改过，
+  /** 服务端确认：只取服务端定的字段（位置、时间、图标、创建者 / 最后编辑者、自动编号）；标题与值留本地的 —— 确认之前可能已经改过，
    *  那些写排在确认之后发。原地替换，不挪位置（确认前后在已加载的行里先后不变） */
   function confirmRow(real: CollectionRow): void {
     for (const win of wins.values()) {
@@ -558,22 +528,25 @@ function createCore(
       const i = w ? w.rows.findIndex((r) => r.id === real.id) : -1
       if (!w || i < 0) continue
       const rows = w.rows.slice()
-      rows[i] = { ...rows[i]!, icon: real.icon, position: real.position, created_at: real.created_at, edited_at: real.edited_at }
+      const { icon, position, created_at, edited_at, created_by, edited_by, edited_agent, number } = real
+      rows[i] = { ...rows[i]!, icon, position, created_at, edited_at, created_by, edited_by, edited_agent, number }
       setState(win, { window: { ...w, rows } })
     }
   }
 
-  function createRow(input: NewRowInput = {}, at?: { viewId: string; group?: string }): NewRow | null {
+  function createRow(input: NewRowInput = {}, at?: { viewId: string } & WindowScope): NewRow | null {
     const values = input.set ? normalize(input.set) : null
     if (input.set && !values) return null
     const id = randomUuid()
-    const tail = at && input.after === undefined && input.before === undefined ? tailOf(at.viewId, at.group) : null
+    const tail = at && input.after === undefined && input.before === undefined ? tailOf(at.viewId, at) : null
     const props: Record<string, unknown> = {}
     for (const [key, value] of Object.entries(values ?? {})) if (value !== null) props[key] = value
     const now = new Date().toISOString()
     const title = input.title?.trim() ?? ''
     const position = tail ? between(tail.last.position, undefined) : nextPosition()
-    const row: CollectionRow = { id, title, icon: null, props, position, created_at: now, edited_at: now, has_body: false }
+    // 创建者先记成自己（服务端就是按发请求的人记的）：按创建者筛选的视图里新行不会等确认才出现；编号要等确认
+    const me = selfId() || null
+    const row: CollectionRow = { id, title, icon: null, props, position, created_at: now, edited_at: now, has_body: false, created_by: me, edited_by: me }
     // 先记进子页基线：随后的页面列表带着它，不当成别人建的行再重取一次
     children?.set(id, title)
     // 正在取数的窗口套不上这条增量（只记 dirty、取完重取，那时服务端可能还没建好）：建成后再重取它们
@@ -583,7 +556,7 @@ function createCore(
       // 没取完的窗口不收排在末行之后的行（applyRowsDelta 只计数）：这里是用户看得见的末尾，直接接上；
       // 游标不动（服务端按旧末行续取会再给一次这一行，续取按 id 去重）
       const w = tail.win.state.window
-      if (w && fits(row, at!.viewId, at!.group) && !w.rows.some((r) => r.id === id)) setState(tail.win, { window: { ...w, rows: [...w.rows, row] } })
+      if (w && fits(row, tail.win.viewId, tail.win.scope) && !w.rows.some((r) => r.id === id)) setState(tail.win, { window: { ...w, rows: [...w.rows, row] } })
     }
     const body: NewRowInput = { ...input, id, ...(values ? { set: values } : {}) }
     // 末行自己还在途（连点两次）：等它建成再带 after，否则服务端认不出这个邻居（400）
@@ -632,6 +605,8 @@ function createCore(
   async function setValuesMany(ids: string[], set: RowSet): Promise<boolean> {
     const values = normalize(set)
     if (!values || ids.length === 0) return false
+    // 反向关联每行的增删不一样（按各自现在的值换算），逐行发
+    if (hasReverse(schema, values)) return (await Promise.all(ids.map((id) => setValues(id, set)))).every(Boolean)
     const ups = ids.map((id) => optimisticUpdate(id, values)).filter((u): u is RowUpdate => u !== null)
     if (ups.length > 0) local(ups)
     const live = await settled(ids)
@@ -639,7 +614,7 @@ function createCore(
       for (const part of chunks(live, BULK_SET_MAX)) await transport.setRows(cid, part, values)
       return true
     } catch (err) {
-      for (const id of ids) echoes.delete(id)
+      for (const id of ids) echoes.drop(id)
       fail(err)
       return false
     }
@@ -676,10 +651,17 @@ function createCore(
 
   function syncPages(pages: readonly Page[]): void {
     if (dead) return
+    const before = deps
+    deps = depsSnapshot(schema, pages)
+    // 关联到的集合有行进出 / 改名，或对方集合本身不在了 / 换了空间：计算值服务端不推，重取
+    const depsMoved = depsChanged(before, deps)
     const next = childrenOf(cid, pages)
     const prev = children
     children = next
-    if (!prev || !next) return
+    if (!prev || !next) {
+      if (depsMoved) refetchAll()
+      return
+    }
     // 在途的新行服务端还没建好，这份列表里没有它：不算「行有进出」（否则重取会把正在命名的行冲掉）
     for (const id of pending.keys()) if (prev.has(id) && !next.has(id)) next.set(id, prev.get(id) ?? '')
     // 本地改过名、服务端还没确认的行：列表里的旧名不算改名（基线留本地的）；列表跟上了或过了认领期就放手
@@ -696,7 +678,7 @@ function createCore(
       if (!prev.has(id)) moved = true
       else if (prev.get(id) !== title) renamed.set(id, title)
     }
-    if (moved) {
+    if (moved || depsMoved) {
       refetchAll()
       return
     }
@@ -731,12 +713,12 @@ function createCore(
       listeners.add(cb)
       return () => listeners.delete(cb)
     },
-    windowState: (viewId, group) => wins.get(winKey(viewId, group))?.state ?? EMPTY_WINDOW,
-    watchWindow: (viewId, group) => {
-      const key = winKey(viewId, group)
+    windowState: (viewId, scope) => wins.get(scopeKey(viewId, scope))?.state ?? EMPTY_WINDOW,
+    watchWindow: (viewId, scope = {}) => {
+      const key = scopeKey(viewId, scope)
       let win = wins.get(key)
       if (!win) {
-        win = { viewId, group, refs: 0, state: EMPTY_WINDOW, sig: null, seq: 0, fetching: false, dirty: false, stale: false }
+        win = newWin(viewId, scope)
         wins.set(key, win)
         fetchWin(win)
       } else if ((win.stale || win.state.error !== null) && !warm && !win.fetching) {
@@ -747,20 +729,23 @@ function createCore(
       const w = win
       w.refs++
       let done = false
-      // 没人看了也留着（随 core 一起活着，增量照常套上）：回来时立即有内容；在途的取数照常落下
+      // 没人看了也留着（随 core 一起活着，增量照常套上）：回来时立即有内容；在途的取数照常落下。
+      // 日期范围窗口例外：翻月 / 横向滚动会不断产生新的，只留最近没人看的几个（idleRangeOverflow）
       return () => {
         if (done) return
         done = true
-        w.refs--
+        if (--w.refs > 0) return
+        w.idleSince = ++idleSeq
+        for (const stale of idleRangeOverflow(wins)) wins.delete(stale)
       }
     },
-    loadMore: (viewId, group) => {
-      const win = wins.get(winKey(viewId, group))
+    loadMore: (viewId, scope) => {
+      const win = wins.get(scopeKey(viewId, scope))
       const current = win?.state.window
       if (!win || !current?.next || win.fetching || win.state.loadingMore) return
       const seq = win.seq
       setState(win, { loadingMore: true })
-      transport.rows(cid, { view: viewId, group, cursor: current.next, limit: WINDOW_LIMIT, tz: tz() }).then(
+      transport.rows(cid, { view: viewId, ...win.scope, cursor: current.next, limit: pageLimit(win.scope), tz: tz() }).then(
         (page) => {
           if (dead || seq !== win.seq) return
           const latest = win.state.window ?? current
@@ -773,7 +758,11 @@ function createCore(
         },
       )
     },
+    queryCtx: ctx,
     findRow,
+    refs: () => lastRefs,
+    watchRow: single.watch,
+    rowState: single.state,
     setValues,
     renameRow,
     moveRow,
@@ -795,10 +784,7 @@ function createCore(
       root.unobserveDeep(recompute)
       listeners.clear()
       link.destroy()
-      const left: ColdCollection | null =
-        keep && status !== 'denied' && (synced || warm)
-          ? { doc: link.doc, wins: [...wins.values()].filter((w) => w.state.window).map((w) => ({ viewId: w.viewId, group: w.group, state: w.state })) }
-          : null
+      const left: ColdCollection | null = keep && status !== 'denied' && (synced || warm) ? { doc: link.doc, wins: coldWins(wins.values()) } : null
       wins.clear()
       return left
     },
@@ -851,6 +837,8 @@ const store = createCollectionStore(collectionTransport)
 export const openCollection = store.open
 export const syncCollectionPages = store.syncPages
 export const resetCollectionCache = store.reset
+/** 最近一次的页面列表（非 React 处取关联行的标题：历史流水、复制） */
+export const collectionPages = store.pages
 
 /* 空间列表（App 已有的 spaces，带我在每个空间的角色）：正文里的集合块按集合所在空间算只读，不另发请求 */
 let spacesNow: readonly Space[] | null = null
@@ -904,22 +892,23 @@ export function useCollectionError(handle: CollectionHandle | null): string | nu
   return useSyncExternalStore(handle?.subscribe ?? noSubscribe, () => handle?.error() ?? null)
 }
 
-/** 一个视图（看板的一列 = 带 group）的行窗口：挂载期间持有，loadMore 续取 */
+/** 一个视图在一个范围里（看板的一列带 group，日历 / 时间线带 range）的行窗口：挂载期间持有，loadMore 续取 */
 export function useRowsWindow(
   handle: CollectionHandle | null,
   viewId: string | null,
-  group?: string,
+  scope: WindowScope = {},
 ): WindowState & { loadMore: () => void } {
+  const { group, range } = scope
   useEffect(() => {
     if (!handle || viewId === null) return
-    return handle.watchWindow(viewId, group)
-  }, [handle, viewId, group])
+    return handle.watchWindow(viewId, { group, range })
+  }, [handle, viewId, group, range])
   const state = useSyncExternalStore(handle?.subscribe ?? noSubscribe, () =>
-    handle && viewId !== null ? handle.windowState(viewId, group) : EMPTY_WINDOW,
+    handle && viewId !== null ? handle.windowState(viewId, { group, range }) : EMPTY_WINDOW,
   )
   // 稳定引用：表格的「滚到底续取」观察者以它为依赖，每次渲染换一个会反复重挂
   const loadMore = useCallback(() => {
-    if (handle && viewId !== null) handle.loadMore(viewId, group)
-  }, [handle, viewId, group])
+    if (handle && viewId !== null) handle.loadMore(viewId, { group, range })
+  }, [handle, viewId, group, range])
   return { ...state, loadMore }
 }

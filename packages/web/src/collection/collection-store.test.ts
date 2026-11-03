@@ -6,6 +6,7 @@ import { parseCollection } from '@ramet/shared/collection-model'
 import type { Page } from '../api'
 import type { NewRowInput, RowPatch } from './collection-api'
 import type { CacheOptions } from './collection-cache'
+import { setSelf } from '../people'
 import { createCollectionStore, type CollectionLink, type CollectionTransport, type RowsQuery } from './collection-store'
 
 /* 不变量（collection-store.ts 文件头）：同一集合只开一条连接（引用计数）；schema 在服务端同步过之后才给；
@@ -24,6 +25,8 @@ let failWrites = false
 let patches: RowPatch[] = []
 let bulkCalls: number[] = []
 let creates: NewRowInput[] = []
+/** 服务端建行时给的元数据（创建者、编号…） */
+let createMeta: Partial<CollectionRow> = {}
 /** 建行请求在这之后才落（测「确认之前」的行为） */
 let createGate: Promise<void> = Promise.resolve()
 /** 改值 / 改名请求在这之后才落（测「改名在途」） */
@@ -101,7 +104,8 @@ function transport(groupBy: string | null = null): CollectionTransport {
       fetches.push(q)
       const link = links[0]!
       const schema = serverSchema(link)
-      return queryWindow(rows, schema.views.find((v) => v.id === q.view) ?? schema.views[0]!, schema, { group: q.group, cursor: q.cursor, limit: q.limit })
+      const view = schema.views.find((v) => v.id === q.view) ?? schema.views[0]!
+      return queryWindow(rows, view, schema, { group: q.group, range: q.range, cursor: q.cursor, limit: q.limit }, { tzOffset: q.tz })
     },
     createRow: async (_cid, input) => {
       creates.push(input)
@@ -112,7 +116,7 @@ function transport(groupBy: string | null = null): CollectionTransport {
       const i = input.after ? order.findIndex((r) => r.id === input.after) : -1
       const max = Math.max(-1, ...rows.map((r) => r.position ?? -1))
       const position = i >= 0 ? between(order[i]!.position, order[i + 1]?.position) : max + 1
-      const created = { ...row(input.id ?? `n${rows.length}`, input.set?.sts001 as string | undefined, position), title: input.title ?? '' }
+      const created = { ...row(input.id ?? `n${rows.length}`, input.set?.sts001 as string | undefined, position), title: input.title ?? '', ...createMeta }
       rows.push(created)
       return created
     },
@@ -185,10 +189,13 @@ beforeEach(() => {
   patches = []
   bulkCalls = []
   creates = []
+  createMeta = {}
   createGate = Promise.resolve()
   patchGate = Promise.resolve()
   vi.spyOn(console, 'error').mockImplementation(() => undefined)
 })
+
+const link0 = (): FakeLink => links[0]!
 
 async function setup(groupBy: string | null = null, cache?: CacheOptions) {
   const store = createCollectionStore(transport(groupBy), cache)
@@ -242,6 +249,22 @@ describe('窗口与增量', () => {
     expect(h.windowState('v1').window?.rows.map((r) => r.id)).toEqual(['b', 'a'])
     expect(fetches).toHaveLength(1)
     link.send({ t: 'collection.rows', up: [], rm: [], reset: true })
+    await flush()
+    expect(fetches).toHaveLength(2)
+  })
+
+  test('加上自动编号属性要重取（服务端取窗口时才给行补号）；只改别的属性不重取', async () => {
+    rows = [row('a')]
+    await setup()
+    const props = link0().doc.getMap('collection').get('props') as Y.Map<Y.Map<unknown>>
+    ;(props.get('sts001') as Y.Map<unknown>).set('name', '进度')
+    await flush()
+    expect(fetches).toHaveLength(1)
+    const num = new Y.Map<unknown>()
+    props.set('num001', num)
+    num.set('name', '编号')
+    num.set('type', 'unique_id')
+    num.set('pos', 1)
     await flush()
     expect(fetches).toHaveLength(2)
   })
@@ -337,13 +360,13 @@ describe('写：乐观更新、回声、失败回滚', () => {
   test('看板的另一列（窗口里没有这一行）也只算一次', async () => {
     rows = [row('a', TODO, 0)]
     const { h, link } = await setup('sts001')
-    const unwatch = h.watchWindow('v1', DOING)
+    const unwatch = h.watchWindow('v1', { group: DOING })
     await flush()
-    expect(h.windowState('v1', DOING).window?.total).toBe(0)
+    expect(h.windowState('v1', { group: DOING }).window?.total).toBe(0)
     await h.setValues('a', { sts001: DOING })
-    expect(h.windowState('v1', DOING).window?.rows.map((r) => r.id)).toEqual(['a'])
+    expect(h.windowState('v1', { group: DOING }).window?.rows.map((r) => r.id)).toEqual(['a'])
     link.send({ t: 'collection.rows', up: [{ row: rows[0]!, prev: { sts001: TODO } }], rm: [] })
-    expect(h.windowState('v1', DOING).window?.total).toBe(1)
+    expect(h.windowState('v1', { group: DOING }).window?.total).toBe(1)
     unwatch()
   })
 
@@ -440,10 +463,10 @@ describe('写：乐观更新、回声、失败回滚', () => {
   test('看板跨列拖到落点：一次乐观增量同时改值与位置，两列计数各自增减，只发一次请求', async () => {
     rows = [row('a', TODO, 0), row('b', DOING, 1), row('c', DOING, 2)]
     const { h, link } = await setup('sts001')
-    h.watchWindow('v1', TODO)
-    h.watchWindow('v1', DOING)
+    h.watchWindow('v1', { group: TODO })
+    h.watchWindow('v1', { group: DOING })
     await flush()
-    const col = (key: string) => h.windowState('v1', key).window!
+    const col = (key: string) => h.windowState('v1', { group: key }).window!
     expect([col(TODO).total, col(DOING).total]).toEqual([1, 2])
     const done = h.moveRow('a', 'b', 'c', { sts001: DOING })
     expect(col(TODO).rows).toEqual([])
@@ -463,26 +486,26 @@ describe('写：乐观更新、回声、失败回滚', () => {
   test('跨列拖到落点：邻居不在窗口里也先换列，位置等服务端', async () => {
     rows = [row('a', TODO, 0), row('b', DOING, 1)]
     const { h } = await setup('sts001')
-    h.watchWindow('v1', DOING)
+    h.watchWindow('v1', { group: DOING })
     await flush()
     const done = h.moveRow('a', 'zz', null, { sts001: DOING })
     expect(h.findRow('a')).toMatchObject({ props: { sts001: DOING }, position: 0 })
-    expect(h.windowState('v1', DOING).window?.total).toBe(2)
+    expect(h.windowState('v1', { group: DOING }).window?.total).toBe(2)
     await done.catch(() => undefined)
   })
 
   test('跨列拖动失败：提示 + 重取，卡片回到原列', async () => {
     rows = [row('a', TODO, 0), row('b', DOING, 1)]
     const { h } = await setup('sts001')
-    h.watchWindow('v1', TODO)
-    h.watchWindow('v1', DOING)
+    h.watchWindow('v1', { group: TODO })
+    h.watchWindow('v1', { group: DOING })
     await flush()
     failWrites = true
     expect(await h.moveRow('a', 'b', null, { sts001: DOING })).toBe(false)
     await flush()
     expect(h.error()).toBe('boom')
-    expect(h.windowState('v1', TODO).window?.rows.map((r) => r.id)).toEqual(['a'])
-    expect(h.windowState('v1', DOING).window?.rows.map((r) => r.id)).toEqual(['b'])
+    expect(h.windowState('v1', { group: TODO }).window?.rows.map((r) => r.id)).toEqual(['a'])
+    expect(h.windowState('v1', { group: DOING }).window?.rows.map((r) => r.id)).toEqual(['b'])
   })
 
   test('跨列拖动带非法值：不挪、不发请求', async () => {
@@ -692,6 +715,20 @@ describe('乐观新建', () => {
     store.syncPages(pagesFor(rows))
     await flush()
     expect(fetches).toHaveLength(1)
+  })
+
+  test('新行先记成自己建的；确认后取服务端给的创建者、最后编辑者与编号', async () => {
+    setSelf({ id: 'me', username: '我', avatar: null })
+    const { h } = await setup()
+    let open!: () => void
+    createGate = new Promise((r) => (open = r))
+    createMeta = { created_by: 'me', edited_by: 'me', edited_agent: null, number: 7 }
+    const created = h.createRow({}, { viewId: 'v1' })!
+    expect(h.findRow(created.id)).toMatchObject({ created_by: 'me', edited_by: 'me' })
+    expect(h.findRow(created.id)?.number ?? null).toBeNull()
+    open()
+    await created.ready
+    expect(h.findRow(created.id)).toMatchObject({ created_by: 'me', edited_by: 'me', edited_agent: null, number: 7 })
   })
 
   test('连点两次得到两行', async () => {

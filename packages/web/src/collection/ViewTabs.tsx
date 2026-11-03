@@ -1,12 +1,16 @@
 // ---------- 视图标签：切换、新建、改名、换布局、删除、拖动排序 ----------
 // 当前看哪个视图是个人偏好（localStorage，见 CollectionSurface），视图本身与顺序写集合文档（所有人同一份）。
-// 点当前标签再点一次打开它的设置；viewer 只能切换。
+// 点当前标签再点一次打开它的设置（名称、布局、这种布局的专属设置：画廊的卡片预览 / 大小、日历 / 时间线按哪个日期属性）；viewer 只能切换。
+// 新建与换布局只列已经有界面的布局（layouts.ts）。
 import type * as Y from 'yjs'
-import { COLLECTION_LAYOUTS, type CollectionLayout, type CollectionSchema, type CollectionView } from '@ramet/shared/collection-model'
+import type { CollectionLayout, CollectionSchema, CollectionView } from '@ramet/shared/collection-model'
 import { COPY } from '../copy'
 import { Icon } from '../icons'
+import { DateSettings } from './date-setup'
+import GallerySettings from './gallery/GallerySettings'
+import { LAYOUT_ICON, READY_LAYOUTS, usesDate } from './layouts'
 import { Popover, usePopover } from './popover'
-import { NameInput } from './PropEditor'
+import { NameInput } from './name-input'
 import { useReorder } from './reorder'
 import { addView, deleteView, moveView, renameView, setLayout } from './schema-ops'
 
@@ -22,10 +26,8 @@ type Props = {
   manage?: boolean
 }
 
-export const LAYOUT_ICON = { table: 'table', board: 'columns' } as const
-
-/** 视图没起名时的叫法：按布局 */
-const defaultName = (layout: CollectionLayout): string => (layout === 'board' ? C.newBoard : C.newTable)
+/** 视图没起名时的叫法（也是新视图的默认名）：布局名 */
+const defaultName = (layout: CollectionLayout): string => C.layouts[layout]
 const nameOf = (view: CollectionView): string => view.name || defaultName(view.layout)
 
 export default function ViewTabs({ doc, schema, activeId, onSelect, readOnly: viewOnly, manage = true }: Props) {
@@ -72,7 +74,7 @@ export default function ViewTabs({ doc, schema, activeId, onSelect, readOnly: vi
         <Popover anchor={addAnchor} onClose={closeAdd}>
           <div className="cl-menu">
             <div className="pop-section">{C.add}</div>
-            {COLLECTION_LAYOUTS.map((layout) => (
+            {READY_LAYOUTS.map((layout) => (
               <button
                 key={layout}
                 type="button"
@@ -94,13 +96,15 @@ export default function ViewTabs({ doc, schema, activeId, onSelect, readOnly: vi
           <div className="cl-menu">
             <NameInput value={editing.name} placeholder={C.name} autoFocus onCommit={(name) => renameView(doc, editing.id, name)} />
             <div className="pop-section">{C.layout}</div>
-            {COLLECTION_LAYOUTS.map((layout) => (
+            {READY_LAYOUTS.map((layout) => (
               <button key={layout} type="button" className="pop-row" onClick={() => setLayout(doc, editing.id, layout)}>
                 <Icon name={LAYOUT_ICON[layout]} size={14} />
                 {C.layouts[layout]}
                 {editing.layout === layout && <Icon name="check" size={14} className="cl-picker-check" />}
               </button>
             ))}
+            {editing.layout === 'gallery' && <GallerySettings doc={doc} schema={schema} view={editing} />}
+            {usesDate(editing.layout) && <DateSettings doc={doc} schema={schema} view={editing} />}
             <button
               type="button"
               className="pop-row is-danger"

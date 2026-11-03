@@ -73,6 +73,10 @@ export const CONNECT_COPY = {
   rejectFailed: '拒绝失败，请重试',
   approved: (space: string) => `已接入「${space}」。机器上的命令会继续运行，稍后它就会出现在「设置 → 连接器」里。`,
   pending: (space: string) => `已提交到「${space}」，等空间所有者批准后生效。机器上的命令会继续运行。`,
+  approvedTitle: '接入成功',
+  pendingTitle: '已提交申请',
+  closing: (sec: number) => `${sec} 秒后自动关闭此页`,
+  closeManually: '可以关闭此页了',
   rejected: '已拒绝，机器上的命令会退出。',
   home: '返回首页',
 }

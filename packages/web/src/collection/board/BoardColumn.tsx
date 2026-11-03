@@ -2,12 +2,13 @@
 // 每列一个按组取的窗口（useRowsWindow，store 按 (视图, 组) 引用计数）；计数 = 窗口的 total（这一组命中筛选的全部行，含没加载的），窗口没到时不显示。
 // 拖放：整列接 dragover / drop，指针下的卡片（data-card）按上半 / 下半定前后，空白处接在已加载的末尾；落点什么都不用做（落回原处）就不画提示。
 // 列内滚动，续取的哨兵以这一列的滚动容器为 root。
-import { useEffect, useRef } from 'react'
+import { useRef } from 'react'
 import type { CollectionProp, CollectionRow, CollectionView } from '@ramet/shared/collection-model'
 import { COPY } from '../../copy'
 import { Icon } from '../../icons'
 import { OptionChip } from '../cells/CellView'
 import { useRowsWindow, type CollectionHandle } from '../collection-store'
+import { useLoadMore } from '../load-more'
 import BoardCard from './BoardCard'
 import { canDrop, dropPlan, type BoardColumnDef, type BoardDrag, type BoardDropAt } from './board-model'
 
@@ -43,7 +44,7 @@ type Props = {
 
 export default function BoardColumn(p: Props) {
   const { handle, view, col } = p
-  const rows = useRowsWindow(handle, view.id, col.key)
+  const rows = useRowsWindow(handle, view.id, { group: col.key })
   const win = rows.window
   const loadMore = rows.loadMore
   const bodyRef = useRef<HTMLDivElement>(null)
@@ -51,16 +52,8 @@ export default function BoardColumn(p: Props) {
   const manual = view.sorts.length === 0
   const cards = win?.rows ?? []
 
-  // 滚到底续取：列不单独滚动，哨兵进视口（提前 200px；root 缺省 = 视口，外层滚动容器的裁剪也算进去）就取下一页
-  useEffect(() => {
-    const el = sentinel.current
-    if (!el || !win?.next) return
-    const io = new IntersectionObserver((entries) => {
-      if (entries.some((e) => e.isIntersecting)) loadMore()
-    }, { rootMargin: '200px' })
-    io.observe(el)
-    return () => io.disconnect()
-  }, [win, loadMore])
+  // 列不单独滚动：哨兵相对视口判定（外层滚动容器的裁剪也算进去）
+  useLoadMore(sentinel, win, loadMore, '200px')
 
   /** 指针所在的落点：卡片上按上半 / 下半定前后，别处 = 列的末尾 */
   const pointAt = (e: React.DragEvent): BoardDropAt => {

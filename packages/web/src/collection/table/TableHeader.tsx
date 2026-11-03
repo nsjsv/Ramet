@@ -1,4 +1,4 @@
-/* ---------- 表头：列名（点开列菜单 = 属性定义编辑）、拖右缘改列宽、行尾「＋」新建属性、全选 ----------
+/* ---------- 表头：列名（点开列菜单 = 属性定义编辑；公式有误的列带警示图标）、拖右缘改列宽、行尾「＋」新建属性、全选 ----------
  * 拖宽：拖动中只改表格的本地样式（onResize 每帧改一个 CSS 变量），松手才写一次集合文档（onResized）。 */
 import { useState } from 'react'
 import type * as Y from 'yjs'
@@ -15,7 +15,8 @@ import { Icon } from '../../icons'
 import PropEditor from '../PropEditor'
 import { Popover, usePopover } from '../popover'
 import { columnWidth, TITLE_ICON, TYPE_ICON } from '../prop-meta'
-import { createProp, TypeList } from '../toolbar/menus'
+import { formulaBroken } from '../cells/FormulaCell'
+import { NewPropMenu } from '../toolbar/menus'
 
 const C = COPY.collection
 
@@ -33,10 +34,16 @@ type Props = {
 }
 
 export default function TableHeader({ doc, schema, view, cols, readOnly, picked, onPickAll, onResize, onResized }: Props) {
-  const [anchor, open, close] = usePopover()
+  const [anchor, open, closeMenu] = usePopover()
+  // 从「＋」新建了需要设置的属性：同一个弹层接着显示它的属性设置
+  const [fresh, setFresh] = useState<string | null>(null)
+  const close = (): void => {
+    setFresh(null)
+    closeMenu()
+  }
   const [dragging, setDragging] = useState<string | null>(null)
   const menuFor = anchor?.dataset.prop
-  const menuProp = menuFor ? schema.props.find((p) => p.id === menuFor) : undefined
+  const menuProp = (fresh ?? menuFor) ? schema.props.find((p) => p.id === (fresh ?? menuFor)) : undefined
 
   const startResize = (e: React.PointerEvent, prop: CollectionProp): void => {
     e.preventDefault()
@@ -95,6 +102,11 @@ export default function TableHeader({ doc, schema, view, cols, readOnly, picked,
             >
               <Icon name={isTitle ? TITLE_ICON : TYPE_ICON[prop.type]} size={14} />
               <span>{prop.name || C.types[prop.type]}</span>
+              {formulaBroken(prop) && (
+                <span className="cl-th-warn" title={prop.formulaError?.message} aria-label={C.formula.bad}>
+                  <Icon name="callout-warning" size={14} />
+                </span>
+              )}
             </button>
             {!readOnly && <span className="cl-resize" role="separator" aria-orientation="vertical" onPointerDown={(e) => startResize(e, prop)} />}
           </div>
@@ -112,14 +124,9 @@ export default function TableHeader({ doc, schema, view, cols, readOnly, picked,
           <PropEditor doc={doc} schema={schema} prop={menuProp} view={view} onClose={close} />
         </Popover>
       )}
-      {anchor && menuFor === '' && (
+      {anchor && menuFor === '' && !fresh && (
         <Popover anchor={anchor} onClose={close}>
-          <TypeList
-            onPick={(type) => {
-              createProp(doc, schema, view, type)
-              close()
-            }}
-          />
+          <NewPropMenu doc={doc} schema={schema} view={view} onCreated={(id, setup) => (setup ? setFresh(id) : close())} />
         </Popover>
       )}
     </div>

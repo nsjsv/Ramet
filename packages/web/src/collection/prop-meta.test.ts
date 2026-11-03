@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest'
-import { newView, TITLE_PROP, type CollectionProp } from '@ramet/shared/collection-model'
-import { columnWidth, formatStamp, hrefOf, moveTo, nextColor, parseNumberInput } from './prop-meta'
+import { newView, PROP_TYPES, TITLE_PROP, type CollectionProp } from '@ramet/shared/collection-model'
+import { columnWidth, formatDate, formatStamp, formulaDate, hrefOf, localDay, moveTo, nextColor, parseDateInput, parseNumberInput, TYPE_ORDER } from './prop-meta'
 
 /* 不变量：数字 / 链接 / 时间的「输入 → 值」「值 → 显示」只在 prop-meta 定义；空输入 = 清空，认不出 = 不写 */
 
@@ -35,7 +35,7 @@ test('时间：按本地时区显示到分钟；认不出原样', () => {
 
 test('列宽：存过的优先，否则按类型缺省', () => {
   const view = { id: 'v', ...newView('t', 'table', 0) }
-  const num: CollectionProp = { id: 'num001', name: 'n', type: 'number', pos: 0, options: [] }
+  const num: CollectionProp = { id: 'num001', name: 'n', type: 'number', pos: 0, options: [], cfg: {} }
   expect(columnWidth(view, TITLE_PROP)).toBe(280)
   expect(columnWidth(view, num)).toBe(160)
   expect(columnWidth({ ...view, widths: { num001: 90 } }, num)).toBe(90)
@@ -47,4 +47,34 @@ test('新选项颜色：先挑没用过的；重排：插到其余项的第 inde
   expect(moveTo(['a', 'b', 'c'], 'c', 0)).toEqual(['c', 'a', 'b'])
   expect(moveTo(['a', 'b', 'c'], 'a', 99)).toEqual(['b', 'c', 'a'])
   expect(moveTo(['a', 'b'], 'x', 1)).toEqual(['a', 'x', 'b'])
+})
+
+test('新建属性菜单列全每一种类型，各一次', () => {
+  expect([...TYPE_ORDER].sort()).toEqual([...PROP_TYPES].sort())
+})
+
+test('日期显示：单日原样，区间「开始 → 结束」；认不出原样', () => {
+  expect(formatDate('2026-01-02')).toBe('2026-01-02')
+  expect(formatDate('2026-01-02/2026-01-05')).toBe('2026-01-02 → 2026-01-05')
+  expect(formatDate('垃圾')).toBe('垃圾')
+  expect(localDay(new Date(2026, 0, 2, 23, 59))).toBe('2026-01-02')
+})
+
+test('日期输入：一天的几种写法与区间；「/」只在两侧都是 YYYY-MM-DD 时算区间', () => {
+  expect(parseDateInput('2026/1/2')).toBe('2026-01-02')
+  expect(parseDateInput('2026.1.2')).toBe('2026-01-02')
+  expect(parseDateInput('2026年1月2日')).toBe('2026-01-02')
+  expect(parseDateInput('2026-01-02/2026-01-05')).toBe('2026-01-02/2026-01-05')
+  expect(parseDateInput('2026-01-05 -> 2026-01-02')).toBe('2026-01-02/2026-01-05')
+  expect(parseDateInput('2026-01-02 ～ 2026-01-02')).toBe('2026-01-02')
+  expect(parseDateInput('2026-02-30')).toBeUndefined()
+  expect(parseDateInput('1')).toBeUndefined()
+  expect(parseDateInput('')).toBeUndefined()
+})
+
+test('公式算出的日期：单日 / 区间同日期格，时间戳同创建时间格（本地时区）', () => {
+  expect(formulaDate('2026-10-01')).toBe('2026-10-01')
+  expect(formulaDate('2026-10-01/2026-10-03')).toBe('2026-10-01 → 2026-10-03')
+  expect(formulaDate('2026-10-25T03:04:05.123Z')).toBe(formatStamp('2026-10-25T03:04:05.123Z'))
+  expect(formulaDate('2026-10-25T03:04:05.123Z')).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/)
 })

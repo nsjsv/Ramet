@@ -41,6 +41,7 @@ const Lazy = ({ children }: { children: ReactNode }) => <Suspense fallback={null
  * 401 由现有 handler 接管回登录页。登录前先把路径记进 sessionStorage，登录 / 初始化 / 改密完成进入 Shell 前读出并跳回。 */
 const PENDING_PATH_KEY = 'ramet_pending_path'
 const RESUMABLE_PATH = /^\/(join|connect)\/[^/]+$/
+const CONNECT_PATH = /^\/connect\/[^/]+$/
 
 /* 侧边栏折叠态记在 localStorage（刷新保持），样式由 .app.sidebar-collapsed 的 CSS 控制。
  * 折叠后没有常驻展开按钮：指针入左缘热区（.sidebar-zone，折叠态才渲染）侧栏以浮层预览滑出，
@@ -213,6 +214,14 @@ function Root() {
   if (pending) {
     sessionStorage.removeItem(PENDING_PATH_KEY)
     if (RESUMABLE_PATH.test(pending)) return <Navigate to={pending} replace />
+  }
+  // 机器接入确认是独立页面：终端里点开、确认完就关，不带侧栏，也不起主应用的同步与协同连接
+  if (CONNECT_PATH.test(location.pathname)) {
+    return (
+      <Routes>
+        <Route path="/connect/:code" element={<Lazy><ConnectMachine selectedSpaceId={localStorage.getItem(LAST_SPACE_KEY)} /></Lazy>} />
+      </Routes>
+    )
   }
   // key：换账号必须是新 Shell 实例（页面缓存 key、增量同步的游标与确认列表都按账号，挂载时取一次）
   return <Shell key={user.id} user={user} />
@@ -620,7 +629,6 @@ function Shell({ user }: { user: User }) {
           <Route path="/login" element={<Navigate to="/" replace />} />
           <Route path="/admin" element={<Lazy><Admin /></Lazy>} />
           <Route path="/join/:token" element={<Lazy><Join onChanged={refresh} /></Lazy>} />
-          <Route path="/connect/:code" element={<Lazy><ConnectMachine spaces={spaces} selectedSpaceId={selectedSpaceId} /></Lazy>} />
           <Route
             path="/"
             element={

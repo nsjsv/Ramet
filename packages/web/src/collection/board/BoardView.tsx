@@ -19,7 +19,7 @@ import BulkBar from '../BulkBar'
 import type { CollectionHandle } from '../collection-store'
 import { useMarquee } from '../marquee'
 import { InBulkSlot } from '../bulk-slot'
-import { useRowPicking } from '../selection'
+import { useEscapeClear, useRowPicking } from '../selection'
 import { TYPE_ICON } from '../prop-meta'
 import { groupChoices, setGroupBy } from '../schema-ops'
 import BoardColumn from './BoardColumn'
@@ -77,19 +77,11 @@ export default function BoardView({ handle, schema, view, readOnly, spaceId, onO
 
   // 选中的卡片被删 / 挪走 / 不在任何已加载的窗口里了：摘掉（窗口由各列 watch，这里只听变化）
   useEffect(() => handle.subscribe(() => prune((id) => handle.findRow(id) !== undefined)), [handle, prune])
-  useEffect(() => {
-    if (picked.size === 0) return
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key !== 'Escape' || e.defaultPrevented || (e.target as Element | null)?.closest?.('input, textarea, [contenteditable]')) return
-      clear()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [picked.size, clear])
+  useEscapeClear(picked.size > 0, clear)
 
   /** 连选的顺序：各列已加载的卡片，列从左到右、列内从上到下 */
   const order = useCallback(
-    (): string[] => (board?.columns ?? []).flatMap((col) => handle.windowState(view.id, col.key).window?.rows.map((r) => r.id) ?? []),
+    (): string[] => (board?.columns ?? []).flatMap((col) => handle.windowState(view.id, { group: col.key }).window?.rows.map((r) => r.id) ?? []),
     [board, handle, view.id],
   )
   const marquee = useMarquee({
@@ -135,7 +127,7 @@ export default function BoardView({ handle, schema, view, readOnly, spaceId, onO
     const created = handle.createRow(set ? { set } : {}, { viewId: view.id, group: key })
     if (!created) return
     // 新卡片在这一列已加载的窗口里就地输入标题；落在还没加载的那一段（排序决定的位置）就等建成后打开它的页面
-    if (handle.windowState(view.id, key).window?.rows.some((r) => r.id === created.id)) setNaming(created.id)
+    if (handle.windowState(view.id, { group: key }).window?.rows.some((r) => r.id === created.id)) setNaming(created.id)
     else void created.ready.then((row) => row && onOpenRow(row.id))
   }
 

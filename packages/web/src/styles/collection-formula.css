@@ -1,0 +1,332 @@
+/* ---------- 集合的公式：格子（只读的勾）、表头警示、属性设置里的摘要、公式编辑弹窗 ---------- */
+
+/* 公式算出的「是否」：画法同复选框，但不能点 */
+.check-box.is-static {
+  cursor: default;
+}
+
+.cl-th-btn > .cl-th-warn {
+  flex: none;
+  display: inline-flex;
+  color: var(--warn);
+}
+
+/* 属性设置里的公式摘要：点它同「编辑公式」 */
+.cl-fx-sum {
+  display: block;
+  width: calc(100% - 16px);
+  margin: 2px 8px;
+  padding: 6px 8px;
+  border-radius: var(--r-sm);
+  background: var(--bg-sunk);
+  color: var(--ink-2);
+  font-size: var(--t-xs);
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cl-fx-sum code {
+  font-family: var(--mono);
+}
+
+.cl-fx-sum:hover {
+  background: var(--hover);
+}
+
+/* ---------- 编辑弹窗 ---------- */
+
+/* 编辑弹窗从属性菜单（.cl-pop，z-index 60）里打开，菜单还开着（取消时要回到它）：
+ * 遮罩不压过它的话，菜单会浮在变暗的页面上、盖住弹窗边上的内容 */
+.modal-overlay:has(> .cl-fx-modal) {
+  z-index: 61;
+}
+
+.modal.cl-fx-modal {
+  display: flex;
+  flex-direction: column;
+  width: 880px;
+  max-height: min(660px, 90vh);
+  padding: 0;
+  overflow: hidden;
+}
+
+.cl-fx {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.cl-fx-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 16px 10px;
+  color: var(--ink-2);
+}
+
+.cl-fx-head .modal-title {
+  flex: 1;
+  color: var(--ink);
+}
+
+.cl-fx-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  flex: 1;
+  min-height: 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.cl-fx-main {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  padding: 14px 16px;
+  overflow: auto;
+}
+
+/* 输入框与后面的垫层（出错区段的底色）：字体、内边距、边框、折行必须一模一样，字才叠得上 */
+.cl-fx-input {
+  position: relative;
+  flex: none;
+  border-radius: var(--r-sm);
+  background: var(--surface);
+}
+
+.cl-fx-back,
+.cl-fx-text {
+  box-sizing: border-box;
+  width: 100%;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  font: 13px/1.6 var(--mono);
+  letter-spacing: normal;
+  tab-size: 2;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  scrollbar-gutter: stable;
+}
+
+.cl-fx-back {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  color: transparent;
+  pointer-events: none;
+}
+
+.cl-fx-back mark {
+  border-bottom: 2px solid var(--danger);
+  border-radius: 2px;
+  background: var(--danger-tint);
+  color: transparent;
+}
+
+.cl-fx-text {
+  position: relative;
+  display: block;
+  min-height: 112px;
+  max-height: 40vh;
+  overflow-y: auto;
+  resize: vertical;
+  border-color: var(--line);
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--ink);
+  outline: none;
+}
+
+.cl-fx-text:focus {
+  border-color: var(--accent);
+}
+
+.cl-fx-text[aria-invalid='true'] {
+  border-color: var(--danger);
+}
+
+/* 补全：贴在输入框下面 */
+.cl-fx-suggest {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 2;
+  max-height: 232px;
+  margin: 0;
+  padding: 4px;
+  overflow: auto;
+  list-style: none;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
+  animation: cl-pop-in var(--d-1) var(--ease-out);
+}
+
+.cl-fx-sug {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  padding: 2px 8px;
+  border-radius: var(--r-sm);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.cl-fx-sug.is-on {
+  background: var(--hover);
+}
+
+.cl-fx-sug-label {
+  flex: none;
+  max-width: 50%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cl-fx-sug-detail {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cl-fx-status {
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+  overflow-wrap: anywhere;
+}
+
+.cl-fx-status.is-ok {
+  color: var(--ok);
+}
+
+.cl-fx-status.is-error {
+  color: var(--danger);
+}
+
+.cl-fx-preview {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 36px;
+  padding: 6px 10px;
+  border-radius: var(--r-sm);
+  background: var(--bg-sunk);
+}
+
+.cl-fx-label {
+  flex: none;
+  max-width: 55%;
+  overflow: hidden;
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cl-fx-value {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+}
+
+/* 函数说明 */
+.cl-fx-docs {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  padding: 12px;
+  border-left: 1px solid var(--line);
+}
+
+.cl-fx-docs > .cl-input {
+  flex: none;
+}
+
+.cl-fx-doclist {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.cl-fx-doc {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: var(--r-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.cl-fx-doc:hover {
+  background: var(--hover);
+}
+
+.cl-fx-sig {
+  color: var(--ink);
+  font: 12px/1.5 var(--mono);
+  overflow-wrap: anywhere;
+}
+
+.cl-fx-desc {
+  color: var(--ink-2);
+  font-size: var(--t-xs);
+}
+
+.cl-fx-example {
+  color: var(--ink-3);
+  font: 11px/1.5 var(--mono);
+  overflow-wrap: anywhere;
+}
+
+.cl-fx-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+}
+
+.cl-fx-keys {
+  flex: 1;
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+}
+
+@media (max-width: 768px) {
+  .cl-fx-body {
+    grid-template-columns: minmax(0, 1fr);
+    overflow: auto;
+  }
+
+  .cl-fx-main {
+    overflow: visible;
+  }
+
+  .cl-fx-docs {
+    max-height: 40vh;
+    border-top: 1px solid var(--line);
+    border-left: 0;
+  }
+
+  .cl-fx-keys {
+    display: none;
+  }
+}

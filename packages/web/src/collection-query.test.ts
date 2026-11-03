@@ -6,8 +6,14 @@ import {
   compareRows,
   groupKey,
   groupOrder,
+  joinRange,
   matchFilter,
+  matchScope,
+  parseRange,
   queryWindow,
+  RANGE_DAYS_MAX,
+  rowSpan,
+  sortRows,
   WINDOW_LIMIT,
   WINDOW_LIMIT_MAX,
   type QueryCtx,
@@ -40,6 +46,11 @@ const PROPS = {
   who: { name: '负责人', type: 'person', pos: 8 },
   cre: { name: '创建时间', type: 'created_time', pos: 9 },
   edi: { name: '编辑时间', type: 'edited_time', pos: 10 },
+  eml: { name: '邮箱', type: 'email', pos: 11 },
+  fil: { name: '附件', type: 'files', pos: 12 },
+  cby: { name: '创建者', type: 'created_by', pos: 13 },
+  eby: { name: '最后编辑者', type: 'edited_by', pos: 14 },
+  uid: { name: '编号', type: 'unique_id', pos: 15 },
 }
 const schema = parseCollection({ props: PROPS })
 
@@ -364,6 +375,131 @@ describe('applyRowsDelta', () => {
   })
 })
 
+/* ---------- 按日期范围取的窗口（日历 / 时间线） ---------- */
+
+describe('日期范围', () => {
+  const cal = (settings: Record<string, unknown> = {}) => viewOf({ layout: 'calendar', dateBy: 'dat', ...settings })
+
+  test('parseRange：两端含的 YYYY-MM-DD..YYYY-MM-DD 或 none；认不出、反序、跨度超过上限都是 null', () => {
+    expect(parseRange('2026-10-01..2026-10-31')).toEqual({ from: '2026-10-01', to: '2026-10-31' })
+    expect(parseRange('2026-10-01..2026-10-01')).toEqual({ from: '2026-10-01', to: '2026-10-01' })
+    expect(parseRange('none')).toBe('none')
+    expect(joinRange('2026-10-01', '2026-10-31')).toBe('2026-10-01..2026-10-31')
+    for (const bad of ['', '2026-10-01', '2026-10-01..', '2026-10-31..2026-10-01', '2026-02-30..2026-03-01', '2026-1-1..2026-1-2', ' 2026-10-01..2026-10-02', 'NONE', null, 7]) {
+      expect(parseRange(bad)).toBeNull()
+    }
+    const from = '2026-01-01'
+    const last = new Date(Date.UTC(2026, 0, RANGE_DAYS_MAX)).toISOString().slice(0, 10)
+    const over = new Date(Date.UTC(2026, 0, RANGE_DAYS_MAX + 1)).toISOString().slice(0, 10)
+    expect(parseRange(`${from}..${last}`)).not.toBeNull()
+    expect(parseRange(`${from}..${over}`)).toBeNull()
+  })
+
+  test('与范围有交集就在里面：单日、区间（含端点相接、整段包住范围）、没有值只在 none 里', () => {
+    const range = '2026-10-05..2026-10-11'
+    const cases: [unknown, boolean][] = [
+      ['2026-10-04', false],
+      ['2026-10-05', true],
+      ['2026-10-11', true],
+      ['2026-10-12', false],
+      ['2026-10-01/2026-10-04', false],
+      ['2026-10-01/2026-10-05', true],
+      ['2026-10-11/2026-10-20', true],
+      ['2026-10-12/2026-10-20', false],
+      ['2026-09-01/2026-12-31', true],
+      ['2026-10-06/2026-10-08', true],
+      ['2026-10-20/2026-10-01', true], // 写反的区间按交换后的读
+      [undefined, false],
+      ['not a date', false],
+    ]
+    for (const [dat, hit] of cases) {
+      const r = row('a', dat === undefined ? {} : { dat })
+      expect(matchScope(r, cal(), schema, { range }), String(dat)).toBe(hit)
+      expect(matchScope(r, cal(), schema, { range: 'none' }), `none ${String(dat)}`).toBe(dat === undefined || dat === 'not a date')
+    }
+  })
+
+  test('创建 / 编辑时间按 ctx.tzOffset 折成那一天再判（同筛选的口径）', () => {
+    // UTC 10-04 20:00 = 东八区 10-05 04:00
+    const r = row('a', {}, { created_at: '2026-10-04T20:00:00Z', edited_at: '2026-10-11T18:00:00Z' })
+    const byCreated = cal({ dateBy: 'cre' })
+    const byEdited = cal({ dateBy: 'edi' })
+    const range = '2026-10-05..2026-10-11'
+    expect(matchScope(r, byCreated, schema, { range })).toBe(false)
+    expect(matchScope(r, byCreated, schema, { range }, { tzOffset: 480 })).toBe(true)
+    expect(matchScope(r, byEdited, schema, { range })).toBe(true)
+    expect(matchScope(r, byEdited, schema, { range }, { tzOffset: 480 })).toBe(false)
+    expect(rowSpan(r, schema.props.find((p) => p.id === 'cre')!, { tzOffset: 480 })).toEqual({ start: '2026-10-05', end: '2026-10-05' })
+    expect(matchScope(r, byCreated, schema, { range: 'none' })).toBe(false)
+  })
+
+  test('queryWindow：只有范围里的行，total 只数范围里的，带回 range；与筛选同时成立', () => {
+    const rows = [
+      row('a', { dat: '2026-10-03', num: 1 }),
+      row('b', { dat: '2026-10-06/2026-10-09', num: 2 }),
+      row('c', { dat: '2026-10-10', num: 3 }),
+      row('d', { num: 4 }),
+      row('e', { dat: '2026-09-28/2026-10-05', num: 5 }),
+    ]
+    const range = '2026-10-05..2026-10-11'
+    const win = queryWindow(rows, cal(), schema, { range })
+    expect(ids(win.rows)).toEqual(['b', 'c', 'e'])
+    expect(win.total).toBe(3)
+    expect(win.range).toBe(range)
+    const filtered = queryWindow(rows, cal({ filter: { all: [{ prop: 'num', op: 'lt', value: 4 }] } }), schema, { range })
+    expect(ids(filtered.rows)).toEqual(['b', 'c'])
+    expect(ids(queryWindow(rows, cal(), schema, { range: 'none' }).rows)).toEqual(['d'])
+    // 视图没有日期属性（没选 / 属性改成了别的类型）、或范围认不出：不限定，也不带回 range
+    for (const [view, opts] of [
+      [viewOf(), { range }],
+      [cal({ dateBy: 'txt' }), { range }],
+      [cal(), { range: 'garbage' }],
+    ] as const) {
+      const all = queryWindow(rows, view, schema, opts)
+      expect(all.total).toBe(5)
+      expect(all.range).toBeUndefined()
+    }
+    // 顺序仍是视图的排序（日历在前端自己按日期排版，窗口顺序只决定同一天里的先后）
+    expect(ids(queryWindow(rows, cal({ sorts: [{ prop: 'num', dir: 'desc' }] }), schema, { range }).rows)).toEqual(['e', 'c', 'b'])
+  })
+
+  test('applyRowsDelta：行改了日期进 / 出范围，计数精确；不在窗口里的行靠 prev 判断', () => {
+    const range = '2026-10-05..2026-10-11'
+    const view = cal({ sorts: [{ prop: 'num', dir: 'asc' }] })
+    const rows = Array.from({ length: 6 }, (_, i) => row(`r${i}`, { num: i, dat: `2026-10-${String(5 + i).padStart(2, '0')}` }))
+    const win = queryWindow(rows, view, schema, { range, limit: 3 })
+    expect(win.total).toBe(6)
+    // 窗口里的行挪出范围：摘掉、减一
+    const out = applyRowsDelta(win, delta([{ row: row('r1', { num: 1, dat: '2026-11-01' }), prev: { dat: '2026-10-06' } }]), view, schema)
+    expect(ids(out.rows)).toEqual(['r0', 'r2'])
+    expect(out.total).toBe(5)
+    expect(out.range).toBe(range)
+    // 窗口外（没加载到）的行挪出范围：靠 prev 还原旧值，减一
+    const far = applyRowsDelta(win, delta([{ row: row('r5', { num: 5, dat: '2026-12-01' }), prev: { dat: '2026-10-10' } }]), view, schema)
+    expect(far.total).toBe(5)
+    // 范围外的行挪进来、排在已加载末行之前：插入、加一
+    const into = applyRowsDelta(win, delta([{ row: row('x', { num: 0.5, dat: '2026-10-01/2026-10-05' }), prev: { dat: '2026-09-01' } }]), view, schema)
+    expect(ids(into.rows)).toEqual(['r0', 'x', 'r1', 'r2'])
+    expect(into.total).toBe(7)
+    // 范围外的行改来改去还在范围外：不动
+    const still = applyRowsDelta(win, delta([{ row: row('y', { num: 0, dat: '2026-12-02' }), prev: { dat: '2026-12-01' } }]), view, schema)
+    expect(still).toEqual(win)
+    // none：清掉日期的行进「未排期」
+    const none = queryWindow(rows, view, schema, { range: 'none' })
+    const cleared = applyRowsDelta(none, delta([{ row: row('r2', { num: 2 }), prev: { dat: '2026-10-07' } }]), view, schema)
+    expect(ids(cleared.rows)).toEqual(['r2'])
+    expect(cleared.total).toBe(1)
+  })
+
+  test('sortRows：几个窗口合起来按视图顺序排（与 queryWindow 同一个比较器）', () => {
+    const rows = [row('a', { num: 3 }), row('b', { num: 1 }), row('c', { num: 2 }, { position: 0 })]
+    const view = cal({ sorts: [{ prop: 'num', dir: 'asc' }] })
+    expect(ids(sortRows(rows, view, schema))).toEqual(ids(queryWindow(rows, view, schema).rows))
+    expect(ids(sortRows(rows, cal(), schema))).toEqual(['c', 'a', 'b'])
+    expect(ids(rows)).toEqual(['a', 'b', 'c'])
+  })
+})
+
 /* ---------- 随机模拟：服务端现算 vs 客户端套增量 ---------- */
 
 function rng(seed: number): () => number {
@@ -389,29 +525,54 @@ function everything(rows: CollectionRow[], view: CollectionView, opts: WindowOpt
   }
 }
 
+const FILES = [
+  { id: '0b5f4a3e-1c2d-4e5f-8a9b-0c1d2e3f4a5b', name: 'b.png', mime: 'image/png', size: 1 },
+  { id: '1c6e5b4f-2d3e-4f60-9bac-1d2e3f4a5b6c', name: 'a.pdf', mime: 'application/pdf', size: 2 },
+]
+// 单日与区间混着来，比较日 10-05 落在区间内 / 端点上 / 外面的都有；有一个写反了的区间（读成交换后的）
+const DATES = ['2026-10-01', '2026-10-05', '2026-10-09', '2026-10-01/2026-10-05', '2026-10-03/2026-10-08', '2026-10-06/2026-10-09', '2026-10-09/2026-10-02']
+
 function simulate(seed: number, view: CollectionView, opts: WindowOpts = {}): void {
   const rand = rng(seed)
   const pick = <T,>(list: readonly T[]): T => list[Math.floor(rand() * list.length)]!
   const titles = ['甲', '乙', '丙', 'a2', 'a10', '']
+  const values = {
+    sts: () => pick(['st', 'sg', 'sd']),
+    num: () => Math.floor(rand() * 6),
+    sel: () => pick(['hi', 'lo']),
+    dat: () => pick(DATES),
+    eml: () => pick(['amy@x.co', 'Bob@x.co', 'eve@y.co']),
+    fil: () => (rand() < 0.5 ? [pick(FILES)] : [...FILES].reverse()),
+  }
+  const keys = Object.keys(values) as (keyof typeof values)[]
   let clock = 0
+  let numbers = 0
+  // 元数据不进 prev：创建者与编号一行定了就不变，最后编辑者随改动变（只拿来排序，按它筛选的计数本就有余量）
   const fresh = (id: string): CollectionRow => {
     const props: Record<string, unknown> = {}
-    if (rand() < 0.75) props.sts = pick(['st', 'sg', 'sd'])
-    if (rand() < 0.75) props.num = Math.floor(rand() * 6)
-    if (rand() < 0.5) props.sel = pick(['hi', 'lo'])
+    for (const key of keys) if (rand() < 0.6) props[key] = values[key]()
     clock += 1
-    return row(id, props, { title: pick(titles), position: rand() < 0.8 ? Math.floor(rand() * 50) : null, created_at: stamp(clock), edited_at: stamp(clock) })
+    numbers += rand() < 0.9 ? 1 : 0
+    return row(id, props, {
+      title: pick(titles),
+      position: rand() < 0.8 ? Math.floor(rand() * 50) : null,
+      created_at: stamp(clock),
+      edited_at: stamp(clock),
+      created_by: pick(['u1', 'u2', null]),
+      edited_by: pick(['u1', 'u2', 'u3']),
+      number: rand() < 0.9 ? numbers : null,
+    })
   }
   const mutate = (before: CollectionRow): { after: CollectionRow; prev: Record<string, unknown> } => {
     const props = { ...before.props }
     let title = before.title
     let position = before.position
     for (let n = 1 + Math.floor(rand() * 2); n > 0; n--) {
-      const what = pick(['sts', 'num', 'sel', 'title', 'position'] as const)
+      const what = pick([...keys, 'title', 'position'] as const)
       if (what === 'title') title = pick(titles)
       else if (what === 'position') position = rand() < 0.2 ? null : Math.floor(rand() * 50)
       else if (rand() < 0.2) delete props[what]
-      else props[what] = what === 'sts' ? pick(['st', 'sg', 'sd']) : what === 'sel' ? pick(['hi', 'lo']) : Math.floor(rand() * 6)
+      else props[what] = values[what]()
     }
     const prev: Record<string, unknown> = {}
     for (const key of new Set([...Object.keys(before.props), ...Object.keys(props)])) {
@@ -419,7 +580,7 @@ function simulate(seed: number, view: CollectionView, opts: WindowOpts = {}): vo
     }
     if (title !== before.title) prev.title = before.title
     clock += 1
-    return { after: { ...before, props, title, position, edited_at: stamp(clock) }, prev }
+    return { after: { ...before, props, title, position, edited_at: stamp(clock), edited_by: pick(['u1', 'u2', 'u3']) }, prev }
   }
 
   const server: CollectionRow[] = Array.from({ length: 40 }, (_, i) => fresh(`r${i}`))
@@ -471,6 +632,38 @@ describe('applyRowsDelta：随机模拟，窗口恒为服务端列表的前缀',
   test('看板的一列（按组取）', () => simulate(4, viewOf({ layout: 'board', groupBy: 'sts' }), { group: 'sg' }))
   test('看板的无值列', () => simulate(5, viewOf({ layout: 'board', groupBy: 'sel', filter: { all: [{ prop: 'num', op: 'gte', value: 2 }] } }), { group: '' }))
   test('按编辑时间倒序', () => simulate(6, viewOf({ sorts: [{ prop: 'edi', dir: 'desc' }] })))
+  test('日期区间：落在区间里的筛选 + 按日期倒序', () =>
+    simulate(7, viewOf({ filter: { all: [{ prop: 'dat', op: 'eq', value: '2026-10-05' }] }, sorts: [{ prop: 'dat', dir: 'desc' }] })))
+  test('日期区间：整段在之前 / 之后的筛选 + 按编号', () =>
+    simulate(8, viewOf({ filter: { all: [{ prop: 'dat', op: 'before', value: '2026-10-05' }] }, sorts: [{ prop: 'uid', dir: 'asc' }] })))
+  test('编号 / 创建者筛选，按最后编辑者再按编号排序', () =>
+    simulate(
+      9,
+      viewOf({
+        filter: { all: [{ prop: 'uid', op: 'gt', value: 5 }, { prop: 'cby', op: 'not_contains', value: 'u1' }] },
+        sorts: [{ prop: 'eby', dir: 'asc' }, { prop: 'uid', dir: 'desc' }],
+      }),
+    ))
+  test('文件 / 邮箱：不为空的筛选，按第一个文件名、邮箱排序', () =>
+    simulate(
+      10,
+      viewOf({
+        filter: { all: [{ prop: 'fil', op: 'not_empty' }, { prop: 'eml', op: 'contains', value: 'X.CO' }] },
+        sorts: [{ prop: 'fil', dir: 'asc' }, { prop: 'eml', dir: 'desc' }],
+      }),
+    ))
+  test('按状态分组 + 日期晚于的筛选', () =>
+    simulate(11, viewOf({ groupBy: 'sts', filter: { all: [{ prop: 'dat', op: 'after', value: '2026-10-05' }] }, sorts: [{ prop: 'cby', dir: 'asc' }] })))
+  test('日历的一个月（按日期范围取）', () => simulate(12, viewOf({ layout: 'calendar', dateBy: 'dat' }), { range: '2026-10-04..2026-10-06' }))
+  test('时间线的一块 + 筛选 + 按日期排序', () =>
+    simulate(
+      13,
+      viewOf({ layout: 'timeline', dateBy: 'dat', filter: { all: [{ prop: 'num', op: 'gte', value: 2 }] }, sorts: [{ prop: 'dat', dir: 'asc' }] }),
+      { range: '2026-10-08..2026-10-30' },
+    ))
+  test('时间线的「未排期」（none）', () => simulate(14, viewOf({ layout: 'timeline', dateBy: 'dat', sorts: [{ prop: 'num', dir: 'desc' }] }), { range: 'none' }))
+  test('按分组的表格 + 日期范围（分组计数仍数全部命中筛选的行）', () =>
+    simulate(15, viewOf({ groupBy: 'sts', dateBy: 'dat' }), { range: '2026-10-02..2026-10-05' }))
 })
 
 describe('between（手动顺序的邻居中点，服务端定位置与客户端乐观显示同用）', () => {
@@ -486,5 +679,71 @@ describe('between（手动顺序的邻居中点，服务端定位置与客户端
     expect(between(null, 1)).toBeNull()
     expect(between(2, 1)).toBeNull()
     expect(between(1, 1 + Number.EPSILON)).toBeNull()
+  })
+})
+
+describe('关联与汇总：读服务端算好的 computed，按输出类型筛选排序', () => {
+  const T = '0b0c3c1e-6f7a-4b2c-9d8e-112233445566'
+  const RPROPS = {
+    rel: { name: '子任务', type: 'relation', pos: 0, cfg: { target: T, reverse: 'rev001', single: false } },
+    rev: { name: '父任务', type: 'relation', pos: 1, cfg: { target: T, mirror: 'rel001' } },
+    sum: { name: '工时合计', type: 'rollup', pos: 2, cfg: { relation: 'rel', prop: 'p00001', fn: 'sum' } },
+    lat: { name: '最晚截止', type: 'rollup', pos: 3, cfg: { relation: 'rel', prop: 'p00002', fn: 'latest' } },
+    shw: { name: '负责人们', type: 'rollup', pos: 4, cfg: { relation: 'rel', prop: 'p00003', fn: 'show_original' } },
+  }
+  const rschema = parseCollection({ props: RPROPS })
+  const rview = (settings: Record<string, unknown>): CollectionView => parseCollection({ props: RPROPS, views: { v1: settings } }).views[0]!
+  const rrow = (id: string, computed: Record<string, unknown>, position: number, props: Record<string, unknown> = {}): CollectionRow =>
+    row(id, props, { computed, position })
+  const rows = [
+    rrow('a', { rel: ['x', 'y'], rev: [], sum: 5, lat: '2026-03-01', shw: ['u1', 'u2'] }, 0),
+    rrow('b', { rel: [], rev: ['z'], shw: [] }, 1, { rel: ['gone'] }),
+    rrow('c', { rel: ['y'], rev: ['z', 'w'], sum: 12, lat: '2026-01-15 08:00:00+00' }, 2),
+  ]
+  const hit = (prop: string, op: string, value?: unknown): string[] =>
+    rows.filter((r) => matchFilter(r, rview({ filter: { all: [{ prop, op, value }] } }).filter, rschema)).map((r) => r.id)
+  const sorted = (prop: string, dir: 'asc' | 'desc'): string[] => ids(queryWindow(rows, rview({ sorts: [{ prop, dir }] }), rschema).rows)
+
+  test('关联：包含 / 不包含 / 为空 / 不为空，比较值是对方的一行；computed 的空列表不退回存储值', () => {
+    expect(hit('rel', 'contains', 'y')).toEqual(['a', 'c'])
+    expect(hit('rel', 'not_contains', 'x')).toEqual(['b', 'c'])
+    expect(hit('rel', 'empty')).toEqual(['b'])
+    expect(hit('rel', 'not_empty')).toEqual(['a', 'c'])
+    expect(hit('rev', 'contains', 'z')).toEqual(['b', 'c'])
+    expect(hit('rev', 'empty')).toEqual(['a'])
+  })
+
+  test('汇总：数字按数字、日期按天（日历日与时间戳都认）、列表只有为空 / 不为空', () => {
+    expect(hit('sum', 'gt', 6)).toEqual(['c'])
+    expect(hit('sum', 'empty')).toEqual(['b'])
+    expect(hit('lat', 'before', '2026-02-01')).toEqual(['c'])
+    expect(hit('lat', 'eq', '2026-03-01')).toEqual(['a'])
+    expect(hit('lat', 'eq', '2026-01-15')).toEqual(['c'])
+    expect(hit('shw', 'not_empty')).toEqual(['a'])
+    expect(hit('shw', 'empty')).toEqual(['b', 'c'])
+    // 列表输出的汇总没有数字运算：条件解析时就丢掉
+    expect(rview({ filter: { all: [{ prop: 'shw', op: 'gt', value: 1 }] } }).filter.all).toEqual([])
+  })
+
+  test('排序：汇总的数字 / 日期可排（空值恒在最后），关联与列表输出的汇总解析时丢掉', () => {
+    expect(sorted('sum', 'desc')).toEqual(['c', 'a', 'b'])
+    expect(sorted('lat', 'asc')).toEqual(['c', 'a', 'b'])
+    expect(rview({ sorts: [{ prop: 'rel', dir: 'asc' }, { prop: 'shw', dir: 'asc' }, { prop: 'sum', dir: 'asc' }] }).sorts).toEqual([
+      { prop: 'sum', dir: 'asc' },
+    ])
+    // 手写的排序里带着排不了的属性：不参与，按手动顺序
+    expect(ids(queryWindow(rows, { ...rview({}), sorts: [{ prop: 'rel', dir: 'desc' }] }, rschema).rows)).toEqual(['a', 'b', 'c'])
+  })
+
+  test('计算值变了的行按 prev: {} 发：窗口里的行按新值进出，refs 原样留着', () => {
+    const view = rview({ filter: { all: [{ prop: 'sum', op: 'gt', value: 6 }] } })
+    const refs = { sum: { state: 'ok' as const, target: { id: T, title: '任务' } } }
+    const start = { ...queryWindow(rows, view, rschema), refs }
+    expect(ids(start.rows)).toEqual(['c'])
+    const a2 = { ...rows[0]!, computed: { ...rows[0]!.computed, sum: 9 } }
+    const next = applyRowsDelta(start, delta([{ row: a2, prev: {} }]), view, rschema)
+    expect(ids(next.rows)).toEqual(['a', 'c'])
+    expect(next.total).toBe(2)
+    expect(next.refs).toBe(refs)
   })
 })

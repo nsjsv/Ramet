@@ -89,6 +89,20 @@ export function Popover({ anchor, onClose, children, className, place = 'below' 
   )
 }
 
+/** 从弹层里打开、盖在它上面的别的浮层（如列菜单里打开的公式编辑弹窗）：挂载期间登记进弹层栈。
+ *  下面的弹层把点它、在它里面滚动都当作「点在上层里」，Esc 也只归栈顶 —— 否则点一下弹窗，下面的弹层就关了，
+ *  连带卸载打开弹窗的组件，弹窗跟着消失 */
+export function usePopoverLayer(el: HTMLElement | null): void {
+  useEffect(() => {
+    if (!el) return
+    stack.push(el)
+    return () => {
+      const i = stack.indexOf(el)
+      if (i >= 0) stack.splice(i, 1)
+    }
+  }, [el])
+}
+
 /** 一个按钮开合一个弹层：返回 [触发元素（null = 关着）, 打开, 关闭] */
 export function usePopover(): [HTMLElement | null, (el: HTMLElement) => void, () => void] {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null)

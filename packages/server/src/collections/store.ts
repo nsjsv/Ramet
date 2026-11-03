@@ -3,7 +3,7 @@
 // 行 = 父页是集合的 kind='doc' 活页面：属于哪个集合永远按 pages.parent_id 现查，不另存。
 // 行属性的真相在行文档的 Y.Map('props')；collection_rows.props 是它的可查询副本（派生，随时可由文档重建）：
 // 写副本只经这里的 writeReplica（投影器 projector.ts 投影、建行时随页面行一起落），读的时候不反写文档。
-// 这里放：建集合、建行、取成员行（live_pages ⋈ collection_rows）、读写副本、手动顺序（邻居中点与重编号）、批量复制 / 挪走。
+// 这里放：建集合、建行、取成员行（live_pages ⋈ collection_rows）、读写副本、手动顺序（邻居中点与重编号）、批量复制 / 挪走、自动编号。
 
 import { randomUUID } from 'node:crypto'
 import type { Pool, PoolClient } from 'pg'
@@ -50,21 +50,34 @@ const DELETE_DOC_STATE = 'DELETE FROM yjs_documents WHERE doc_name = $1'
 // 正文里有没有字：content_text 由 collab.ts 的 syncContentText 在每次存文档时刷新（不含标题）；
 // NULL = 正文索引之前就有、之后再没存过的老页面，算有（宁可多画一个图标）
 const HAS_BODY = (alias: string): string => `COALESCE(${alias}.content_text ~ '\\S', true)`
-// 行的对外形状（窗口查询与增量共用）。编辑时间 = 正文 / 属性最后一次变化，与创建时间取最晚：
-// 三列类型不同（created_at / content_updated_at 是 now()::text，props_updated_at 是 timestamptz），统一按 timestamptz 比
+// 行的对外形状（窗口查询与增量共用，连接见 ROW_JOINS）。编辑时间 = 正文 / 属性最后一次变化，与创建时间取最晚：
+// 三列类型不同（created_at / content_updated_at 是 now()::text，props_updated_at 是 timestamptz），统一按 timestamptz 比。
+// 最后编辑者 = edit_marks 的整页行（存储钩子约 2s 后落库，刚改的值由投影器在增量里先补上）；
+// 一次都没被编辑过（服务端整份写好的新行 / 副本）就是建它的人 —— 与编辑时间此时等于创建时间同一个口径。
+// 整页行在、user_id 却是 NULL（编辑者的账号删了）不回落，否则会张冠李戴到建页人头上
 const ROW_COLUMNS = `p.id, p.title, p.icon_emoji, p.icon_file_id, p.position, p.created_at,
   GREATEST(p.created_at::timestamptz, p.content_updated_at::timestamptz, r.props_updated_at)::text AS edited_at,
-  r.props, ${HAS_BODY('p')} AS has_body`
-// 一个集合的全部行（走 idx_pages_parent）；没有副本行的按空属性（LEFT JOIN）
-const SELECT_MEMBERS = `SELECT ${ROW_COLUMNS} FROM live_pages p
-  LEFT JOIN collection_rows r ON r.page_id = p.id
+  r.props, ${HAS_BODY('p')} AS has_body, p.owner_id AS created_by,
+  CASE WHEN m.actor IS NULL THEN p.owner_id ELSE m.user_id END AS edited_by,
+  CASE WHEN m.actor = 'agent' THEN m.actor_agent END AS edited_agent, n.n AS number`
+// 副本（没有的按空属性）、最后编辑者、本集合里的编号（行挪走后旧集合的号对不上 parent_id，不算）。
+// 最后编辑者按行逐个走 edit_marks 的主键：那张表存着全库每个块的标记，普通 JOIN 会被规划成整表扫描，
+// 窗口查询的耗时就跟着全库的块数涨了。LIMIT 1 不让规划器把子查询拉平回普通 JOIN（主键本就至多一行）
+const ROW_JOINS = `LEFT JOIN collection_rows r ON r.page_id = p.id
+  LEFT JOIN LATERAL (SELECT user_id, actor, actor_agent FROM edit_marks
+    WHERE page_id = p.id AND block_id = '' LIMIT 1) m ON true
+  LEFT JOIN collection_row_numbers n ON n.page_id = p.id AND n.collection_id = p.parent_id`
+// 一个集合的全部行（走 idx_pages_parent）
+const SELECT_MEMBERS = `SELECT ${ROW_COLUMNS} FROM live_pages p ${ROW_JOINS}
   WHERE p.parent_id = $1 AND p.kind = 'doc'`
 // 一行 + 它所在的集合（不是活集合的行 = 没有结果）
 const SELECT_MEMBER_ROW = `SELECT ${ROW_COLUMNS}, c.id AS collection_id FROM live_pages p
   JOIN live_pages c ON c.id = p.parent_id AND c.kind = 'collection'
-  LEFT JOIN collection_rows r ON r.page_id = p.id
+  ${ROW_JOINS}
   WHERE p.id = $1 AND p.kind = 'doc'`
 const SELECT_MEMBERS_AMONG = `SELECT id FROM live_pages WHERE parent_id = $1 AND kind = 'doc' AND id = ANY($2::text[])`
+// 一个集合里指定的几行（整行形状同 SELECT_MEMBERS）
+const SELECT_MEMBER_ROWS_AMONG = `${SELECT_MEMBERS} AND p.id = ANY($2::text[])`
 const SELECT_SPACE_MEMBERS = `SELECT m.user_id, u.username FROM space_members m JOIN users u ON u.id = m.user_id
   WHERE m.space_id = $1`
 
@@ -108,6 +121,10 @@ type RowRecord = {
   edited_at: string
   props: Record<string, unknown> | null
   has_body: boolean
+  created_by: string | null
+  edited_by: string | null
+  edited_agent: string | null
+  number: number | null
 }
 
 function toRow(r: RowRecord): CollectionRow {
@@ -120,6 +137,10 @@ function toRow(r: RowRecord): CollectionRow {
     created_at: r.created_at,
     edited_at: r.edited_at,
     has_body: r.has_body,
+    created_by: r.created_by,
+    edited_by: r.edited_by,
+    edited_agent: r.edited_agent,
+    number: r.number,
   }
 }
 
@@ -146,6 +167,12 @@ export async function memberRows(db: Db, collectionId: string): Promise<Collecti
 export async function memberRow(db: Db, rowId: string): Promise<{ collectionId: string; row: CollectionRow } | null> {
   const r = (await db.query<RowRecord & { collection_id: string }>(SELECT_MEMBER_ROW, [rowId])).rows[0]
   return r ? { collectionId: r.collection_id, row: toRow(r) } : null
+}
+
+/** 这个集合里 ids 指的那些活行（整行；不是这个集合的活行的 id 不在结果里） */
+export async function memberRowsAmong(db: Db, collectionId: string, ids: string[]): Promise<CollectionRow[]> {
+  if (ids.length === 0) return []
+  return (await db.query<RowRecord>(SELECT_MEMBER_ROWS_AMONG, [collectionId, ids])).rows.map(toRow)
 }
 
 /** ids 里哪些是这个集合的活行 */
@@ -337,6 +364,42 @@ export async function moveRow(pool: Pool, collectionId: string, rowId: string, a
   })
 }
 
+// ---------- 自动编号 ----------
+
+// 同一集合的取号在事务级 advisory 锁下串行（两个人同时建行不撞号）。键与手动顺序的锁不同：
+// 建行 / 复制 / 挪进在同一事务里先拿顺序锁再拿编号锁，窗口查询只拿编号锁，没有反过来拿的路径，不会死锁
+const LOCK_NUMBERS = `SELECT pg_advisory_xact_lock(hashtextextended('numbers:' || $1::text, 0))`
+// 本集合活行里还没有本集合编号的（挪进来的行带着别的集合的号，同样算没有）
+const MISSING_NUMBERS = `FROM live_pages p LEFT JOIN collection_row_numbers n ON n.page_id = p.id AND n.collection_id = p.parent_id
+  WHERE p.parent_id = $1 AND p.kind = 'doc' AND n.page_id IS NULL`
+const ANY_MISSING_NUMBER = `SELECT EXISTS (SELECT 1 ${MISSING_NUMBERS}) AS missing`
+// 按创建先后取号（加编号属性时老行得到 1..n；同一刻建的按 id）
+const SELECT_UNNUMBERED = `SELECT p.id ${MISSING_NUMBERS} ORDER BY p.created_at::timestamptz, p.id`
+const SELECT_NEXT_NUMBER = 'SELECT next_number FROM collections WHERE page_id = $1'
+const UPSERT_NUMBERS = `INSERT INTO collection_row_numbers (page_id, collection_id, n)
+  SELECT v.id, $1, v.n FROM unnest($2::text[], $3::int[]) AS v(id, n)
+  ON CONFLICT (page_id) DO UPDATE SET collection_id = EXCLUDED.collection_id, n = EXCLUDED.n`
+const SET_NEXT_NUMBER = 'UPDATE collections SET next_number = $2 WHERE page_id = $1'
+
+/** 给集合里还没有编号的活行依次取号（在调用方的事务里；号码只增不减，删掉 / 挪走的行的号不再发出去）。
+ *  只在集合定义里有「自动编号」属性时调：取号的时刻决定先后，没有这个属性时就取，之后加属性的老行就排不成创建先后了 */
+export async function assignNumbers(client: PoolClient, collectionId: string): Promise<void> {
+  await client.query(LOCK_NUMBERS, [collectionId])
+  const next = (await client.query<{ next_number: number }>(SELECT_NEXT_NUMBER, [collectionId])).rows[0]?.next_number
+  if (next === undefined) return
+  const ids = (await client.query<{ id: string }>(SELECT_UNNUMBERED, [collectionId])).rows.map((r) => r.id)
+  if (ids.length === 0) return
+  await client.query(UPSERT_NUMBERS, [collectionId, ids, ids.map((_, i) => next + i)])
+  await client.query(SET_NEXT_NUMBER, [collectionId, next + ids.length])
+}
+
+/** 窗口查询前补号：先不加锁地看一眼有没有缺号的行，没有就不进事务（绝大多数查询走这条）。
+ *  编号是派生数据，viewer 打开时触发补号也可以；没走建行接口进集合的行（侧栏拖入、agent 建页、导入、恢复…）都在这里补上 */
+export async function ensureNumbers(pool: Pool, collectionId: string): Promise<void> {
+  if (!(await pool.query<{ missing: boolean }>(ANY_MISSING_NUMBER, [collectionId])).rows[0]?.missing) return
+  await withTransaction(pool, (client) => assignNumbers(client, collectionId))
+}
+
 // ---------- 建 ----------
 
 export type NewCollection = { id: string; spaceId: string; parentId: string | null; ownerId: string; inline: boolean; title: string }
@@ -371,6 +434,8 @@ export type NewRow = {
   props: Record<string, PropValue>
   after: string | null
   before: string | null
+  /** 集合有自动编号属性：同一事务里取号，响应里的行就带着号 */
+  numbered: boolean
 }
 
 /** 建行：文档（标题 + Y.Map('props')）先整份写好，再在一个事务里建页面行、定位置、落副本 —— 行文档还没被加载过，
@@ -399,6 +464,7 @@ export async function createRow(pool: Pool, input: NewRow): Promise<{ id: string
       const at = slot.at ?? (await tailPosition(client, input.collectionId, id))
       await client.query(INSERT_ROW_PAGE, [id, input.collectionId, input.ownerId, input.spaceId, input.title, at])
       await writeReplica(client, id, props.toJSON(), false)
+      if (input.numbered) await assignNumbers(client, input.collectionId)
       return { id, renumbered: slot.renumbered }
     })
   } catch (err) {
@@ -428,6 +494,8 @@ export type DuplicateInput = {
   rows: { id: string; props: Record<string, unknown> }[]
   /** 子树全部文档的全量状态（clone.ts 的 resolveDocs，事务外组好） */
   docs: Map<string, Uint8Array>
+  /** 集合有自动编号属性：副本在同一事务里取号 */
+  numbered: boolean
 }
 
 /** 每个源行复制一份（连子页，规则同 clone.ts 的 COPYABLE），副本紧跟在原行之后；一个事务。
@@ -456,17 +524,20 @@ export async function duplicateRows(
       await writeReplica(client, id, row.props, false)
       created.push({ from: row.id, id })
     }
+    if (input.numbered && created.length > 0) await assignNumbers(client, input.collectionId)
     return { created, renumbered }
   })
 }
 
 /** 把行挪到集合 to 的末尾，副本同时换成按目标定义改写好的值（mapped，collections/transfer.ts）；一个事务。
+ *  目标有自动编号属性（numbered）时挪进来的行在目标里取新号。
  *  行文档里的 props 由调用方随后经 DocWriter 写（快照记给发起人）。目标进了回收站 = null；返回实际挪了的行 */
 export async function moveRowsTo(
   pool: Pool,
   from: string,
   to: string,
   rows: { id: string; mapped: Record<string, PropValue> }[],
+  numbered: boolean,
 ): Promise<string[] | null> {
   return withTransaction(pool, async (client) => {
     if ((await client.query(LOCK_LIVE_COLLECTION, [to])).rows.length === 0) return null
@@ -478,6 +549,7 @@ export async function moveRowsTo(
       await writeReplica(client, row.id, row.mapped, true)
       moved.push(row.id)
     }
+    if (numbered && moved.length > 0) await assignNumbers(client, to)
     return moved
   })
 }

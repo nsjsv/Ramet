@@ -62,6 +62,13 @@
   overscroll-behavior-x: contain;
 }
 
+/* 时间线只向右伸出：左栏（行标题）吸左、与正文左缘对齐，时间轴往右铺到画面边，横向滚动时滑进右侧留白。
+ * 左边也伸出的话，滚过去的横条会出现在左栏左边的留白里 */
+.cl-block .cl-tl-scroll {
+  margin-right: calc(-1 * var(--bleed-r, 0px));
+  padding-right: var(--bleed-r, 0px);
+}
+
 .cl-block-note {
   display: flex;
   align-items: center;

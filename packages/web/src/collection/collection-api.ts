@@ -3,15 +3,20 @@
 // 属性定义与视图不走 REST：经集合文档的协同连接直接改（schema-ops.ts），viewer 的连接服务端只读。
 import { HocuspocusProvider } from '@hocuspocus/provider'
 import type * as Y from 'yjs'
-import type { CollectionRow, PropValue } from '@ramet/shared/collection-model'
+import type { CollectionRefs, CollectionRow, CollectionSchema, PropValue } from '@ramet/shared/collection-model'
 import type { RowsWindow } from '@ramet/shared/collection-query'
 import { ApiError, request, type Page } from '../api'
 import { collabUrl } from '../editor/collab-url'
 import { personOf } from '../people'
 import type { CollectionLink, CollectionTransport, RowsQuery } from './collection-store'
+import { rowsSearch } from './collection-windows'
 
 /** 改值：属性 id → 新值，null = 清空（服务端 validateValue 全部通过才写，任一非法整个 400） */
 export type RowSet = Record<string, PropValue | null>
+/** 反向关联的一次增删（源集合的行 id，各 ≤ LIST_MAX）：反向值可以有几千行，只发改了的那几个，并发时也不互相覆盖 */
+export type ReverseEdit = { add?: string[]; remove?: string[] }
+/** 发给服务端的改值：反向关联是增删，其余同 RowSet（store 由整份值换算，见 relation-write.ts） */
+export type RowWrite = Record<string, PropValue | null | ReverseEdit>
 
 export type NewCollectionInput = {
   space_id: string
@@ -24,7 +29,14 @@ export type NewCollectionInput = {
 
 /** id = 客户端生成的 uuid v4（乐观新建：先插行、进入命名，不等这一趟；已被占用 409） */
 export type NewRowInput = { id?: string; title?: string; set?: RowSet; after?: string | null; before?: string | null }
-export type RowPatch = { set?: RowSet; title?: string; after?: string | null; before?: string | null }
+export type RowPatch = { set?: RowWrite; title?: string; after?: string | null; before?: string | null }
+/** 单行 + refs（行页面属性区：它只有定义没有窗口，反向关联与汇总从这里取） */
+export type RowWithRefs = { row: CollectionRow; refs: CollectionRefs }
+
+/** 建关联：反向属性名缺省 = 本集合名，正向缺省 = 对方集合名 */
+export type NewRelation = { name?: string; target: string; two_way?: boolean; reverse_name?: string; single?: boolean }
+export type RelationPatch = { target?: string; two_way?: boolean; reverse_name?: string; single?: boolean }
+export type RelationIds = { prop: string | null; reverse: string | null }
 
 const base = (cid: string): string => `/api/collections/${encodeURIComponent(cid)}`
 
@@ -41,13 +53,9 @@ export const collectionApi = {
   /** 建集合页（整页或内联）：广播 changed，返回页面元数据 + inline */
   create: (input: NewCollectionInput) =>
     request<Page & { inline: boolean }>('/api/collections', { method: 'POST', body: JSON.stringify(input) }),
-  /** 窗口查询：tz = 比 UTC 快多少分钟（创建 / 编辑时间按它折成日期，与客户端套增量同一口径） */
-  rows: (cid: string, q: RowsQuery) => {
-    const params = new URLSearchParams({ view: q.view, limit: String(q.limit), tz: String(q.tz) })
-    if (q.group !== undefined) params.set('group', q.group)
-    if (q.cursor) params.set('cursor', q.cursor)
-    return request<RowsWindow>(`${base(cid)}/rows?${params.toString()}`)
-  },
+  /** 窗口查询：tz = 比 UTC 快多少分钟（创建 / 编辑时间按它折成日期，与客户端套增量同一口径）；
+   *  group = 看板的一列，range = 日历 / 时间线的日期范围（写法见 shared 的 parseRange） */
+  rows: (cid: string, q: RowsQuery) => request<RowsWindow>(`${base(cid)}/rows?${rowsSearch(q)}`),
   createRow: (cid: string, input: NewRowInput) =>
     request<CollectionRow>(`${base(cid)}/rows`, { method: 'POST', body: JSON.stringify(input) }),
   patchRow: (cid: string, rowId: string, patch: RowPatch) =>
@@ -60,6 +68,16 @@ export const collectionApi = {
     request<{ created: { from: string; id: string }[] }>(`${base(cid)}/rows/duplicate`, { method: 'POST', body: JSON.stringify({ ids }) }),
   moveRows: (cid: string, ids: string[], to: string) =>
     request<{ moved: string[] }>(`${base(cid)}/rows/move`, { method: 'POST', body: JSON.stringify({ ids, to }) }),
+  row: (cid: string, rowId: string) => request<RowWithRefs>(`${base(cid)}/rows/${encodeURIComponent(rowId)}`),
+  /** 别的集合的属性定义（建汇总时列对方的属性），不为此开一条协同连接 */
+  schema: (cid: string) => request<{ title: string; schema: CollectionSchema }>(`${base(cid)}/schema`),
+  /** 关联的定义跨两份集合文档（反向在对方那份），只能经服务端改，客户端不直接写别的集合的文档 */
+  addRelation: (cid: string, input: NewRelation) =>
+    request<RelationIds>(`${base(cid)}/relations`, { method: 'POST', body: JSON.stringify(input) }),
+  patchRelation: (cid: string, propId: string, patch: RelationPatch) =>
+    request<RelationIds>(`${base(cid)}/relations/${encodeURIComponent(propId)}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  deleteRelation: (cid: string, propId: string) =>
+    request<{ deleted: { collection: string; prop: string }[] }>(`${base(cid)}/relations/${encodeURIComponent(propId)}`, { method: 'DELETE' }),
 }
 
 /** 集合文档 page:<cid> 的协同连接：不挂 IndexedDB（只有属性定义与视图，体积小）。
@@ -101,5 +119,6 @@ export const collectionTransport: CollectionTransport = {
   setRows: collectionApi.setRows,
   duplicateRows: collectionApi.duplicateRows,
   moveRows: collectionApi.moveRows,
+  row: collectionApi.row,
   nameOf: (spaceId, userId) => personOf(spaceId, userId)?.username,
 }

@@ -1,17 +1,15 @@
 /* ---------- 表格的一格：展示 / 编辑 ----------
  * 编辑的进出由 TableView 管（同 Notion：单击 / Enter / 直接打字进编辑，Esc 退回选中态，Enter / 失焦提交）。
- * 选择器弹着、筛选框还空着时 ⌘V = 往这一格粘贴（onPaste），认不出才照旧贴进筛选框。这里按类型选编辑器：
- * 名称 / 文本 / 数字 / 链接 / 日期是格内输入框，单选 / 多选 / 状态 / 人员是贴着格子的选择器弹层，复选框点一下即切换（startEdit 里直接提交）。 */
+ * 选择器弹着、筛选框还空着时 ⌘V = 往这一格粘贴（onPaste），认不出才照旧贴进筛选框。编辑器由 CellEditor 按类型选：
+ * 格内输入框替换展示，弹层盖在格子上，复选框点一下即切换（startEdit 里直接提交），系统生成的格子锁着。 */
 import { useRef } from 'react'
 import type * as Y from 'yjs'
 import { rowValue, TITLE_PROP_ID, type CollectionProp, type CollectionRow, type PropValue } from '@ramet/shared/collection-model'
 import { COPY } from '../../copy'
 import { PageIcon } from '../../PageIcon'
+import { CellEditor } from '../cells/CellEditor'
 import { CellView } from '../cells/CellView'
-import { initialText, InlineInput } from '../cells/InlineInput'
-import { OptionPicker, PersonPicker } from '../cells/Pickers'
-import { Popover } from '../popover'
-import { isComputed } from '../prop-meta'
+import { editorKind } from '../cells/editor-kind'
 
 type Props = {
   row: CollectionRow
@@ -45,9 +43,22 @@ export default function TableCell(p: Props) {
   const { row, prop } = p
   const ref = useRef<HTMLDivElement>(null)
   const isTitle = prop.id === TITLE_PROP_ID
-  const picker = prop.type === 'select' || prop.type === 'multi_select' || prop.type === 'status' || prop.type === 'person'
-  const inline = p.editing && !picker
-  const locked = p.readOnly || isComputed(prop.type)
+  const kind = editorKind(prop)
+  const inline = p.editing && kind === 'inline'
+  const locked = p.readOnly || kind === 'none'
+  const editor = p.editing && (
+    <CellEditor
+      prop={prop}
+      value={rowValue(row, prop)}
+      doc={p.doc}
+      spaceId={p.spaceId}
+      seed={p.seed}
+      onPaste={p.onPaste}
+      anchor={ref.current}
+      onCommit={p.onCommit}
+      onDone={p.onStop}
+    />
+  )
   return (
     <div
       ref={ref}
@@ -55,6 +66,7 @@ export default function TableCell(p: Props) {
       aria-selected={p.selected}
       className={'cl-cell' + (p.selected ? ' is-selected' : '') + (p.inRange ? ' is-in-range' : '') + (p.inFill ? ' is-in-fill' : '') + (isTitle ? ' is-title' : '') + (locked ? ' is-locked' : '')}
       data-type={prop.type}
+      title={kind === 'none' ? COPY.collection.cell.readonly : undefined}
       onMouseDown={(e) => {
         if (e.button !== 0 || (e.target as HTMLElement).closest('a, button, input')) return
         p.onSelect(e.shiftKey)
@@ -71,7 +83,7 @@ export default function TableCell(p: Props) {
       }}
     >
       {inline ? (
-        <InlineInput prop={prop} initial={initialText(row, prop)} seed={p.seed} onCommit={p.onCommit} onCancel={p.onStop} />
+        editor
       ) : isTitle ? (
         <span className="cl-title">
           {/* 没有自定义图标时，正文里有字才画通用文档图标（同 Notion） */}
@@ -85,15 +97,7 @@ export default function TableCell(p: Props) {
         <CellView prop={prop} row={row} spaceId={p.spaceId} />
       )}
       {p.onFillStart && <span className="cl-fill" aria-hidden onMouseDown={p.onFillStart} />}
-      {p.editing && picker && (
-        <Popover anchor={ref.current} onClose={p.onStop} place="over" className="cl-cell-pop">
-          {prop.type === 'person' ? (
-            <PersonPicker value={rowValue(row, prop)} spaceId={p.spaceId} onChange={p.onCommit} seed={p.seed} onPaste={p.onPaste} />
-          ) : (
-            <OptionPicker prop={prop} value={rowValue(row, prop)} doc={p.doc} onChange={p.onCommit} onDone={p.onStop} seed={p.seed} onPaste={p.onPaste} />
-          )}
-        </Popover>
-      )}
+      {!inline && editor}
     </div>
   )
 }

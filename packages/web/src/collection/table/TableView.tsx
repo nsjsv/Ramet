@@ -25,11 +25,12 @@ import BulkBar from '../BulkBar'
 import { useCollectionPages, useRowsWindow, type CollectionHandle } from '../collection-store'
 import { createHandleMenu } from '../../handle-menu'
 import { openRowMenu } from '../row-menu'
+import { useLoadMore } from '../load-more'
 import { useMarquee } from '../marquee'
 import { InBulkSlot } from '../bulk-slot'
-import { useRowPicking } from '../selection'
+import { usePruneToWindow, useRowPicking } from '../selection'
 import { setWidth } from '../schema-ops'
-import { isComputed } from '../prop-meta'
+import { bulkEditable, editorKind } from '../cells/editor-kind'
 import TableCell from './TableCell'
 import TableHeader from './TableHeader'
 import { boxOf, boxSize, type CellBox } from './cell-range'
@@ -52,8 +53,6 @@ type Props = {
 }
 
 type Cursor = { rowId: string; propId: string }
-
-const PICKER_TYPES = new Set(['select', 'multi_select', 'status', 'person'])
 
 export default function TableView({ handle, schema, view, readOnly, spaceId, onOpenRow, registerMore }: Props) {
   const rows = useRowsWindow(handle, view.id)
@@ -131,16 +130,7 @@ export default function TableView({ handle, schema, view, readOnly, spaceId, onO
     return () => registerMore?.(null)
   })
 
-  // 滚到底续取：哨兵进视口（提前 300px）就取下一页
-  useEffect(() => {
-    const el = sentinel.current
-    if (!el || !win?.next) return
-    const io = new IntersectionObserver((entries) => {
-      if (entries.some((e) => e.isIntersecting)) loadMore()
-    }, { rootMargin: '300px' })
-    io.observe(el)
-    return () => io.disconnect()
-  }, [win, loadMore])
+  useLoadMore(sentinel, win, loadMore)
 
   useEffect(() => {
     const up = (): void => {
@@ -191,13 +181,7 @@ export default function TableView({ handle, schema, view, readOnly, spaceId, onO
     }
   }, [editing])
 
-  // 勾选的行被删了 / 挪出窗口：摘掉
-  const { prune } = picking
-  useEffect(() => {
-    if (!win) return
-    const alive = new Set(win.rows.map((r) => r.id))
-    prune((id) => alive.has(id))
-  }, [win, prune])
+  usePruneToWindow(win, picking.prune)
 
   const marquee = useMarquee({
     root: wrapRef,
@@ -230,13 +214,13 @@ export default function TableView({ handle, schema, view, readOnly, spaceId, onO
   const ranged = box !== null && boxSize(box) > 1
   const grid = box ? { handle, rows: visible, cols, box, spaceId } : null
   // 填充柄画在选区右下角那一格；选区里全是计算列就不画
-  const fillable = box !== null && !readOnly && !editing && cols.slice(box.c0, box.c1 + 1).some((p) => !isComputed(p.type))
+  const fillable = box !== null && !readOnly && !editing && cols.slice(box.c0, box.c1 + 1).some(bulkEditable)
   const fillSpan = filling.span
 
   const commit = (row: CollectionRow, prop: CollectionProp, value: PropValue | null): void => {
-    // 选区里编辑：同列选区里的每一行都写这个值（名称列只改这一行）
+    // 选区里编辑：同列选区里的每一行都写这个值（名称列、反向关联只改这一行：反向值每行不同，按各自现在的值换算成增删）
     const col = cols.findIndex((p) => p.id === prop.id)
-    const inBox = prop.id !== TITLE_PROP_ID && ranged && box && col >= box.c0 && col <= box.c1
+    const inBox = prop.id !== TITLE_PROP_ID && bulkEditable(prop) && ranged && box && col >= box.c0 && col <= box.c1
     apply(setCells(inBox ? visible.slice(box.r0, box.r1 + 1) : [row], prop, value))
   }
   const selectCell = (row: CollectionRow, prop: CollectionProp, shift: boolean): void => {
@@ -252,9 +236,10 @@ export default function TableView({ handle, schema, view, readOnly, spaceId, onO
     setCursor({ rowId: row.id, propId: prop.id })
   }
   const startEdit = (row: CollectionRow, prop: CollectionProp, typed?: string): void => {
-    if (readOnly || isComputed(prop.type)) return
+    const kind = editorKind(prop)
+    if (readOnly || kind === 'none') return
     setCursor({ rowId: row.id, propId: prop.id })
-    if (prop.type === 'checkbox') {
+    if (kind === 'toggle') {
       commit(row, prop, rowValue(row, prop) === true ? null : true)
       return
     }
@@ -314,11 +299,12 @@ export default function TableView({ handle, schema, view, readOnly, spaceId, onO
     } else if ((e.key === 'Backspace' || e.key === 'Delete') && !readOnly && grid) {
       e.preventDefault()
       apply(clearBox(grid))
-    } else if (e.key.length === 1 && !mod && !e.altKey && !readOnly && !isComputed(prop.type)) {
+    } else if (e.key.length === 1 && !mod && !e.altKey && !readOnly && editorKind(prop) !== 'none') {
       // 选中格子直接打字：复选框只认空格（切换）；别的格用打的字开始编辑
-      if (prop.type === 'checkbox' && e.key !== ' ') return
+      const toggle = editorKind(prop) === 'toggle'
+      if (toggle && e.key !== ' ') return
       e.preventDefault()
-      startEdit(row, prop, prop.type === 'checkbox' ? undefined : e.key)
+      startEdit(row, prop, toggle ? undefined : e.key)
     }
   }
 
@@ -471,8 +457,8 @@ export default function TableView({ handle, schema, view, readOnly, spaceId, onO
             onStop={stopEdit}
             onCommit={(value) => {
               commit(row, prop, value)
-              // 格内输入提交即结束；选择器自己决定（单选选完就关，多选 / 人员留着继续选）
-              if (!PICKER_TYPES.has(prop.type)) stopEdit()
+              // 格内输入提交即结束；弹层自己决定（单选选完就关，多选 / 人员 / 文件留着继续改，日期 Enter 才关）
+              if (editorKind(prop) === 'inline') stopEdit()
             }}
             onPaste={(text) => {
               const done = pasteText(text)

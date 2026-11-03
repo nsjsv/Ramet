@@ -1,10 +1,13 @@
 import { describe, expect, test } from 'vitest'
 import {
+  COLLECTION_LAYOUTS,
   COLUMN_WIDTH_MAX,
   COLUMN_WIDTH_MIN,
   FILTER_OPS,
+  filterOps,
   isCalendarDate,
   isShortId,
+  layoutGroups,
   LIST_MAX,
   NAME_MAX,
   newShortId,
@@ -30,7 +33,7 @@ import {
  * validateValue 是写入前的唯一校验，null = 删键，空值规范化成 null。 */
 
 function prop(type: PropType, extra: Partial<CollectionProp> = {}): CollectionProp {
-  return { id: 'p1', name: '属性', type, pos: 0, options: [], ...extra }
+  return { id: 'p1', name: '属性', type, pos: 0, options: [], cfg: {}, ...extra }
 }
 
 const OPTIONS = [
@@ -68,7 +71,7 @@ describe('parseCollection：容错', () => {
       JSON.stringify({
         props: {
           good01: { name: '好', type: 'text', pos: 0 },
-          weird1: { name: '未来类型', type: 'relation', pos: 1 },
+          weird1: { name: '未来类型', type: 'hologram', pos: 1 },
           notobj: 'x',
           BAD001: { name: '大写', type: 'text' },
           bad_01: { name: '下划线', type: 'text' },
@@ -106,6 +109,9 @@ describe('parseCollection：容错', () => {
       groupBy: null,
       shown: null,
       widths: {},
+      cover: 'page',
+      cardSize: 'm',
+      dateBy: null,
     })
   })
 
@@ -138,6 +144,27 @@ describe('parseCollection：容错', () => {
     const schema = parseCollection({ props: { p1: { type: 'text', name: long } } })
     expect([...schema.props[0]!.name]).toHaveLength(NAME_MAX)
     expect(schema.props[0]!.name).toBe('😀'.repeat(NAME_MAX))
+  })
+})
+
+describe('parseCollection：属性配置 cfg', () => {
+  test('按当前类型解析：编号认前缀（只留 [A-Za-z0-9_-]、截到 10 个），别的类型恒为 {}；坏形状落到缺省', () => {
+    const schema = parseCollection({
+      props: {
+        num001: { name: '编号', type: 'unique_id', pos: 0, cfg: { prefix: 'TASK-#1 中', other: 1 } },
+        num002: { name: '编号2', type: 'unique_id', pos: 1, cfg: { prefix: 'ABCDEFGHIJKLMN' } },
+        num003: { name: '编号3', type: 'unique_id', pos: 2, cfg: 'x' },
+        num004: { name: '编号4', type: 'unique_id', pos: 3 },
+        txt001: { name: '文本', type: 'text', pos: 4, cfg: { prefix: 'T' } },
+      },
+    })
+    expect(schema.props.map((p) => p.cfg)).toEqual([{ prefix: 'TASK-1' }, { prefix: 'ABCDEFGHIJ' }, { prefix: '' }, { prefix: '' }, {}])
+  })
+
+  test('改类型不清 cfg：改回编号前缀还在', () => {
+    const cfg = { prefix: 'BUG' }
+    expect(parseCollection({ props: { num001: { name: 'n', type: 'number', pos: 0, cfg } } }).props[0]?.cfg).toEqual({})
+    expect(parseCollection({ props: { num001: { name: 'n', type: 'unique_id', pos: 0, cfg } } }).props[0]?.cfg).toEqual(cfg)
   })
 })
 
@@ -212,7 +239,47 @@ describe('parseCollection：视图设置', () => {
     expect(view({ shown: 'num' }).shown).toBeNull()
     expect(view({ shown: [] }).shown).toEqual([])
     expect(view({ layout: 'board' }).layout).toBe('board')
-    expect(view({ layout: 'calendar' }).layout).toBe('table')
+    expect(view({ layout: 'calendar' }).layout).toBe('calendar')
+    expect(view({ layout: 'weekly' }).layout).toBe('table')
+    expect(view({ layout: 3 }).layout).toBe('table')
+  })
+
+  test('六种布局都认；画廊 / 日历 / 时间线不分组（groupBy 读成 null），表格 / 看板 / 列表照常', () => {
+    const view = (raw: Record<string, unknown>) => parseCollection({ props, views: { v1: raw } }).views[0]!
+    for (const layout of COLLECTION_LAYOUTS) {
+      const parsed = view({ layout, groupBy: 'sts' })
+      expect(parsed.layout).toBe(layout)
+      expect(parsed.groupBy).toBe(layoutGroups(layout) ? 'sts' : null)
+    }
+    expect(COLLECTION_LAYOUTS.filter((l) => !layoutGroups(l))).toEqual(['gallery', 'calendar', 'timeline'])
+  })
+
+  test('卡片预览：page / none 原样，文件属性 id 留下；属性已删 / 不是文件 / 别的形状回到 page；卡片大小只认 s / m / l', () => {
+    const withFiles = { ...props, fil: { type: 'files', pos: 4 } }
+    const view = (raw: Record<string, unknown>) => parseCollection({ props: withFiles, views: { v1: { layout: 'gallery', ...raw } } }).views[0]!
+    expect(view({}).cover).toBe('page')
+    expect(view({ cover: 'none' }).cover).toBe('none')
+    expect(view({ cover: 'page' }).cover).toBe('page')
+    expect(view({ cover: 'fil' }).cover).toBe('fil')
+    expect(view({ cover: 'txt' }).cover).toBe('page')
+    expect(view({ cover: 'gone' }).cover).toBe('page')
+    expect(view({ cover: 'title' }).cover).toBe('page')
+    expect(view({ cover: ['fil'] }).cover).toBe('page')
+    expect(view({}).cardSize).toBe('m')
+    for (const size of ['s', 'm', 'l']) expect(view({ cardSize: size }).cardSize).toBe(size)
+    expect(view({ cardSize: 'xl' }).cardSize).toBe('m')
+    expect(view({ cardSize: 1 }).cardSize).toBe('m')
+  })
+
+  test('日期属性（dateBy）：只认日期 / 创建时间 / 编辑时间，属性已删 / 别的类型 / 名称读成 null；换布局不清', () => {
+    const withDates = { ...props, dat: { type: 'date', pos: 4 }, cre: { type: 'created_time', pos: 5 }, edi: { type: 'edited_time', pos: 6 } }
+    const view = (raw: Record<string, unknown>) => parseCollection({ props: withDates, views: { v1: { layout: 'calendar', ...raw } } }).views[0]!
+    expect(view({}).dateBy).toBeNull()
+    for (const id of ['dat', 'cre', 'edi']) expect(view({ dateBy: id }).dateBy).toBe(id)
+    for (const bad of ['txt', 'num', 'gone', 'title', 1, ['dat']]) expect(view({ dateBy: bad }).dateBy).toBeNull()
+    expect(view({ layout: 'table', dateBy: 'dat' }).dateBy).toBe('dat')
+    expect(newView('日历', 'calendar', 0, null, 'dat').dateBy).toBe('dat')
+    expect(newView('表格', 'table', 0).dateBy).toBeNull()
   })
 
   test('列宽夹进区间并取整，「名称」列的宽度保留，非数字丢掉', () => {
@@ -294,6 +361,18 @@ describe('rowValue', () => {
     expect(rowValue(r, prop('created_time'))).toBe(r.created_at)
     expect(rowValue(r, prop('edited_time'))).toBe(r.edited_at)
     expect(rowValue(r, prop('text'))).toBe('x')
+  })
+
+  test('创建者 / 最后编辑者 / 编号读行元数据：字段缺失（老服务端、乐观新建的行）= 空，props 里的同名键读不出', () => {
+    const meta = row({ created_by: 'u1', edited_by: 'u2', edited_agent: 'claude', number: 7, props: { p1: 'x' } })
+    expect(rowValue(meta, prop('created_by'))).toEqual(['u1'])
+    expect(rowValue(meta, prop('edited_by'))).toEqual(['u2'])
+    expect(rowValue(meta, prop('unique_id'))).toBe(7)
+    const bare = row({ props: { p1: ['u1'] } })
+    for (const type of ['created_by', 'edited_by', 'unique_id'] as const) expect(rowValue(bare, prop(type))).toBeUndefined()
+    expect(rowValue(row({ created_by: null, edited_by: '', number: null }), prop('created_by'))).toBeUndefined()
+    expect(rowValue(row({ edited_by: '' }), prop('edited_by'))).toBeUndefined()
+    for (const number of [0, -1, 1.5, Number.NaN]) expect(rowValue(row({ number }), prop('unique_id'))).toBeUndefined()
   })
 
   test('只读自有属性：继承来的 constructor 不是值，JSON 里自有的 __proto__ 键照常读', () => {
@@ -418,6 +497,9 @@ describe('id、模板与小工具', () => {
       groupBy: 'st0001',
       shown: null,
       widths: {},
+      cover: 'page',
+      cardSize: 'm',
+      dateBy: null,
     })
     const schema = parseCollection({ views: { vb: { pos: 1, name: 'B' }, va: { pos: 0, name: 'A' } } })
     expect(pickView(schema, 'vb').name).toBe('B')
@@ -426,9 +508,12 @@ describe('id、模板与小工具', () => {
     expect(pickView(parseCollection(null))).toMatchObject({ id: '', layout: 'table', filter: { all: [] } })
   })
 
-  test('FILTER_OPS：每种类型都有运算，名称按文本', () => {
-    for (const type of PROP_TYPES) expect(FILTER_OPS[type].length).toBeGreaterThan(0)
-    expect(FILTER_OPS[TITLE_PROP.type]).toContain('contains')
+  test('FILTER_OPS / filterOps：每种类型都有运算，按属性取与按类型查表一致，名称按文本', () => {
+    for (const type of PROP_TYPES) {
+      expect(FILTER_OPS[type].length).toBeGreaterThan(0)
+      expect(filterOps(prop(type))).toEqual(FILTER_OPS[type])
+    }
+    expect(filterOps(TITLE_PROP)).toContain('contains')
   })
 
   test('timeMs：Postgres 的 now()::text 与 ISO 8601 同一时刻；没写时区按 UTC；认不出 = NaN', () => {

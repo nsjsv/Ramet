@@ -1,15 +1,21 @@
 /* ---------- 集合 ----------
  * POST  /api/collections                    建集合：{ id?, space_id, parent_id?, inline?, title? }（整页 / 内联；id 可由客户端给）
- * GET   /api/collections/:id/rows           窗口查询：?view=&group=&cursor=&limit=&tz=（tz = 比 UTC 快多少分钟，缺省 0）
+ * GET   /api/collections/:id/rows           窗口查询：?view=&group=&range=&cursor=&limit=&tz=（tz = 比 UTC 快多少分钟，缺省 0；
+ *                                            range = 日期范围 'YYYY-MM-DD..YYYY-MM-DD' 或 'none'，写法见 shared 的 parseRange）
  * POST  /api/collections/:id/rows           建行：{ title?, set?, after?, before? }
  * PATCH /api/collections/:id/rows/:rowId    改值 set / 改名 title / 手动顺序 after、before（相邻行 id）
+ * （单行取数 GET rows/:rowId、定义 GET schema、关联的建 / 改 / 删在 collection-relations.ts）
  * POST  /api/collections/:id/rows/trash     删行（进回收站）：{ ids }
  * POST  /api/collections/:id/rows/set       批量改值：{ ids, set }（set 一次校验，任一非法整批不写）
  * POST  /api/collections/:id/rows/duplicate 复制行（连子页，副本紧跟原行）：{ ids }
  * POST  /api/collections/:id/rows/move      挪到同空间的另一个集合末尾：{ ids, to }（属性按同名同类型对应，collections/transfer.ts）
  * 闸门：集合页过 pageAccess（不存在 / 不是集合 / 非成员 → 404，viewer 写 → 403）；行端点再核对行是这个集合的活行。
+ * 关联 / 汇总的值由服务端算（collections/computed.ts）：窗口与写接口返回的行都带好 computed，窗口另带 refs。
+ * 公式的值只在窗口里算（shared 的 queryWindow，按请求的 tz）；写接口、单行与增量里的行不带公式值，客户端套增量前自己算。
+ * set 里的反向关联只收增删 { add?, remove? }，不写进本行文档，换算成源集合那几行正向关联的改动（collections/relation-set.ts）。
  * 属性定义与视图不走 REST：客户端经集合文档的协同连接直接改（viewer 的连接只读，服务端天然拒写）。
  * 批量端点的 ids 只收本集合的活行，别的 id 静默忽略（同 trash）；每个端点有行数上限，客户端分批发。
+ * 集合有自动编号属性时，建行 / 复制 / 挪进在同一事务里取号，窗口查询前给别的路径进来的行补号（collections/store.ts）。
  * 只有建集合、建行、删行、复制 / 挪走行、行改名广播 changed（它们改了页面列表），改值、拖动排序只发集合增量（collections/delta.ts）。
  * 每条路由各自挂 requireAuth，不挂 '*' 中间件（见 index.ts 的挂载序注释）。 */
 
@@ -17,18 +23,31 @@ import { randomUUID } from 'node:crypto'
 import { Hono, type Context } from 'hono'
 import type { Pool } from 'pg'
 import * as Y from 'yjs'
-import { findProp, isPropId, pickView, validateValue, type CollectionSchema, type PropValue } from '@ramet/shared/collection-model'
-import { queryWindow, type QueryCtx } from '@ramet/shared/collection-query'
+import {
+  findProp,
+  formulaNeedsNames,
+  isPropId,
+  pickView,
+  validateValue,
+  type CollectionRow,
+  type CollectionSchema,
+  type PropType,
+  type PropValue,
+} from '@ramet/shared/collection-model'
+import { parseRange, queryWindow, type QueryCtx } from '@ramet/shared/collection-query'
 import { requireAuth, type AuthEnv, type AuthUser } from '../auth.js'
 import { collectSubtreeIds, resolveDocs } from '../clone.js'
 import { loadDocForRead, pageAccess, setDocTitle, type DocWriter } from '../collab.js'
 import { toApiPage } from '../page-icon.js'
+import { computeRows, hasComputed } from '../collections/computed.js'
 import type { Projector } from '../collections/projector.js'
+import { checkRelationValue, planReverse, writeReverse, type ReversePlan, type ReverseSet } from '../collections/relation-set.js'
 import { mapProps } from '../collections/transfer.js'
 import {
   createCollection,
   createRow,
   duplicateRows,
+  ensureNumbers,
   memberRow,
   memberRows,
   membersAmong,
@@ -66,8 +85,25 @@ const SET_MAX = 500
 const MOVE_MAX = 500
 const DUPLICATE_MAX = 100
 
-type Gate = { ok: true; collection: CollectionPage } | { ok: false; status: 403 | 404 }
-type SetResult = { ok: true; values: [string, PropValue | null][] } | { ok: false; error: Record<string, string> }
+/** 按用户名排序的类型（值都是用户 id 列表） */
+const PERSON_TYPES: ReadonlySet<PropType> = new Set(['person', 'created_by', 'edited_by'])
+const isPersonLike = (type: PropType | undefined): boolean => type !== undefined && PERSON_TYPES.has(type)
+
+/** 集合有自动编号属性才取号（见 collections/store.ts 的 assignNumbers） */
+const numbered = (schema: CollectionSchema): boolean => schema.props.some((prop) => prop.type === 'unique_id')
+
+export type Gate = { ok: true; collection: CollectionPage } | { ok: false; status: 403 | 404 }
+type SetResult = { ok: true; values: [string, PropValue | null][]; reverse: ReverseSet[] } | { ok: false; error: Record<string, string> }
+
+/** 集合端点的闸门（本文件与 collection-relations.ts 共用）：集合页过 pageAccess；不存在、不是集合、非成员同 404，viewer 写 403 */
+export async function collectionGate(pool: Pool, user: AuthUser, id: string, need: 'read' | 'write'): Promise<Gate> {
+  const collection = await selectCollection(pool, id)
+  const role = collection ? await pageAccess(pool, id, user) : null
+  // 不存在、不是集合、非成员同响应：不泄露存在性
+  if (!collection || role === null) return { ok: false, status: 404 }
+  if (need === 'write' && !writable(role)) return { ok: false, status: 403 }
+  return { ok: true, collection }
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -104,34 +140,48 @@ export function collectionRoutes(deps: CollectionDeps) {
   const app = new Hono<AuthEnv>()
   const auth = requireAuth(pool)
 
-  async function gate(user: AuthUser, id: string, need: 'read' | 'write'): Promise<Gate> {
-    const collection = await selectCollection(pool, id)
-    const role = collection ? await pageAccess(pool, id, user) : null
-    // 不存在、不是集合、非成员同响应：不泄露存在性
-    if (!collection || role === null) return { ok: false, status: 404 }
-    if (need === 'write' && !writable(role)) return { ok: false, status: 403 }
-    return { ok: true, collection }
-  }
+  const gate = (user: AuthUser, id: string, need: 'read' | 'write'): Promise<Gate> => collectionGate(pool, user, id, need)
 
   const denied = (c: Context<AuthEnv>, status: 403 | 404) =>
     c.json({ error: status === 404 ? 'collection not found' : 'forbidden' }, status)
 
-  /** set 的每个键都必须是现有属性，值都要过 validateValue（人员只能选这个空间的成员）。有一个不行就整个不写 */
-  async function readSet(raw: unknown, schema: CollectionSchema, spaceId: string | null): Promise<SetResult> {
-    if (raw === undefined) return { ok: true, values: [] }
+  /** set 的每个键都必须是现有属性，值都要过 validateValue（人员只能选这个空间的成员，关联只能选另一端集合的活行）。
+   *  有一个不行就整个不写。反向关联的值单独收进 reverse（不写本行文档） */
+  async function readSet(raw: unknown, schema: CollectionSchema, collection: CollectionPage): Promise<SetResult> {
+    if (raw === undefined) return { ok: true, values: [], reverse: [] }
     if (!isRecord(raw)) return { ok: false, error: { error: 'set must be an object' } }
     const values: [string, PropValue | null][] = []
+    const reverse: ReverseSet[] = []
     let members: ReadonlySet<string> | undefined
     for (const [key, value] of Object.entries(raw)) {
       // 名称不在 set 里改（它是页面标题，走 title），created_time / edited_time 由 validateValue 拒绝
       const prop = isPropId(key) ? schema.props.find((p) => p.id === key) : undefined
       if (!prop) return { ok: false, error: { error: 'unknown property', prop: key } }
-      if (prop.type === 'person' && !members) members = new Set((await spaceMembers(pool, spaceId)).keys())
+      if (prop.type === 'relation') {
+        const checked = await checkRelationValue(pool, getLiveDoc, collection, schema, prop, value)
+        if (!checked.ok) return { ok: false, error: { error: 'invalid value', prop: key, message: checked.error } }
+        if (!('reverse' in checked)) values.push([key, checked.forward])
+        else if (checked.reverse) reverse.push(checked.reverse)
+        continue
+      }
+      if (prop.type === 'person' && !members) members = new Set((await spaceMembers(pool, collection.space_id)).keys())
       const checked = validateValue(prop, value, { members })
       if (!checked.ok) return { ok: false, error: { error: 'invalid value', prop: key, message: checked.error } }
       values.push([key, checked.value])
     }
-    return { ok: true, values }
+    return { ok: true, values, reverse }
+  }
+
+  /** 反向关联的写入求差（targets = 被写的本集合行）；没有反向关联 = 空计划 */
+  async function reversePlans(set: SetResult | null, targets: string[]): Promise<{ ok: true; plans: ReversePlan[] } | { ok: false; error: string }> {
+    if (!set?.ok || set.reverse.length === 0) return { ok: true, plans: [] }
+    return planReverse(pool, set.reverse, targets)
+  }
+
+  /** 写接口返回的行也带好计算值（客户端拿它确认乐观写，缺了计算值关联会退回存储值、汇总变空） */
+  async function withComputed(collection: CollectionPage, rows: CollectionRow[]): Promise<void> {
+    const schema = await readSchema(pool, collection.id, getLiveDoc)
+    if (hasComputed(schema)) await computeRows(pool, getLiveDoc, collection, schema, rows)
   }
 
   /** 邻居必须是这个集合的另一行（不能是自己，两侧不能是同一行） */
@@ -200,13 +250,21 @@ export function collectionRoutes(deps: CollectionDeps) {
     const id = c.req.param('id')
     const g = await gate(c.get('user'), id, 'read')
     if (!g.ok) return denied(c, g.status)
+    // 范围写错了不能当没给：那样会把整个集合当成「这段时间」发回去，日历 / 时间线一屏排进全部行
+    const range = c.req.query('range')
+    if (range !== undefined && parseRange(range) === null) return c.json({ error: 'invalid range' }, 400)
     const schema = await readSchema(pool, id, getLiveDoc)
     const view = pickView(schema, c.req.query('view'))
+    // 没走建行接口进集合的行在这里补号（窗口里的行都要带着号）
+    if (numbered(schema)) await ensureNumbers(pool, id)
     const rows = await memberRows(pool, id)
+    // 关联 / 汇总先算好，筛选排序读的就是 computed
+    const refs = await computeRows(pool, getLiveDoc, g.collection, schema, rows, true)
     const tz = Number(c.req.query('tz'))
-    const ctx: QueryCtx = { tzOffset: Number.isFinite(tz) ? tz : 0 }
-    // 人员排序按用户名比，只有这个视图真按人员排序时才查成员名单
-    if (view.sorts.some((sort) => findProp(schema, sort.prop)?.type === 'person')) {
+    // 公式在 queryWindow 里按请求的时区算（TODAY() 是看的人的今天），读逐个显示的汇总时按 refs 换选项名
+    const ctx: QueryCtx = { tzOffset: Number.isFinite(tz) ? tz : 0, refs }
+    // 人员类排序按用户名比、公式里人员类属性的值是用户名：只有真用到时才查成员名单
+    if (view.sorts.some((sort) => isPersonLike(findProp(schema, sort.prop)?.type)) || formulaNeedsNames(schema, refs)) {
       const names = await spaceMembers(pool, g.collection.space_id)
       ctx.nameOf = (userId) => names.get(userId)
     }
@@ -214,10 +272,10 @@ export function collectionRoutes(deps: CollectionDeps) {
       rows,
       view,
       schema,
-      { group: c.req.query('group'), cursor: c.req.query('cursor') ?? null, limit: c.req.query('limit') ?? null },
+      { group: c.req.query('group'), range, cursor: c.req.query('cursor') ?? null, limit: c.req.query('limit') ?? null },
       ctx,
     )
-    return c.json(window)
+    return c.json(Object.keys(refs).length > 0 ? { ...window, refs } : window)
   })
 
   app.post('/api/collections/:id/rows', auth, async (c) => {
@@ -236,12 +294,17 @@ export function collectionRoutes(deps: CollectionDeps) {
     if (after === false || before === false || !(await neighborsOk(id, after, before, null))) {
       return c.json({ error: 'after / before must be rows of this collection' }, 400)
     }
-    const set = body.set === undefined ? null : await readSet(body.set, await readSchema(pool, id, getLiveDoc), g.collection.space_id)
+    const schema = await readSchema(pool, id, getLiveDoc)
+    const set = body.set === undefined ? null : await readSet(body.set, schema, g.collection)
     if (set && !set.ok) return c.json(set.error, 400)
+    // 带反向关联值的新行：先定下 id 才能求差（新行现在的反向值必然为空）
+    const newId = typeof rowId === 'string' ? rowId : set?.reverse.length ? randomUUID() : undefined
+    const plans = await reversePlans(set, newId ? [newId] : [])
+    if (!plans.ok) return c.json({ error: 'invalid value', message: plans.error }, 400)
     const props: Record<string, PropValue> = {}
     for (const [key, value] of set?.values ?? []) if (value !== null) props[key] = value
     const created = await createRow(pool, {
-      ...(typeof rowId === 'string' ? { id: rowId } : {}),
+      ...(newId ? { id: newId } : {}),
       collectionId: id,
       spaceId: g.collection.space_id,
       ownerId: user.id,
@@ -249,6 +312,7 @@ export function collectionRoutes(deps: CollectionDeps) {
       props,
       after,
       before,
+      numbered: numbered(schema),
     })
     // null 表示集合在这期间进了回收站
     if (!created) return denied(c, 404)
@@ -257,8 +321,10 @@ export function collectionRoutes(deps: CollectionDeps) {
     // 但定位置时重编号了，别的行的 position 全换了，要让观看者重取
     notify()
     if (created.renumbered) projector.reset(id)
+    await writeReverse(write, projector.flushRow, user, plans.plans)
     const found = await memberRow(pool, created.id)
     if (!found) return denied(c, 404)
+    await withComputed(g.collection, [found.row])
     return c.json(found.row, 201)
   })
 
@@ -278,8 +344,10 @@ export function collectionRoutes(deps: CollectionDeps) {
       return c.json({ error: 'after / before must be other rows of this collection' }, 400)
     }
     // 全部校验完才动手：非法值整个请求 400，文档一个字都不改
-    const set = body.set === undefined ? null : await readSet(body.set, await readSchema(pool, id, getLiveDoc), g.collection.space_id)
+    const set = body.set === undefined ? null : await readSet(body.set, await readSchema(pool, id, getLiveDoc), g.collection)
     if (set && !set.ok) return c.json(set.error, 400)
+    const plans = await reversePlans(set, [rowId])
+    if (!plans.ok) return c.json({ error: 'invalid value', message: plans.error }, 400)
     const values = set?.values ?? []
     const title = typeof body.title === 'string' ? body.title.trim() : undefined
 
@@ -299,6 +367,7 @@ export function collectionRoutes(deps: CollectionDeps) {
     }
     // 副本当场落库再响应（不等投影器的去抖），写的人随后查询一定看得到。增量照常由投影器发
     if (values.length > 0) await projector.flushRow(rowId)
+    await writeReverse(write, projector.flushRow, user, plans.plans)
     // 改名同普通页面：文档标题片段和 pages.title 双写，页面列表变了（广播 changed，不另发集合增量）
     if (title !== undefined) {
       await pool.query(SET_TITLE, [title, rowId])
@@ -315,6 +384,7 @@ export function collectionRoutes(deps: CollectionDeps) {
     }
     const found = moved ?? (await memberRow(pool, rowId))
     if (!found) return c.json({ error: 'row not found' }, 404)
+    await withComputed(g.collection, [found.row])
     return c.json(found.row)
   })
 
@@ -341,16 +411,24 @@ export function collectionRoutes(deps: CollectionDeps) {
     const raw = isRecord(body) ? body.set : undefined
     if (!isRecord(raw) || Object.keys(raw).length === 0) return c.json({ error: 'set must be a non-empty object' }, 400)
     // 一次校验全部值，非法整批 400，一行都不写
-    const set = await readSet(raw, await readSchema(pool, id, getLiveDoc), g.collection.space_id)
+    const set = await readSet(raw, await readSchema(pool, id, getLiveDoc), g.collection)
     if (!set.ok) return c.json(set.error, 400)
-    const rows = []
-    for (const rowId of await membersAmong(pool, id, ids)) {
+    const targets = await membersAmong(pool, id, ids)
+    const plans = await reversePlans(set, targets)
+    if (!plans.ok) return c.json({ error: 'invalid value', message: plans.error }, 400)
+    for (const rowId of targets) {
       // 逐行同 PATCH：先写行文档（记给发起人）再让副本当场落库，增量由投影器照常发，不广播 changed
+      if (set.values.length === 0) break
       await write(`page:${rowId}`, user, (doc, origin) => doc.transact(() => writeProps(doc, set.values), origin), 'user')
       await projector.flushRow(rowId)
+    }
+    await writeReverse(write, projector.flushRow, user, plans.plans)
+    const rows = []
+    for (const rowId of targets) {
       const found = await memberRow(pool, rowId)
       if (found) rows.push(found.row)
     }
+    await withComputed(g.collection, rows)
     return c.json({ rows })
   })
 
@@ -373,7 +451,15 @@ export function collectionRoutes(deps: CollectionDeps) {
       if (state) Y.applyUpdate(doc, state)
       return { id: rowId, props: doc.getMap<unknown>('props').toJSON() }
     })
-    const done = await duplicateRows(pool, { collectionId: id, spaceId: g.collection.space_id, ownerId: user.id, rows, docs })
+    const schema = await readSchema(pool, id, getLiveDoc)
+    const done = await duplicateRows(pool, {
+      collectionId: id,
+      spaceId: g.collection.space_id,
+      ownerId: user.id,
+      rows,
+      docs,
+      numbered: numbered(schema),
+    })
     if (!done) return denied(c, 404)
     // 新行是页面：页面列表变了（客户端经它重取窗口），重编号了也要让观看者重取
     if (done.created.length > 0) notify()
@@ -407,7 +493,7 @@ export function collectionRoutes(deps: CollectionDeps) {
       const doc = await loadDocForRead(pool, `page:${rowId}`, getLiveDoc)
       rows.push({ id: rowId, mapped: mapProps(from, dest, doc.getMap<unknown>('props').toJSON(), members) })
     }
-    const moved = await moveRowsTo(pool, id, to, rows)
+    const moved = await moveRowsTo(pool, id, to, rows, numbered(dest))
     if (!moved) return c.json({ error: 'target collection not found' }, 404)
     const mapped = new Map(rows.map((r) => [r.id, r.mapped]))
     for (const rowId of moved) {

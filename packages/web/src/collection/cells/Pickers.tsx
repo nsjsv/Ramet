@@ -3,7 +3,7 @@
 // 选项选择器里打一个没有的名字按 Enter = 新建选项并选中（写集合文档，viewer 没有这个入口）。
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type * as Y from 'yjs'
-import { STATUS_GROUPS, type CollectionOption, type CollectionProp, type PropValue } from '@ramet/shared/collection-model'
+import { idList, STATUS_GROUPS, type CollectionOption, type CollectionProp, type PropValue } from '@ramet/shared/collection-model'
 import { COPY } from '../../copy'
 import { Avatar } from '../../Avatar'
 import { Icon } from '../../icons'
@@ -14,10 +14,10 @@ import { OptionChip, usePeopleTick } from './CellView'
 
 const C = COPY.collection.cell
 
-type Item = { key: string; render: () => React.ReactNode; pick: () => void; on: boolean }
+export type Item = { key: string; render: () => React.ReactNode; pick: () => void; on: boolean }
 
-/** 选择器的公共骨架：筛选框 + 列表（可分节）+ 键位 */
-function PickerList({
+/** 选择器的公共骨架：筛选框 + 列表（可分节）+ 键位（关联的行选择器也用它） */
+export function PickerList({
   query,
   setQuery,
   placeholder,
@@ -136,7 +136,7 @@ export function OptionPicker({
 }) {
   const [query, setQuery] = useState(seed)
   const multi = prop.type === 'multi_select'
-  const selected = useMemo(() => new Set(Array.isArray(value) ? value : typeof value === 'string' ? [value] : []), [value])
+  const selected = useMemo(() => new Set(idList(value) ?? (typeof value === 'string' ? [value] : [])), [value])
   const pick = (option: CollectionOption): void => {
     if (!multi) {
       onChange(option.id)
@@ -217,7 +217,7 @@ export function PersonPicker({
 }) {
   usePeopleTick()
   const [query, setQuery] = useState(seed)
-  const selected = new Set(Array.isArray(value) ? value : [])
+  const selected = new Set(idList(value) ?? [])
   // 候选 = 空间成员（服务端只认成员；agent 不是成员，不在候选里）
   const members: Person[] = (spaceId ? spaceMembers(spaceId) : null) ?? []
   const items: Item[] = members

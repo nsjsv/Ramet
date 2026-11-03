@@ -55,12 +55,18 @@ const PATHS = {
   /** 折叠块 / 分栏 / 目录 / 嵌入（斜杠菜单） */
   toggle: '<path d="M8 6l6 4-6 4z" fill="currentColor" stroke="none"/><path d="M16 18H8M18 14h-4"/>',
   columns: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16"/>',
+  /** 集合的画廊视图：四格卡片 */
+  gallery: '<rect x="3" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.5"/>',
   toc: '<path d="M4 6h16M8 12h12M12 18h8"/>',
   embed: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M10 9.5l5 2.5-5 2.5z"/>',
   /** 表格（斜杠菜单） */
   table: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M3 15h18M9 4v16M15 4v16"/>',
   /** 键盘（设置「快捷键」页） */
   keyboard: '<rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/>',
+  /** 集合的关联属性：指向别处的一行 */
+  relation: '<path d="M7 17 17 7"/><path d="M8 7h9v9"/>',
+  /** 集合的汇总属性：几行汇成一个值 */
+  rollup: '<path d="M4 6h5l4 6h7"/><path d="M4 18h5l4-6"/><path d="m17 9 3 3-3 3"/>',
   /** 新标签打开（端口预览） */
   external: '<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
   globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/>',
@@ -118,7 +124,12 @@ const PATHS = {
   tags: '<path d="M12.6 2.6A2 2 0 0 0 11.2 2H4a2 2 0 0 0-2 2v7.2a2 2 0 0 0 .6 1.4l8.7 8.7a2.4 2.4 0 0 0 3.4 0l6.6-6.6a2.4 2.4 0 0 0 0-3.4z"/><circle cx="7.5" cy="7.5" r="1" fill="currentColor"/>',
   status: '<circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" stroke="none"/>',
   calendar: '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
+  /** 时间线布局：错开的三根横条 */
+  timeline: '<rect x="3" y="4.5" width="10" height="3.5" rx="1.75"/><rect x="8" y="10.25" width="13" height="3.5" rx="1.75"/><rect x="5" y="16" width="9" height="3.5" rx="1.75"/>',
   checkbox: '<rect x="3" y="3" width="18" height="18" rx="3"/><path d="m8 12 3 3 5-6"/>',
+  mail: '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>',
+  phone:
+    '<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>',
   filter: '<path d="M3 5h18M6 12h12M10 19h4"/>',
   sort: '<path d="m3 8 4-4 4 4M7 4v16M21 16l-4 4-4-4M17 20V4"/>',
   group: '<rect x="3" y="3" width="18" height="7" rx="1.5"/><rect x="3" y="14" width="18" height="7" rx="1.5"/>',

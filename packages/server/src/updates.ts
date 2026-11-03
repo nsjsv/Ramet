@@ -258,17 +258,25 @@ export function diffBlocks(prev: string[], cur: string[]): BlockSummaryItem[] {
   return items
 }
 
-/** 摘要里的属性值：字符串截到 SUMMARY_TEXT_MAX，数组只留前 LIST_MAX 项的标量，
+/** 列表里的一项：标量照给（字符串截断）；带字符串 name 的对象（文件）只留截断后的文件名，流水里读得出是哪个文件；
+ *  别的对象不给内容 */
+function clipItem(item: unknown): unknown {
+  if (typeof item === 'string') return clip(item)
+  if (typeof item === 'number' || typeof item === 'boolean') return item
+  if (typeof item === 'object' && item !== null && !Array.isArray(item)) {
+    const name: unknown = Object.hasOwn(item, 'name') ? (item as Record<string, unknown>).name : undefined
+    if (typeof name === 'string') return { name: clip(name) }
+  }
+  return null
+}
+
+/** 摘要里的属性值：字符串截到 SUMMARY_TEXT_MAX，数组只留前 LIST_MAX 项（见 clipItem），
  *  对象（协同连接写进来的脏数据，readValue 读不出）只给一个空对象占位，都是为了让响应有界 */
 function clipValue(value: unknown): unknown {
   if (value === undefined || value === null) return null
   if (typeof value === 'string') return clip(value)
   if (typeof value === 'number' || typeof value === 'boolean') return value
-  if (Array.isArray(value)) {
-    return value
-      .slice(0, LIST_MAX)
-      .map((item: unknown) => (typeof item === 'string' ? clip(item) : typeof item === 'number' || typeof item === 'boolean' ? item : null))
-  }
+  if (Array.isArray(value)) return value.slice(0, LIST_MAX).map(clipItem)
   return {}
 }
 
@@ -287,10 +295,10 @@ export function propDiff(prev: Record<string, unknown>, cur: Record<string, unkn
   return items
 }
 
-// 「改了」的口径：属性看名字、类型、位置、选项；视图看名字、布局、位置、筛选、排序、分组、显示属性。
+// 「改了」的口径：属性看名字、类型、位置、选项、配置；视图看名字、布局、位置、筛选、排序、分组、显示属性、画廊的卡片预览与大小、日历 / 时间线的日期属性。
 // 列宽不算：拖一下列宽不该在流水里出一条，只改了列宽的版本没有可读摘要，流水不列，历史版本里仍在
-const propKey = (p: CollectionProp): string => JSON.stringify([p.name, p.type, p.pos, p.options])
-const viewKey = (v: CollectionView): string => JSON.stringify([v.name, v.layout, v.pos, v.filter, v.sorts, v.groupBy, v.shown])
+const propKey = (p: CollectionProp): string => JSON.stringify([p.name, p.type, p.pos, p.options, p.cfg])
+const viewKey = (v: CollectionView): string => JSON.stringify([v.name, v.layout, v.pos, v.filter, v.sorts, v.groupBy, v.shown, v.cover, v.cardSize, v.dateBy])
 
 function entityDiff<T extends { id: string; name: string }>(
   prev: readonly T[],

@@ -6,7 +6,8 @@
 // - 块头改集合名要同时写集合文档的 title 片段与 pages.title，只写其一，打开整页时标题会话会拿旧名写回去。
 // - nodeView 吃掉块里的事件（stopEvent，正文块拖放除外）、忽略 DOM 变化（ignoreMutation），块里是另一个应用，不是正文。
 //   销毁时推迟一个微任务卸载 React 根（PM 可能在 React 渲染途中重建 nodeView，同步卸载会告警）。
-// - 看板横向滚动时伸出正文列铺到画面两边：伸出量由 editor/bleed.ts 量，写成块上的 --bleed-l / --bleed-r（collection-block.css 用）。
+// - 看板、时间线横向滚动时伸出正文列铺到画面两边：伸出量由 editor/bleed.ts 量，写成块上的 --bleed-l / --bleed-r（collection-block.css 用）；
+//   日历不伸出，按正文列宽排。
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { $view } from '@milkdown/kit/utils'
@@ -22,7 +23,7 @@ import { useCollection, useCollectionPages, useCollectionSchema, useCollectionSp
 import CollectionSurface from './CollectionSurface'
 import { BulkSlot } from './bulk-slot'
 import { blockVerdict, blockWritable, needsState } from './embed-verdict'
-import { NameInput } from './PropEditor'
+import { NameInput } from './name-input'
 
 const C = COPY.collection.embed
 

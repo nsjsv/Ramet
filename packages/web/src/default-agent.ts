@@ -88,6 +88,12 @@ export function agentList(): AgentInfo[] {
   return state.agents
 }
 
+/** AI 写的署名：目录里的名字，对不上就写「AI」，不借用当前默认 agent（更新流水、「上次编辑」、集合的最后编辑者共用） */
+export function agentLabel(id: string | null): string {
+  const label = id ? agentList().find((a) => a.id === id)?.label?.trim() : ''
+  return label || 'AI'
+}
+
 /** 非 React 消费方（消息 chip 的 DOM 构造函数）读完整状态：`loaded` 是「拉过了吗」，
  *  不是「有没有结果」，两者必须分开，否则「没连任何 agent」会被显示成「加载中」。
  *  React 侧用 useAgents() 拿同一份。 */

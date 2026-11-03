@@ -203,13 +203,14 @@ export async function editCollection(collectionId: string, edit: (root: Y.Map<un
   await appendDocUpdate(pool, docName, Buffer.from(Y.encodeStateAsUpdate(doc, before)))
 }
 
-/** 写一个属性定义（Y 结构同 init-doc.ts：属性与 options 是 Y.Map，选项本身是普通值） */
+/** 写一个属性定义（Y 结构同 init-doc.ts：属性与 options 是 Y.Map，选项本身与 cfg 是普通值） */
 export function addProp(root: Y.Map<unknown>, id: string, json: PropJson): void {
   const prop = new Y.Map<unknown>()
   ;(root.get('props') as Y.Map<unknown>).set(id, prop)
   prop.set('name', json.name)
   prop.set('type', json.type)
   prop.set('pos', json.pos)
+  if (json.cfg) prop.set('cfg', json.cfg)
   if (!json.options) return
   const options = new Y.Map<unknown>()
   prop.set('options', options)

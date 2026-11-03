@@ -225,9 +225,10 @@ export const imageItemMark = $prose(
  * display 版，原样显示、不出按钮。点浮层或 Esc 关闭（document keydown 挂一次，浮层移除时解绑）。
  * 同时接管附件卡片的下载点击：contenteditable 里浏览器不跟进 <a> 点击（/page/ 链接的跳转
  * 也是因此才手动拦的），必须 preventDefault 后用游离 <a download> 合成点击触发下载。
- * gif / svg 等没有 webp 派生版的图，服务端让 /display 直接退回原图，这时点按钮是重复请求同一份字节。 */
+ * gif / svg 等没有 webp 派生版的图，服务端让 /display 直接退回原图，这时点按钮是重复请求同一份字节。
+ * openLightbox 也给集合的文件格用（同一套看大图），src 传原图地址 /api/files/<id>。 */
 
-function openLightbox(src: string): void {
+export function openLightbox(src: string): void {
   if (document.querySelector('.lightbox')) return
   const overlay = document.createElement('div')
   overlay.className = 'lightbox'

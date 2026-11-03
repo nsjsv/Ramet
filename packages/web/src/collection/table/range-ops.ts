@@ -4,11 +4,11 @@
  * 清单原样进 TableView 的撤销栈（table/undo.ts）：撤销 = 按「改前」再写一遍。
  * 粘贴到单选 / 多选时没有的选项名就地新建（写集合文档，同单元格选择器里敲新名字）；状态不新建。
  * 粘贴超出末行：允许续行时把多出来的行作为新行交回调用方建（同 Notion / 表格软件）。 */
-import { readValue, rowValue, TITLE_PROP_ID, type CollectionProp, type CollectionRow, type PropValue } from '@ramet/shared/collection-model'
+import { idList, isComputedProp, readValue, rowValue, TITLE_PROP_ID, type CollectionProp, type CollectionRow, type PropValue } from '@ramet/shared/collection-model'
 import { spaceMembers } from '../../people'
 import type { NewRowInput, RowSet } from '../collection-api'
 import type { CollectionHandle } from '../collection-store'
-import { isComputed, nextColor } from '../prop-meta'
+import { nextColor } from '../prop-meta'
 import { addOption } from '../schema-ops'
 import { cellText, parseCell, parseTsv, planPaste, toTsv, type CellBox, type ParseCtx } from './cell-range'
 import { planFill, type FillSpan } from './fill'
@@ -18,31 +18,37 @@ type Grid = { handle: CollectionHandle; rows: readonly CollectionRow[]; cols: re
 /** 一格的改动：名称列的值是标题字符串，其余是属性值（null = 空） */
 export type CellChange = { rowId: string; propId: string; before: PropValue | null; after: PropValue | null }
 
-const writable = (prop: CollectionProp): boolean => prop.id !== TITLE_PROP_ID && !isComputed(prop.type)
+const writable = (prop: CollectionProp): boolean => prop.id !== TITLE_PROP_ID && !isComputedProp(prop)
 
-/** 存着的值（撤销写回它；状态没设过 = null，不是显示出来的默认选项） */
-const storedOf = (row: CollectionRow, prop: CollectionProp): PropValue | null =>
-  prop.id === TITLE_PROP_ID ? row.title : (readValue(prop, Object.hasOwn(row.props, prop.id) ? row.props[prop.id] : undefined) ?? null)
+/** 存着的值（撤销写回它；状态没设过 = null，不是显示出来的默认选项）。关联取显示的那份（服务端去掉了已不在对方集合的行，
+ *  写回存的原值会因为含着那些行被拒） */
+function storedOf(row: CollectionRow, prop: CollectionProp): PropValue | null {
+  if (prop.id === TITLE_PROP_ID) return row.title
+  if (prop.type === 'relation') return rowValue(row, prop) ?? null
+  return readValue(prop, Object.hasOwn(row.props, prop.id) ? row.props[prop.id] : undefined) ?? null
+}
 
-/** 这一格改成 after；显示出来没变 = null（状态清空仍显示默认选项，不算改动） */
+/** 这一格改成 after；显示出来没变 = null（状态清空仍显示默认选项，不算改动）。
+ *  关联以 computed 为准（rowValue 读它），往 props 里套新值看不出变化：直接拿新值与现在显示的比 */
 function changeOf(row: CollectionRow, prop: CollectionProp, after: PropValue | null): CellChange | null {
   if (prop.id === TITLE_PROP_ID) {
     const title = typeof after === 'string' ? after : ''
     return title === row.title ? null : { rowId: row.id, propId: prop.id, before: row.title, after: title }
   }
-  const next = { ...row, props: { ...row.props, [prop.id]: after } }
-  if (JSON.stringify(rowValue(next, prop)) === JSON.stringify(rowValue(row, prop))) return null
+  const next = prop.type === 'relation' ? idList(after ?? undefined) : rowValue({ ...row, props: { ...row.props, [prop.id]: after } }, prop)
+  if (JSON.stringify(next) === JSON.stringify(rowValue(row, prop))) return null
   return { rowId: row.id, propId: prop.id, before: storedOf(row, prop), after }
 }
 
 const compact = (list: (CellChange | null)[]): CellChange[] => list.filter((c): c is CellChange => c !== null)
 
-export function copyBox({ rows, cols, box, spaceId }: Grid): string {
+export function copyBox({ handle, rows, cols, box, spaceId }: Grid): string {
   const grid: string[][] = []
+  const refs = handle.refs()
   for (let r = box.r0; r <= box.r1; r++) {
     const row = rows[r]
     if (!row) continue
-    grid.push(cols.slice(box.c0, box.c1 + 1).map((prop) => cellText(row, prop, spaceId)))
+    grid.push(cols.slice(box.c0, box.c1 + 1).map((prop) => cellText(row, prop, spaceId, refs)))
   }
   return toTsv(grid)
 }

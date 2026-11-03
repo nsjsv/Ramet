@@ -10,7 +10,9 @@ import type { Pool } from 'pg'
 import * as Y from 'yjs'
 import { isAddressable } from '@ramet/shared/block-address'
 
-type Mark = { userId: string; actor: 'user' | 'agent'; agent: string | null; at: Date }
+/** 一笔事务记给谁 */
+export type Editor = { userId: string; actor: 'user' | 'agent'; agent: string | null }
+type Mark = Editor & { at: Date }
 /** 两次落库之间攒下的编辑。块存元素引用、落库时再读 id：新块的 id 可能由下一笔事务才补上 */
 type Pending = { page: Mark | null; blocks: Map<Y.XmlElement, Mark> }
 
@@ -19,12 +21,13 @@ const tracked = new WeakSet<Y.Doc>()
 
 type OriginContext = { user?: { id?: string }; actor?: { kind?: string; agent?: string | null } }
 
-function markOf(origin: unknown, at: Date): Mark | null {
+/** 事务 origin 的归属（规则见文件头）；没有 context 的内部写入 = null。集合投影器也按它认「最后编辑者」 */
+export function editorOf(origin: unknown): Editor | null {
   const ctx = (origin as { context?: OriginContext } | null | undefined)?.context
   const userId = ctx?.user?.id
   if (!userId) return null
   const agent = ctx.actor?.kind === 'agent'
-  return { userId, actor: agent ? 'agent' : 'user', agent: agent ? (ctx.actor?.agent ?? null) : null, at }
+  return { userId, actor: agent ? 'agent' : 'user', agent: agent ? (ctx.actor?.agent ?? null) : null }
 }
 
 /** type 的所有祖先里可寻址的块（含自身，由深到浅；判定与手柄同一份 isAddressable）。不在正文里 → null */
@@ -59,8 +62,9 @@ export function trackEdits(doc: Y.Doc): void {
   const body = doc.getXmlFragment('prosemirror')
   doc.on('afterTransaction', (tr: Y.Transaction) => {
     if (tr.changed.size === 0) return
-    const mark = markOf(tr.origin, new Date())
-    if (!mark) return
+    const editor = editorOf(tr.origin)
+    if (!editor) return
+    const mark: Mark = { ...editor, at: new Date() }
     const touched: Y.XmlElement[] = []
     let edited = false
     tr.changed.forEach((keys, type) => {

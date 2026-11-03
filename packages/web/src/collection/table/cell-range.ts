@@ -1,20 +1,24 @@
 /* ---------- 表格的格子选区：矩形范围、复制成 TSV、粘贴解析（纯函数，TableView 用） ----------
  * 选区 = 锚点格与光标格围成的矩形（按看得见的行与显示的列算下标）。
- * 复制：每格按显示口径转文字（选项 / 人员给名字，多值用「、」连），TSV 与 Excel / 表格软件互通（含制表符、换行、引号的格加引号）。
+ * 复制：每格按显示口径转文字（选项 / 人员 / 创建者给名字，文件给文件名，关联给对方行的标题，多值用「、」连；日期区间「开始 → 结束」；
+ * 编号带前缀；汇总给显示的文字；公式按输出类型，粘贴不写公式），
+ * TSV 与 Excel / 表格软件互通（含制表符、换行、引号的格加引号）。
  * 粘贴：一格内容贴到多格选区 = 填满选区；多格内容从选区左上角铺开，超出表格的部分丢掉（不新建行 / 列）。
- * 文字 → 值按目标属性类型解析，认不出的格跳过（不写也不清空）；空文字 = 清空。 */
+ * 文字 → 值按目标属性类型解析，认不出的格跳过（不写也不清空）；空文字 = 清空。文件、关联和系统生成的类型粘贴不进去
+ * （文字里没有文件；标题不唯一，认不回是哪一行）。 */
 import {
-  isCalendarDate,
+  isComputedProp,
   rowValue,
   TEXT_MAX,
   TITLE_PROP_ID,
   validateValue,
   type CollectionProp,
+  type CollectionRefs,
   type CollectionRow,
   type PropValue,
 } from '@ramet/shared/collection-model'
-import { formatStamp, isComputed, parseNumberInput } from '../prop-meta'
-import { valueText } from '../value-text'
+import { parseDateInput, parseNumberInput } from '../prop-meta'
+import { shownText } from '../value-text'
 
 export type CellPos = { row: number; col: number }
 export type CellBox = { r0: number; r1: number; c0: number; c1: number }
@@ -25,14 +29,14 @@ export function boxOf(a: CellPos, b: CellPos): CellBox {
 
 export const boxSize = (box: CellBox): number => (box.r1 - box.r0 + 1) * (box.c1 - box.c0 + 1)
 
-/** 一格的文字（与格子显示同口径；空 / 读不出 = 空串） */
-export function cellText(row: CollectionRow, prop: CollectionProp, spaceId: string | null): string {
+/** 一格的文字（与格子显示同口径；空 / 读不出 = 空串）。关联给对方行的标题，汇总给显示的文字（refs = 汇总的目标属性定义） */
+export function cellText(row: CollectionRow, prop: CollectionProp, spaceId: string | null, refs?: CollectionRefs | null): string {
   if (prop.id === TITLE_PROP_ID) return row.title
   const value = rowValue(row, prop)
   if (value === undefined) return ''
-  if (isComputed(prop.type)) return typeof value === 'string' ? formatStamp(value) : ''
-  if (prop.type === 'checkbox') return value === true ? CHECKED_TEXT : ''
-  return valueText(prop, value, spaceId)
+  // 是否类（复选框、输出是否的公式）复制成勾 / 空：贴回复选框认得出
+  if (prop.type === 'checkbox' || (prop.type === 'formula' && prop.output === 'boolean')) return value === true ? CHECKED_TEXT : ''
+  return shownText(prop, value, spaceId, refs)
 }
 
 const CHECKED_TEXT = '✓'
@@ -117,7 +121,7 @@ export type ParseCtx = {
 
 /** 粘贴的文字 → 属性值；null = 清空，undefined = 认不出（这一格不动）。名称列不走这里（改名） */
 export function parseCell(prop: CollectionProp, text: string, ctx: ParseCtx): PropValue | null | undefined {
-  if (isComputed(prop.type) || prop.id === TITLE_PROP_ID) return undefined
+  if (isComputedProp(prop) || prop.type === 'files' || prop.type === 'relation' || prop.id === TITLE_PROP_ID) return undefined
   const t = text.trim()
   if (t === '') return null
   let value: unknown
@@ -129,10 +133,12 @@ export function parseCell(prop: CollectionProp, text: string, ctx: ParseCtx): Pr
       value = parseNumberInput(t)
       break
     case 'url':
+    case 'email':
+    case 'phone':
       value = t
       break
     case 'date':
-      value = parseDate(t)
+      value = parseDateInput(t)
       break
     case 'checkbox': {
       const k = t.toLowerCase()
@@ -165,12 +171,4 @@ function names(text: string): string[] {
     .split(LIST_SPLIT)
     .map((s) => s.trim())
     .filter((s) => s !== '')
-}
-
-/** 日期：YYYY-MM-DD，也认 2026/1/2、2026.1.2、2026年1月2日 */
-function parseDate(text: string): string | undefined {
-  const m = /^(\d{4})\s*[-/.年]\s*(\d{1,2})\s*[-/.月]\s*(\d{1,2})\s*日?$/.exec(text)
-  if (!m) return undefined
-  const iso = `${m[1]}-${m[2]!.padStart(2, '0')}-${m[3]!.padStart(2, '0')}`
-  return isCalendarDate(iso) ? iso : undefined
 }

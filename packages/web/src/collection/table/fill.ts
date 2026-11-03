@@ -1,11 +1,22 @@
 /* ---------- 表格的填充柄：选区右下角的小方块，按住往下 / 往上拖，把选区的内容按列填进拖过的行（纯函数，TableView 用） ----------
  * 只沿竖直方向填（拖到选区左右两侧不算）；拖回选区里面 = 不填。
  * 每一列各算各的（同 Excel）：
- * · 数字 / 日期列，选区里这一列有两格及以上、都有值、且等差（日期按天）→ 顺着这个步长续成序列（往上拖就往回减）
- * · 其余一律按选区里的值循环复制（往上拖时也保持同一周期，紧挨选区的那一格是选区最近一端的值）
- * 名称列复制标题（改名）；计算列（创建 / 编辑时间）不填。 */
-import { isCalendarDate, rowValue, TITLE_PROP_ID, type CollectionProp, type CollectionRow, type PropValue } from '@ramet/shared/collection-model'
-import { isComputed } from '../prop-meta'
+ * · 数字 / 日期列，选区里这一列有两格及以上、都有值、且等差（日期按开始日、按天算）→ 顺着这个步长续成序列（往上拖就往回减）；
+ *   日期区间整段平移（第 k 格 = 周期里对应那一格的区间平移 k 个周期，长短跟着周期走）
+ * · 其余一律按选区里的值循环复制（往上拖时也保持同一周期，紧挨选区的那一格是选区最近一端的值；文件也是原样复制）
+ * 名称列复制标题（改名）；系统生成的列（创建 / 编辑时间、创建者、编号…）不填。 */
+import {
+  dateSpan,
+  isCalendarDate,
+  isComputedProp,
+  joinDate,
+  rowValue,
+  TITLE_PROP_ID,
+  type CollectionProp,
+  type CollectionRow,
+  type DateSpan,
+  type PropValue,
+} from '@ramet/shared/collection-model'
 import type { CellBox } from './cell-range'
 
 /** 拖过的行（看得见的行的下标，闭区间；不含选区本身） */
@@ -27,7 +38,7 @@ export function planFill(rows: readonly CollectionRow[], cols: readonly Collecti
   const n = box.r1 - box.r0 + 1
   for (let c = box.c0; c <= box.c1; c++) {
     const prop = cols[c]
-    if (!prop || isComputed(prop.type)) continue
+    if (!prop || isComputedProp(prop)) continue
     const src: (PropValue | undefined)[] = []
     for (let r = box.r0; r <= box.r1; r++) {
       const row = rows[r]
@@ -59,13 +70,20 @@ function seriesOf(prop: CollectionProp, src: readonly (PropValue | undefined)[])
     return (k) => round(nums[0]! + k * step, digits)
   }
   if (prop.type === 'date') {
-    if (!src.every((v): v is string => typeof v === 'string' && isCalendarDate(v))) return null
-    const days = (src as string[]).map(dayOf)
-    const step = days[1]! - days[0]!
-    if (!steady(days, step)) return null
+    const spans = src.map(dateSpan)
+    if (!spans.every((s): s is DateSpan => s !== undefined)) return null
+    const starts = spans.map((s) => dayOf(s.start))
+    const step = starts[1]! - starts[0]!
+    if (!steady(starts, step)) return null
+    const n = spans.length
     return (k) => {
-      const iso = new Date((days[0]! + k * step) * DAY).toISOString().slice(0, 10)
-      return isCalendarDate(iso) ? iso : null
+      // 周期里对应的那一格，整段挪到第 k 格的开始日（等差时就是平移了 k 所在的那几个周期）
+      const i = ((k % n) + n) % n
+      const span = spans[i]!
+      const shift = starts[0]! + k * step - starts[i]!
+      const start = isoOf(dayOf(span.start) + shift)
+      const end = isoOf(dayOf(span.end) + shift)
+      return isCalendarDate(start) && isCalendarDate(end) ? joinDate(start, end) : null
     }
   }
   return null
@@ -73,6 +91,11 @@ function seriesOf(prop: CollectionProp, src: readonly (PropValue | undefined)[])
 
 const DAY = 86_400_000
 const dayOf = (iso: string): number => Math.round(Date.parse(`${iso}T00:00:00Z`) / DAY)
+/** 第几天 → 'YYYY-MM-DD'；超出 0001–9999（toISOString 写成 ±YYYYYY 或抛错）给 '' */
+function isoOf(day: number): string {
+  const date = new Date(day * DAY)
+  return Number.isNaN(date.getTime()) ? '' : date.toISOString().slice(0, 10)
+}
 
 function steady(values: readonly number[], step: number): boolean {
   const eps = 1e-9 * Math.max(1, ...values.map(Math.abs))

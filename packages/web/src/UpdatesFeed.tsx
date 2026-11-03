@@ -2,18 +2,12 @@ import { useEffect, useState } from 'react'
 import type { CollectionSchema } from '@ramet/shared/collection-model'
 import { api, HISTORY_PAGE, type UpdateEntry, type UpdateSummaryItem } from './api'
 import { useCachedLoad } from './cached-load'
-import { agentList } from './default-agent'
+import { agentLabel } from './default-agent'
 import { Icon } from './icons'
 import { COPY } from './copy'
 import { useCollection, useCollectionSchema } from './collection/collection-store'
 import { usePeopleTick } from './collection/cells/CellView'
 import { orderSummary, propItemText } from './collection/value-text'
-
-/** AI 写的署名：目录里的名字，对不上就写「AI」，不借用当前默认 agent（更新流水与菜单里的「上次编辑」共用） */
-export function agentLabel(id: string | null): string {
-  const label = id ? agentList().find((a) => a.id === id)?.label?.trim() : ''
-  return label || 'AI'
-}
 
 /** 这条编辑记录署名谁 */
 export function editAuthorName(entry: Pick<UpdateEntry, 'actor' | 'actor_agent' | 'author_username'>, username: string): string {

@@ -101,7 +101,7 @@ describe('schemaDiff：集合页的属性定义 / 视图差异', () => {
     delete (delView.views as Record<string, unknown>).view02
     expect(schemaDiff(prev, parseCollection(delView))).toEqual([{ kind: 'schema', op: 'view_del', text: '看板' }])
 
-    // 筛选 / 排序 / 分组 / 显示属性 / 布局 / 名字 / 位置都算修改视图
+    // 筛选 / 排序 / 分组 / 显示属性 / 布局 / 名字 / 位置 / 画廊的卡片预览与大小都算修改视图
     const edits: ((json: ReturnType<typeof collectionJson>) => void)[] = [
       (j) => (j.views.view01.name = '全部'),
       (j) => (j.views.view01.layout = 'board'),
@@ -110,6 +110,8 @@ describe('schemaDiff：集合页的属性定义 / 视图差异', () => {
       (j) => ((j.views.view01.sorts as unknown) = [{ prop: 'prio01', dir: 'desc' }]),
       (j) => ((j.views.view01.groupBy as unknown) = 'stat01'),
       (j) => ((j.views.view01.shown as unknown) = ['prio01']),
+      (j) => ((j.views.view01 as Record<string, unknown>).cover = 'none'),
+      (j) => ((j.views.view01 as Record<string, unknown>).cardSize = 'l'),
     ]
     for (const edit of edits) {
       const json = collectionJson()
@@ -120,9 +122,32 @@ describe('schemaDiff：集合页的属性定义 / 视图差异', () => {
     }
   })
 
+  test('日历 / 时间线的日期属性算修改视图；老视图没有这个字段，与写了 null 的同一版视图不算修改', () => {
+    const withDate = () => {
+      const json = collectionJson()
+      ;(json.props as Record<string, unknown>).due001 = { name: '截止', type: 'date', pos: 2 }
+      return json
+    }
+    const prev = parseCollection(withDate())
+    const picked = withDate()
+    Object.assign(picked.views.view01, { dateBy: 'due001' })
+    const items = schemaDiff(prev, parseCollection(picked))
+    expect(items).toHaveLength(1)
+    expect(items[0]).toMatchObject({ kind: 'schema', op: 'view_edit' })
+    const unset = withDate()
+    Object.assign(unset.views.view01, { dateBy: null })
+    expect(schemaDiff(prev, parseCollection(unset))).toEqual([])
+  })
+
   test('只改列宽不出项', () => {
     const json = collectionJson()
     json.views.view01.widths = { stat01: 300, title: 400 } as never
+    expect(schemaDiff(parseCollection(collectionJson()), parseCollection(json))).toEqual([])
+  })
+
+  test('老视图没有卡片预览 / 大小字段，与写了缺省值的同一版视图不算修改', () => {
+    const json = collectionJson()
+    Object.assign(json.views.view01, { cover: 'page', cardSize: 'm' })
     expect(schemaDiff(parseCollection(collectionJson()), parseCollection(json))).toEqual([])
   })
 

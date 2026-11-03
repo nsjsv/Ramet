@@ -1,7 +1,7 @@
 /* ---------- 属性定义与视图的写：直接改集合文档 page:<cid> 的 Y.Map('collection') ----------
  * 形状与并发语义见 @ramet/shared/collection-model 的 PropJson / ViewJson 与服务端 collections/init-doc.ts：
  * props / 每个属性 / options / views / 每个视图 / widths 是 Y.Map（各字段各自后写为准、两人同时加选项能合并），
- * 选项本身、筛选、排序、shown 是普通值，整体替换。顺序一律写小数 pos，不用 Y.Array 搬移（并发重排会复制条目）。
+ * 选项本身、属性配置 cfg、筛选、排序、shown 是普通值，整体替换。顺序一律写小数 pos，不用 Y.Array 搬移（并发重排会复制条目）。
  * 读一律经 parseCollection（坏数据容错），这里只负责写；每个操作一个事务（一次撤销 / 一条协同增量）。
  * viewer 的连接服务端只读，写了也不会生效，入口的禁用在界面上做。 */
 import * as Y from 'yjs'
@@ -9,14 +9,19 @@ import {
   COLLECTION_VERSION,
   COLUMN_WIDTH_MAX,
   COLUMN_WIDTH_MIN,
+  isDateType,
+  isPropId,
+  layoutGroups,
   NAME_MAX,
   newShortId,
   newStatusOptions,
   newView,
+  parseCfg,
   parseCollection,
   pickView,
   TITLE_PROP_ID,
   typeHasOptions,
+  type CardSize,
   type CollectionLayout,
   type CollectionProp,
   type CollectionSchema,
@@ -28,6 +33,7 @@ import {
   type StatusGroup,
 } from '@ramet/shared/collection-model'
 import type { ColorName } from '@ramet/shared/md-dialect'
+import { usesDate } from './layouts'
 
 type YMap = Y.Map<unknown>
 
@@ -92,9 +98,16 @@ function tx(doc: Y.Doc, fn: () => void): void {
 
 // ---------- 属性 ----------
 
-/** 加一个属性，排在最后；状态带三个默认选项（同组名），单选 / 多选是空选项表。返回新属性 id */
-export function addProp(doc: Y.Doc, name: string, type: PropType): string {
-  const id = newShortId(takenIds(doc))
+/** 新属性的 id（还没写进文档）：新建公式先在编辑器里写，表达式可能引用它自己，建的时候要用同一个 id */
+export function newPropId(doc: Y.Doc): string {
+  return newShortId(takenIds(doc))
+}
+
+/** 加一个属性，排在最后；状态带三个默认选项（同组名），单选 / 多选是空选项表。返回新属性 id。
+ *  init：先定好的 id（newPropId；已被占用就另取）与配置，和属性同一笔写入 */
+export function addProp(doc: Y.Doc, name: string, type: PropType, init: { id?: string; cfg?: Record<string, unknown> } = {}): string {
+  const taken = takenIds(doc)
+  const id = init.id !== undefined && isPropId(init.id) && !taken.has(init.id) ? init.id : newShortId(taken)
   const pos = nextPos(readSchema(doc).props.map((p) => p.pos))
   tx(doc, () => {
     const prop = new Y.Map<unknown>()
@@ -102,6 +115,7 @@ export function addProp(doc: Y.Doc, name: string, type: PropType): string {
     prop.set('name', clipName(name))
     prop.set('type', type)
     prop.set('pos', pos)
+    if (init.cfg) prop.set('cfg', init.cfg)
     if (typeHasOptions(type)) fillOptions(ensureMap(prop, 'options'), type)
   })
   return id
@@ -125,6 +139,22 @@ export function setPropType(doc: Y.Doc, propId: string, type: PropType): void {
     prop.set('type', type)
     if (typeHasOptions(type)) fillOptions(ensureMap(prop, 'options'), type)
   })
+}
+
+/** 改属性配置（如自动编号的前缀）：cfg 是普通值，读出现值、换上给出的字段再整份写回；
+ *  别的字段（改类型前那个类型的配置）留着，改回原类型配置还在。给出的字段都没变 = 不写（同值写入也进集合页的版本历史） */
+export function setPropCfg(doc: Y.Doc, propId: string, cfg: Record<string, unknown>): void {
+  const map = mapAt(mapAt(rootOf(doc), 'props'), propId)
+  if (!map) return
+  const current = plainRecord(map.get('cfg'))
+  const next = { ...current, ...cfg }
+  if (sameJson(current, next)) return
+  tx(doc, () => map.set('cfg', next))
+}
+
+/** 普通对象值（cfg）；不是对象（没有 / 脏数据）当空的 */
+function plainRecord(raw: unknown): Record<string, unknown> {
+  return typeof raw === 'object' && raw !== null && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {}
 }
 
 /** 删属性：只摘定义。各行文档里的值保留，视图里引用它的设置由 parseCollection 忽略 —— 恢复集合页的版本后都回来 */
@@ -208,12 +238,23 @@ export function boardGroupBy(schema: CollectionSchema): string | null {
   return groupChoices(schema)[0]?.id ?? null
 }
 
-/** 新建视图，排在最后。看板按 boardGroupBy 分组。返回新视图 id */
+/** 能拿来排日历 / 时间线的属性：日期、创建时间、编辑时间，按属性顺序 */
+export function dateChoices(schema: CollectionSchema): CollectionProp[] {
+  return schema.props.filter((p) => isDateType(p.type))
+}
+
+/** 新建视图，排在最后。看板按 boardGroupBy 分组，日历 / 时间线按第一个日期类属性排。返回新视图 id */
+/** 新建列表视图时默认显示几个属性 */
+const LIST_SHOWN = 3
+
 export function addView(doc: Y.Doc, name: string, layout: CollectionLayout): string {
   const schema = readSchema(doc)
   const id = newShortId(takenIds(doc))
   const groupBy = layout === 'board' ? boardGroupBy(schema) : null
-  const json = newView(clipName(name), layout, nextPos(schema.views.map((v) => v.pos)), groupBy)
+  const dateBy = usesDate(layout) ? (dateChoices(schema)[0]?.id ?? null) : null
+  const json = newView(clipName(name), layout, nextPos(schema.views.map((v) => v.pos)), groupBy, dateBy)
+  // 列表一行只有一条，属性全摆上会挤成一排截断的碎字：新建时只显示前几个，其余从「属性」里打开
+  if (layout === 'list') json.shown = schema.props.slice(0, LIST_SHOWN).map((p) => p.id)
   tx(doc, () => {
     const view = new Y.Map<unknown>()
     ensureMap(rootOf(doc), 'views').set(id, view)
@@ -225,19 +266,44 @@ export function addView(doc: Y.Doc, name: string, layout: CollectionLayout): str
   return id
 }
 
-/** 换布局（表格 ↔ 看板）：其余设置原样留着。切到看板而还没分组时补上 boardGroupBy（同 addView） */
+/** 换布局：其余设置原样留着。切到看板而还没分组时补上 boardGroupBy、切到日历 / 时间线而还没选日期属性时补第一个（同 addView）；
+ *  切到不分组的布局（画廊、日历、时间线）清掉 groupBy：解析时本就读成 null，留在文档里的旧值换回表格时会冒出来，像是凭空多了个分组 */
 export function setLayout(doc: Y.Doc, viewId: string, layout: CollectionLayout): void {
   const schema = readSchema(doc)
   const view = schema.views.find((v) => v.id === viewId)
   // 点的就是当前布局：不写（同值写入也会进集合页的版本历史）
   if (!view || view.layout === layout) return
   const groupBy = layout === 'board' && view.groupBy === null ? boardGroupBy(schema) : null
+  const dateBy = usesDate(layout) && view.dateBy === null ? (dateChoices(schema)[0]?.id ?? null) : null
   tx(doc, () => {
     const map = viewMap(doc, viewId)
     if (!map) return
     map.set('layout', layout)
     if (groupBy !== null) map.set('groupBy', groupBy)
+    if (dateBy !== null) map.set('dateBy', dateBy)
+    if (!layoutGroups(layout) && map.get('groupBy') != null) map.set('groupBy', null)
   })
+}
+
+/** 日历 / 时间线按哪个属性排（只认日期类，别的类型写进去 parseCollection 也会忽略）。与现在读到的一样就不写 */
+export function setDateBy(doc: Y.Doc, viewId: string, propId: string | null): void {
+  const view = readSchema(doc).views.find((v) => v.id === viewId)
+  if (!view || view.dateBy === propId) return
+  tx(doc, () => viewMap(doc, viewId)?.set('dateBy', propId))
+}
+
+/** 画廊卡片预览：COVER_PAGE / COVER_NONE / 文件属性 id。与现在读到的一样就不写 */
+export function setViewCover(doc: Y.Doc, viewId: string, cover: string): void {
+  const view = readSchema(doc).views.find((v) => v.id === viewId)
+  if (!view || view.cover === cover) return
+  tx(doc, () => viewMap(doc, viewId)?.set('cover', cover))
+}
+
+/** 画廊卡片大小。与现在读到的一样就不写 */
+export function setCardSize(doc: Y.Doc, viewId: string, size: CardSize): void {
+  const view = readSchema(doc).views.find((v) => v.id === viewId)
+  if (!view || view.cardSize === size) return
+  tx(doc, () => viewMap(doc, viewId)?.set('cardSize', size))
 }
 
 export function renameView(doc: Y.Doc, viewId: string, name: string): void {
@@ -330,6 +396,11 @@ function syncProp(map: YMap, prop: CollectionProp, current: CollectionProp | und
   setIfChanged(map, 'name', prop.name, current?.name)
   setIfChanged(map, 'type', prop.type, current?.type)
   setIfChanged(map, 'pos', prop.pos, current?.pos)
+  // 配置按目标类型解析后比，一样就不写；不同就只换这个类型认得的字段（cfg 里别的类型留下的配置不动，同选项表）。
+  // 没有配置的类型解析出来是空对象，什么都不碰
+  if (Object.keys(prop.cfg).length > 0 && !sameJson(parseCfg(prop.type, map.get('cfg')), prop.cfg)) {
+    map.set('cfg', { ...plainRecord(map.get('cfg')), ...prop.cfg })
+  }
   // 没有选项的类型：解析时不读它的选项表，这里也不动（改类型时留下的旧选项，改回原类型还要用）
   if (!typeHasOptions(prop.type)) return
   // 当前选项按目标类型解析后比（同一个解析器出来的，键序一致）：当前类型没有选项（比如恢复改类型之前的版本）

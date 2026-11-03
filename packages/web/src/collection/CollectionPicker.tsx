@@ -20,8 +20,13 @@ type Props = {
   empty?: string
 }
 
-/** 集合选择弹层：React 里直接用（批量操作栏的「移到…」）；斜杠菜单经 openCollectionPicker 临时挂根 */
-export function CollectionChooser({ anchor, collections, onPick, onClose, title = C.pick, empty = C.pickEmpty }: Props) {
+type ListProps = Omit<Props, 'anchor' | 'onClose'> & {
+  /** 标在某一项后面的说明（新建关联时的「本集合」） */
+  note?: (page: Page) => string | null
+}
+
+/** 集合列表：筛选框 + 列表 + 键位（弹层里用，也直接嵌在菜单里：新建关联先选目标集合） */
+export function CollectionList({ collections, onPick, title = C.pick, empty = C.pickEmpty, note }: ListProps) {
   const [query, setQuery] = useState('')
   const [active, setActive] = useState(0)
   const input = useRef<HTMLInputElement>(null)
@@ -30,44 +35,53 @@ export function CollectionChooser({ anchor, collections, onPick, onClose, title 
   const shown = collections.filter((p) => !q || (p.title || COPY.untitled).toLowerCase().includes(q))
   useEffect(() => setActive(0), [query])
   return (
-    <Popover anchor={anchor} onClose={onClose}>
-      <div className="cl-picker">
-        <div className="pop-section">{title}</div>
-        <input
-          ref={input}
-          className="cl-picker-q"
-          value={query}
-          placeholder={C.search}
-          onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.nativeEvent.isComposing) return
-            if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-              e.preventDefault()
-              if (shown.length) setActive((i) => (i + (e.key === 'ArrowDown' ? 1 : shown.length - 1)) % shown.length)
-            } else if (e.key === 'Enter') {
-              e.preventDefault()
-              const hit = shown[active]
-              if (hit) onPick(hit)
-            }
-          }}
-        />
-        <div className="cl-picker-list">
-          {shown.map((page, i) => (
-            <button
-              key={page.id}
-              type="button"
-              className={'pop-row cl-picker-row' + (i === active ? ' is-active' : '')}
-              onMouseEnter={() => setActive(i)}
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => onPick(page)}
-            >
-              {page.icon ? <PageIcon icon={page.icon} /> : <Icon name="table" size={16} />}
-              <span>{page.title || COPY.untitled}</span>
-            </button>
-          ))}
-          {shown.length === 0 && <div className="cl-picker-empty">{collections.length === 0 ? empty : C.pickNone}</div>}
-        </div>
+    <div className="cl-picker">
+      <div className="pop-section">{title}</div>
+      <input
+        ref={input}
+        className="cl-picker-q"
+        value={query}
+        placeholder={C.search}
+        onChange={(e) => setQuery(e.target.value)}
+        onKeyDown={(e) => {
+          e.stopPropagation()
+          if (e.nativeEvent.isComposing) return
+          if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+            e.preventDefault()
+            if (shown.length) setActive((i) => (i + (e.key === 'ArrowDown' ? 1 : shown.length - 1)) % shown.length)
+          } else if (e.key === 'Enter') {
+            e.preventDefault()
+            const hit = shown[active]
+            if (hit) onPick(hit)
+          }
+        }}
+      />
+      <div className="cl-picker-list">
+        {shown.map((page, i) => (
+          <button
+            key={page.id}
+            type="button"
+            className={'pop-row cl-picker-row' + (i === active ? ' is-active' : '')}
+            onMouseEnter={() => setActive(i)}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => onPick(page)}
+          >
+            {page.icon ? <PageIcon icon={page.icon} /> : <Icon name="table" size={16} />}
+            <span>{page.title || COPY.untitled}</span>
+            {note?.(page) && <span className="cl-picker-note">{note(page)}</span>}
+          </button>
+        ))}
+        {shown.length === 0 && <div className="cl-picker-empty">{collections.length === 0 ? empty : C.pickNone}</div>}
       </div>
+    </div>
+  )
+}
+
+/** 集合选择弹层：React 里直接用（批量操作栏的「移到…」、改关联的目标）；斜杠菜单经 openCollectionPicker 临时挂根 */
+export function CollectionChooser({ anchor, onClose, ...list }: Props) {
+  return (
+    <Popover anchor={anchor} onClose={onClose}>
+      <CollectionList {...list} />
     </Popover>
   )
 }
