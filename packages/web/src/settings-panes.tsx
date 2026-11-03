@@ -11,10 +11,11 @@ import { uploadFile } from './editor/media'
 import { Card, Row, Segmented } from './form-kit'
 import { Icon } from './icons'
 import { PASSWORD_MIN, passwordError } from './password'
+import { setThemePref, useThemePref, type ThemePref } from './theme'
 import { setDefaultViewMode, useDefaultViewMode } from './view-mode'
 
 // 设置弹窗的个人分页 + 连接器分页。状态来源：默认 Agent = default-agent.ts，编辑方式 = editor/edit-mode.tsx，
-// 新页面打开方式 = view-mode.ts（偏好单源，顶栏快捷开关读同一份），密码规则 = password.ts（与强制改密页同一处）。
+// 新页面打开方式 = view-mode.ts（偏好单源，顶栏快捷开关读同一份），明暗 = theme.ts，密码规则 = password.ts（与强制改密页同一处）。
 // 空间分页在 SpaceSettings.tsx。
 
 /** 账户：头像 + 修改密码 + 登出 */
@@ -198,6 +199,27 @@ export function EditorPane() {
             { value: 'chat', label: '聊天' },
           ]}
           onChange={(v) => setDefaultViewMode(v === 'chat')}
+        />
+      </Row>
+    </Card>
+  )
+}
+
+/** 外观：界面明暗（theme.ts，存在本机浏览器里，不跟账号走） */
+export function AppearancePane() {
+  const pref = useThemePref()
+  return (
+    <Card title="主题">
+      <Row label="配色" desc="跟随系统：随操作系统的深浅色设置自动切换；只对这台设备上的浏览器生效">
+        <Segmented<ThemePref>
+          label="配色"
+          value={pref}
+          options={[
+            { value: 'system', label: '跟随系统' },
+            { value: 'light', label: '浅色' },
+            { value: 'dark', label: '深色' },
+          ]}
+          onChange={setThemePref}
         />
       </Row>
     </Card>

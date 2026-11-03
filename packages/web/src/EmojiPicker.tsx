@@ -7,7 +7,8 @@
  * 选择器是 Web Component（shadow DOM），样式只能走它公开的外部入口：
  * ① 宿主元素的尺寸写在 page-icon.css（它自带 `:host{width:min-content}`，不覆盖就缩成一小条、每行 5 个）；
  * ② CSS 变量 --rgb-background / --rgb-color / --rgb-accent 要 'r, g, b' 三元组，吃不了 var(--surface)，
- *    所以由 applyTheme 从站点令牌取计算值写上去，明暗切换时重写。明暗判据 theme:'auto' 与 dark.css 同为系统设置。
+ *    所以由 applyTheme 从站点令牌取计算值写上去，明暗切换时重写。明暗不用库自己的 theme:'auto'（那只看系统设置），
+ *    按界面实际明暗（theme.ts）传 light / dark，切换时经 update() 改掉。
  * 搜索：库自带的关键词是英文，中文词表（emoji-zh.json）在 loadData 里并进去，见 emoji-search.ts。 */
 
 import { useEffect, useRef, useState } from 'react'
@@ -15,10 +16,17 @@ import dataUrl from '@emoji-mart/data/sets/15/twitter.json?url'
 import i18nUrl from '@emoji-mart/data/i18n/zh.json?url'
 import zhKeywordsUrl from './emoji-zh.json?url'
 import { addZhKeywords, type EmojiMartData, type ZhKeywords } from './emoji-search'
+import { isDark, onThemeChange } from './theme'
 
 const SPRITE_URL = '/twemoji-sprite-64.png'
 
-/** 站点令牌 → 'r, g, b'：借一个探针元素让浏览器算出 var() 的实际颜色 */
+/** 库的 Web Component：update() 改属性不重建（选择器的滚动位置、搜索词都保留） */
+type PickerElement = HTMLElement & { update: (props: { theme: 'light' | 'dark' }) => void }
+
+const pickerTheme = (): 'light' | 'dark' => (isDark() ? 'dark' : 'light')
+
+/** 站点令牌 → 'r, g, b'：借一个探针元素让浏览器算出 var() 的实际颜色。
+ * 探针不能挂进选择器自己：它有 shadow DOM，没被 slot 的子元素不在渲染树里，Chrome 算出的 color 是空串 */
 function rgbOf(token: string, scope: HTMLElement): string | null {
   const probe = document.createElement('span')
   probe.style.color = `var(${token})`
@@ -35,8 +43,9 @@ function applyTheme(el: HTMLElement): void {
     ['--rgb-color', '--ink'],
     ['--rgb-accent', '--accent'],
   ]
+  const scope = el.parentElement ?? document.body
   for (const [prop, token] of vars) {
-    const rgb = rgbOf(token, el)
+    const rgb = rgbOf(token, scope)
     if (rgb) el.style.setProperty(prop, rgb)
   }
 }
@@ -61,9 +70,8 @@ export function EmojiPicker({ onPick }: { onPick: (emoji: string) => void }) {
 
   useEffect(() => {
     let cancelled = false
-    let el: HTMLElement | null = null
-    const dark = window.matchMedia('(prefers-color-scheme: dark)')
-    const retheme = () => el && applyTheme(el)
+    let el: PickerElement | null = null
+    let offTheme = (): void => undefined
     void (async () => {
       try {
         const [{ Picker }, i18n] = await Promise.all([
@@ -78,17 +86,21 @@ export function EmojiPicker({ onPick }: { onPick: (emoji: string) => void }) {
           set: 'twitter',
           emojiVersion: 15,
           getSpritesheetURL: () => SPRITE_URL,
-          theme: 'auto',
+          theme: pickerTheme(),
           previewPosition: 'none',
           skinTonePosition: 'search',
           dynamicWidth: true,
           onEmojiSelect: (picked: { native?: string }) => {
             if (picked.native) pickRef.current(picked.native)
           },
-        }) as unknown as HTMLElement
+        }) as unknown as PickerElement
         hostRef.current.appendChild(el)
         applyTheme(el)
-        dark.addEventListener('change', retheme)
+        const picker = el
+        offTheme = onThemeChange(() => {
+          picker.update({ theme: pickerTheme() })
+          applyTheme(picker)
+        })
       } catch (err) {
         console.error(err)
         if (!cancelled) setFailed(true)
@@ -96,7 +108,7 @@ export function EmojiPicker({ onPick }: { onPick: (emoji: string) => void }) {
     })()
     return () => {
       cancelled = true
-      dark.removeEventListener('change', retheme)
+      offTheme()
       el?.remove()
     }
   }, [])

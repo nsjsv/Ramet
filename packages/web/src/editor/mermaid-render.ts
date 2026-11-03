@@ -1,26 +1,26 @@
 /* ---------- Mermaid 图 ----------
  * `mermaid` 代码块的图：库按需加载（lazy.ts）；按「主题 + 代码」缓存 svg（同一张图在气泡 / 编辑器 / 历史里只算一次）；
- * 主题跟随系统明暗（dark.css 同口径），切换时清缓存、由订阅者重画。securityLevel 'strict'：图里的 HTML / 点击脚本
+ * 主题跟随界面明暗（theme.ts），切换时清缓存、由订阅者重画。securityLevel 'strict'：图里的 HTML / 点击脚本
  * 由 mermaid 自己清掉（图的代码来自文档，可能是别人 / AI 写的）。语法错误不抛：在图的位置显示错误，代码照旧在。 */
 
+import { isDark, onThemeChange } from '../theme'
 import { loadMermaid } from './lazy'
 
-const DARK = typeof window !== 'undefined' ? window.matchMedia('(prefers-color-scheme: dark)') : null
 const svgCache = new Map<string, string>()
 const themeListeners = new Set<() => void>()
 let seq = 0
 let initialized: string | null = null
 
 function theme(): 'dark' | 'default' {
-  return DARK?.matches ? 'dark' : 'default'
+  return isDark() ? 'dark' : 'default'
 }
 
-DARK?.addEventListener('change', () => {
+onThemeChange(() => {
   svgCache.clear()
   for (const fn of themeListeners) fn()
 })
 
-/** 系统明暗切换时回调（图要按新主题重画）；返回取消订阅 */
+/** 界面明暗切换时回调（图要按新主题重画）；返回取消订阅 */
 export function onMermaidTheme(fn: () => void): () => void {
   themeListeners.add(fn)
   return () => themeListeners.delete(fn)

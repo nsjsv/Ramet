@@ -102,7 +102,7 @@ export function initClientDiagnostics(): void {
     `boot viewport=${window.innerWidth}x${window.innerHeight} dpr=${window.devicePixelRatio} ua="${clip(navigator.userAgent)}" url=${location.pathname}${location.search}`,
   )
   push(
-    `env styles=${document.querySelectorAll('style').length} links=${document.querySelectorAll('link[rel=stylesheet]').length} bodyFilter=${bodyStyle.filter || '-'} bodyOpacity=${bodyStyle.opacity} htmlFilter=${getComputedStyle(document.documentElement).filter || '-'} dark=${String(window.matchMedia('(prefers-color-scheme: dark)').matches)} hasFocus=${String(document.hasFocus())}`,
+    `env styles=${document.querySelectorAll('style').length} links=${document.querySelectorAll('link[rel=stylesheet]').length} bodyFilter=${bodyStyle.filter || '-'} bodyOpacity=${bodyStyle.opacity} htmlFilter=${getComputedStyle(document.documentElement).filter || '-'} theme=${document.documentElement.dataset.theme ?? '-'} sysDark=${String(window.matchMedia('(prefers-color-scheme: dark)').matches)} hasFocus=${String(document.hasFocus())}`,
   )
   window.addEventListener('pointerdown', (e) => onPointer('pointerdown', e), true)
   window.addEventListener('mousedown', (e) => onPointer('mousedown', e), true)

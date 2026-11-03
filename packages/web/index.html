@@ -7,6 +7,17 @@
     <link rel="icon" href="/favicon.ico" sizes="48x48" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <script>
+      // 首帧前定好明暗（与 src/theme.ts 同一个 key 与取值）：模块脚本是 defer 的，等它就会先闪一下白底
+      ;(function () {
+        var t = null
+        try {
+          t = localStorage.getItem('ramet:theme')
+        } catch (e) {}
+        if (t !== 'light' && t !== 'dark') t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+        document.documentElement.setAttribute('data-theme', t)
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>

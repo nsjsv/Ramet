@@ -7,11 +7,12 @@ import Modal from './Modal'
 import { QuickAiPane } from './QuickAiPane'
 import SpaceSettings from './SpaceSettings'
 import { ConnectorsPane } from './ConnectorsPane'
-import { AccountPane, AgentPane, EditorPane, ShortcutsPane } from './settings-panes'
+import { AccountPane, AgentPane, AppearancePane, EditorPane, ShortcutsPane } from './settings-panes'
 
 /* ---------- 主设置弹窗 ----------
  * 入口：侧栏底部「空间切换」右边的 ⚙（常驻）。左侧分组导航（带图标），右侧标题 + 说明 + 卡片式设置行：
- *   个人   账户（头像 / 修改密码 / 登出）· 编辑器（编辑方式 / 新页面默认打开方式）· 默认 Agent · 随手 AI（⌘J 用的模型连接）
+ *   个人   账户（头像 / 修改密码 / 登出）· 外观（明暗）· 编辑器（编辑方式 / 新页面默认打开方式）· 默认 Agent
+ *          · 随手 AI（⌘J 用的模型连接）
  *   空间   成员与空间（成员 / 邀请 / 改名 / 退出 / 删除）· 连接器（本地 connector 配对 / 列表 / 撤销）
  *          · 机器（谁能用接入的机器：授权 / 申请 / 使用记录）
  * 空间组：无选中空间时不出现；连接器是写入口，只读成员不出现（成员能接入自己的机器，批准要空间所有者）；
@@ -19,10 +20,11 @@ import { AccountPane, AgentPane, EditorPane, ShortcutsPane } from './settings-pa
  * 权限只在分页可见性上表达；各分页内容自己管自己的动作权限。外壳是 Modal（portal 到 body，见 Modal.tsx）。
  * 卡片 / 行 / 开关等原语在 form-kit.tsx，各分页在 settings-panes.tsx 与 SpaceSettings.tsx。 */
 
-type TabId = 'account' | 'editor' | 'keys' | 'agent' | 'quick' | 'space' | 'connectors' | 'machines'
+type TabId = 'account' | 'appearance' | 'editor' | 'keys' | 'agent' | 'quick' | 'space' | 'connectors' | 'machines'
 
 const TABS: Record<TabId, { label: string; icon: IconName; desc: string }> = {
   account: { label: '账户', icon: 'user', desc: '头像、密码与登录' },
+  appearance: { label: '外观', icon: 'sun', desc: '界面的明暗配色' },
   editor: { label: '编辑器', icon: 'edit', desc: '编辑体验与新页面的默认打开方式' },
   keys: { label: '快捷键', icon: 'keyboard', desc: '键盘快捷键与 Markdown 输入写法' },
   agent: { label: '默认 Agent', icon: 'bot', desc: '聊天输入框与 /命令 默认使用的 agent' },
@@ -61,7 +63,7 @@ export default function SettingsModal({
   const canSpace = space !== null
   // 连接器是写入口（配对 / 撤销）：只读成员 / 无空间都不出现
   const canConnectors = canSpace && space.my_role !== 'viewer'
-  const personal: TabId[] = ['account', 'editor', 'keys', 'agent', 'quick']
+  const personal: TabId[] = ['account', 'appearance', 'editor', 'keys', 'agent', 'quick']
   const spaceTabs: TabId[] = canSpace ? ['space', ...(canConnectors ? (['connectors'] as const) : []), 'machines'] : []
   const [tab, setTab] = useState<TabId>(initialTab ?? 'account')
   // 分页可能中途变得不可见（空间被退）；回落到账户，不留空白
@@ -108,6 +110,7 @@ export default function SettingsModal({
         </header>
         <div className="set-main-body">
           {active === 'account' && <AccountPane user={user} onLogout={onLogout} onAvatarChange={onAvatarChange} />}
+          {active === 'appearance' && <AppearancePane />}
           {active === 'editor' && <EditorPane />}
           {active === 'keys' && <ShortcutsPane />}
           {active === 'agent' && <AgentPane />}

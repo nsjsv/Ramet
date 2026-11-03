@@ -10,13 +10,14 @@
   max-width: min(280px, calc(100vw - 16px));
   padding: 4px 8px;
   border-radius: var(--r-sm);
+  border: 1px solid var(--line);
   background: var(--tip-bg);
   color: var(--tip-ink);
   font-size: var(--t-xs);
   font-weight: 500;
   line-height: 1.4;
   overflow-wrap: anywhere;
-  box-shadow: 0 2px 8px rgba(15, 15, 15, 0.16);
+  box-shadow: var(--tip-shadow);
   pointer-events: none;
   opacity: 0;
   visibility: hidden;

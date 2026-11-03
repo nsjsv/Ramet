@@ -4,6 +4,7 @@ import { COPY } from '../copy'
 import { diagnosticsEnabled } from '../debug-log'
 import { isQuickKey, QUICK_KEY_LABEL } from '../editor/quick-keys'
 import { Icon } from '../icons'
+import { onThemeChange } from '../theme'
 import TermAsk from './TermAsk'
 import type { TermInfo } from './terminal-api'
 import { LatencySamples, spread } from './term-latency'
@@ -16,7 +17,7 @@ const Q = COPY.quick
 /** 留给 ⌘J 的终端最近输出（原始字节，含控制序列；发给模型前才剥）：只留尾部，够取最后 30 行 */
 const TAIL_KEEP_CHARS = 24_000
 
-/** 终端配色跟着界面令牌（深色自动跟随）；令牌是十六进制色，直接交给 xterm */
+/** 终端配色跟着界面令牌（明暗切换时重取）；令牌是十六进制色，直接交给 xterm */
 function termTheme(): ITheme {
   const css = getComputedStyle(document.documentElement)
   const v = (name: string, fallback: string): string => css.getPropertyValue(name).trim() || fallback
@@ -155,7 +156,11 @@ export default function TermPane({ pageId, agent, info, visible }: { pageId: str
 
       const observer = new ResizeObserver(() => doFit())
       observer.observe(el)
+      const offTheme = onThemeChange(() => {
+        term.options.theme = termTheme()
+      })
       cleanup = () => {
+        offTheme()
         observer.disconnect()
         ahead.dispose()
         session.dispose()
