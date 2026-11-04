@@ -169,14 +169,14 @@ export function PageIconHeader({
       <button
         type="button"
         className={'icon-header-trigger' + (icon ? ' has-icon' : '')}
-        title={icon ? '更换图标' : '添加图标'}
+        data-tip={icon ? '更换图标' : '添加图标'}
         onClick={() => setOpen((v) => !v)}
         disabled={busy}
       >
         {icon ? <PageIcon icon={icon} size="lg" /> : <span className="icon-header-add"><Icon name="plus" size={14} /> 图标</span>}
       </button>
       {onAddCover && (
-        <button type="button" className="icon-header-trigger icon-header-cover" title={COVER_COPY.addTitle} onClick={onAddCover}>
+        <button type="button" className="icon-header-trigger icon-header-cover" data-tip={COVER_COPY.addTitle} onClick={onAddCover}>
           <span className="icon-header-add">
             <Icon name="plus" size={14} /> {COVER_COPY.add}
           </span>

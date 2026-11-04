@@ -142,7 +142,7 @@ export default function RowProperties({ page, collectionId, getDoc, tick, readOn
           return (
             <div key={prop.id} className="cl-rowprop">
               {/* 拖属性名调顺序（属性的全局顺序，所有行页面同一份）；拖手柄只在名字上，值格里照常选字 */}
-              <span className="cl-rowprop-name" title={prop.name || C.types[prop.type]} {...drag(prop.id)}>
+              <span className="cl-rowprop-name" data-tip={prop.name || C.types[prop.type]} {...drag(prop.id)}>
                 <Icon name={TYPE_ICON[prop.type]} size={14} />
                 <span>{prop.name || C.types[prop.type]}</span>
               </span>
@@ -179,7 +179,7 @@ export default function RowProperties({ page, collectionId, getDoc, tick, readOn
             <button
               type="button"
               className="icon-btn"
-              title={C.dismiss}
+              data-tip={C.dismiss}
               aria-label={C.dismiss}
               onClick={() => {
                 setError(null)

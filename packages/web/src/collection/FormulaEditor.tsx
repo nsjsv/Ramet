@@ -25,13 +25,13 @@ import {
   type Suggestion,
 } from '@ramet/shared/collection-model'
 import { fillFormulas } from '@ramet/shared/collection-query'
-import Modal from '../Modal'
+import Modal from '../ui/Modal'
 import { COPY } from '../copy'
 import { Icon } from '../icons'
 import { FormulaCell, formulaBroken } from './cells/FormulaCell'
 import { useCollection } from './collection-store'
 import { applySuggestion, docGroups, insertText, markParts, previewRow, stepIndex, summary, type Edit } from './formula-editor-model'
-import { usePopoverLayer } from './popover'
+import { usePopoverLayer } from '../ui/popover'
 import { TYPE_ICON } from './prop-meta'
 import { useRelationCtx } from './relation-ctx'
 import { setPropCfg } from './schema-ops'
@@ -53,7 +53,7 @@ export function FormulaField({ doc, schema, prop, view }: Props) {
   const display = toDisplay(prop.cfg.expr ?? '', schema)
   return (
     <>
-      <button type="button" className="cl-fx-sum" title={display || undefined} onClick={() => setOpen(true)}>
+      <button type="button" className="cl-fx-sum" data-tip={display || undefined} onClick={() => setOpen(true)}>
         {display.trim() ? <code>{summary(display)}</code> : <span className="cl-text is-dim">{F.none}</span>}
       </button>
       {formulaBroken(prop) && <div className="cl-hint is-error">{prop.formulaError?.message}</div>}
@@ -113,7 +113,7 @@ function FunctionDocs({ onInsert }: { onInsert: (name: string) => void }) {
                 key={item.name}
                 type="button"
                 className="cl-fx-doc"
-                title={F.insert}
+                data-tip={F.insert}
                 // 不抢输入框的焦点：插入位置是它的光标
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => onInsert(item.name)}
@@ -256,7 +256,7 @@ export function FormulaEditor({
         <header className="cl-fx-head">
           <Icon name="sigma" size={16} />
           <h2 className="modal-title">{F.title(name)}</h2>
-          <button type="button" className="modal-close" title={F.close} aria-label={F.close} onClick={onClose}>
+          <button type="button" className="modal-close" data-tip={F.close} aria-label={F.close} onClick={onClose}>
             <Icon name="x" size={16} />
           </button>
         </header>
@@ -334,7 +334,7 @@ export function FormulaEditor({
           <button type="button" className="admin-btn" onClick={onClose}>
             {F.cancel}
           </button>
-          <button type="button" className="admin-btn primary" disabled={!stored.ok} title={stored.ok ? undefined : F.cantSave} onClick={save}>
+          <button type="button" className="admin-btn primary" disabled={!stored.ok} data-tip={stored.ok ? undefined : F.cantSave} onClick={save}>
             {F.save}
           </button>
         </footer>

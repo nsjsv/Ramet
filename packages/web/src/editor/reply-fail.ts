@@ -80,7 +80,7 @@ export function buildFailStrip(opts: { pageId: string; replyId: string; canRetry
   const text = document.createElement('span')
   text.className = 'now-text'
   text.textContent = failText(opts.replyId)
-  text.title = text.textContent
+  text.dataset.tip = text.textContent
   now.append(text)
   const dot = document.createElement('span')
   dot.className = 'spin'

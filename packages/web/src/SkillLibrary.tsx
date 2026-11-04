@@ -10,6 +10,7 @@ import { useCachedLoad } from './cached-load'
 import { COPY } from './copy'
 import { Icon } from './icons'
 import { fmtSize, invalidateSkills, skillApi, type ImportResult, type SkillSummary } from './skill-api'
+import { confirmDialog } from './ui/dialog'
 
 const C = COPY.skills
 /** 导入请求体上限（与服务端 / nginx 一致）；文件夹里的 .git、node_modules 不上传 */
@@ -96,7 +97,7 @@ export default function SkillLibrary({ space, pages, onChanged }: { space: Space
   }
 
   async function remove(skill: SkillSummary) {
-    if (!window.confirm(C.confirmRemove(skill.name))) return
+    if (!(await confirmDialog({ message: C.confirmRemove(skill.name), danger: true }))) return
     try {
       await api.trashPage(skill.id)
       afterWrite()
@@ -126,7 +127,7 @@ export default function SkillLibrary({ space, pages, onChanged }: { space: Space
       {error && (
         <div className="skill-error" role="alert">
           <span>{error}</span>
-          <button className="skill-error-close" title={COPY.failed} onClick={() => setError(null)}>
+          <button className="skill-error-close" data-tip={COPY.failed} aria-label={COPY.failed} onClick={() => setError(null)}>
             <Icon name="x" size={12} />
           </button>
         </div>
@@ -217,7 +218,7 @@ export default function SkillLibrary({ space, pages, onChanged }: { space: Space
       <ul className="skill-list">
         {list?.map((skill) => (
           <li key={skill.id} className="skill-row">
-            <button className="skill-row-main" onClick={() => navigate(`/page/${skill.id}`)} title={C.open}>
+            <button className="skill-row-main" onClick={() => navigate(`/page/${skill.id}`)} data-tip={C.open}>
               <span className="skill-row-name">{skill.name}</span>
               <span className="skill-row-desc">{skill.description}</span>
               <span className="skill-row-meta">
@@ -226,7 +227,7 @@ export default function SkillLibrary({ space, pages, onChanged }: { space: Space
               </span>
             </button>
             {canWrite && (
-              <button className="skill-row-del" title={C.remove} aria-label={C.remove} onClick={() => void remove(skill)}>
+              <button className="skill-row-del" data-tip={C.remove} aria-label={C.remove} onClick={() => void remove(skill)}>
                 <Icon name="trash" size={14} />
               </button>
             )}

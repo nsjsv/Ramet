@@ -25,7 +25,7 @@ import { RollupCell } from './RollupCell'
 /** 选项的小色块（颜色 = 选项色；状态多一个圆点） */
 export function OptionChip({ option, status = false }: { option: CollectionOption; status?: boolean }) {
   return (
-    <span className={'cl-opt' + (status ? ' is-status' : '')} data-color={option.color} title={option.name}>
+    <span className={'cl-opt' + (status ? ' is-status' : '')} data-color={option.color} data-tip={option.name}>
       {status && <i className="cl-opt-dot" aria-hidden="true" />}
       <span className="cl-opt-name">{option.name || ' '}</span>
     </span>
@@ -54,7 +54,7 @@ export function PersonList({ spaceId, ids }: { spaceId: string | null; ids: read
 function PersonChip({ spaceId, userId }: { spaceId: string | null; userId: string }) {
   const person = personOf(spaceId, userId)
   return (
-    <span className="cl-person" title={person?.username ?? userId}>
+    <span className="cl-person" data-tip={person?.username ?? userId}>
       <Avatar person={person} size={18} />
       <span className="cl-person-name">{person?.username ?? '…'}</span>
     </span>
@@ -104,7 +104,7 @@ export function CellView({ prop, row, spaceId }: Props) {
       // agent 改的：agent 名在前，后面是让它改的人
       return row.edited_agent ? (
         <span className="cl-chips">
-          <span className="cl-agent" title={agentLabel(row.edited_agent)}>
+          <span className="cl-agent" data-tip={agentLabel(row.edited_agent)}>
             <Icon name="bot" size={14} />
             <span className="cl-person-name">{agentLabel(row.edited_agent)}</span>
           </span>

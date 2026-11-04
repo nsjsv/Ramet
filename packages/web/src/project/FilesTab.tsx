@@ -147,7 +147,7 @@ function EntryRow({
       data-row
       aria-expanded={entry.type === 'dir' ? open : undefined}
       disabled={entry.type === 'link'}
-      title={entry.type === 'link' ? C.linkOut : entry.size !== undefined ? `${path} · ${sizeLabel(entry.size)}` : path}
+      data-tip={entry.type === 'link' ? C.linkOut : entry.size !== undefined ? `${path} · ${sizeLabel(entry.size)}` : path}
       className={'project-tree-row' + (entry.git ? ` ${markClass(entry.git)}` : '')}
       style={{ paddingLeft: 8 + depth * 14 }}
       onClick={() => (entry.type === 'dir' ? onToggle(path) : onOpen(path))}

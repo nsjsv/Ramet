@@ -4,14 +4,21 @@ import { ApiError } from './api'
 import { Avatar } from './Avatar'
 import { copyText } from './clipboard'
 import { COPY } from './copy'
-import { Card, ConfirmButton, Row } from './form-kit'
+import { Card, ConfirmButton, Row } from './ui/form-kit'
 import { Icon } from './icons'
+import { Select } from './ui/Select'
+
+/** 加成员 / 邀请链接的角色选项 */
+const JOIN_ROLES = [
+  { value: 'member', label: '成员（可编辑）' },
+  { value: 'viewer', label: '只读' },
+] as const
 
 /** 空间分页（设置弹窗内，卡片式）：
  * - 所有成员（含只读成员）可看成员列表
  * - owner：改成员角色、按用户名添加成员、移除成员、生成 / 撤销邀请链接、改名（行内编辑）、删空间
  * - member/viewer：退出空间（自己移除自己）
- * 危险动作用行内两步确认（form-kit.tsx ConfirmButton），不弹 window.confirm。
+ * 危险动作用行内两步确认（ui/form-kit.tsx ConfirmButton），不弹 window.confirm。
  * 外壳（遮罩 / 导航 / 标题）在 SettingsModal，这里只管内容与权限。 */
 export default function SpaceSettings({
   space,
@@ -113,7 +120,7 @@ export default function SpaceSettings({
           <div className="set-line" key={m.user_id}>
             <Avatar person={{ id: m.user_id, username: m.username, avatar: m.avatar }} size={28} />
             <div className="set-line-main">
-              <span className="set-line-name" title={m.username}>
+              <span className="set-line-name" data-tip={m.username}>
                 {m.username}
                 {m.user_id === user.id && <span className="member-me">（我）</span>}
               </span>
@@ -121,16 +128,18 @@ export default function SpaceSettings({
             {/* owner 管理别人：角色直接在下拉里改（member ⇄ viewer）；owner 自己与其他人只是徽标 */}
             {canManage && m.role !== 'owner' && m.user_id !== user.id ? (
               <>
-                <select
+                <Select
                   className="member-role-select"
-                  aria-label={COPY.members.role}
+                  size="sm"
+                  label={COPY.members.role}
                   value={m.role}
-                  onChange={(e) => void changeRole(m, e.target.value as 'member' | 'viewer')}
-                >
-                  <option value="member">{SPACE_ROLE_LABELS.member}</option>
-                  <option value="viewer">{SPACE_ROLE_LABELS.viewer}</option>
-                </select>
-                <ConfirmButton confirmLabel="确认移除" onConfirm={() => void removeMember(m)} title={`将「${m.username}」移出空间`}>
+                  options={[
+                    { value: 'member', label: SPACE_ROLE_LABELS.member },
+                    { value: 'viewer', label: SPACE_ROLE_LABELS.viewer },
+                  ]}
+                  onChange={(role) => void changeRole(m, role)}
+                />
+                <ConfirmButton confirmLabel="确认移除" onConfirm={() => void removeMember(m)} tip={`将「${m.username}」移出空间`}>
                   移除
                 </ConfirmButton>
               </>
@@ -287,10 +296,7 @@ function AddMember({ space, onAdded, onError }: { space: Space; onAdded: (name: 
         aria-label={COPY.members.addTitle}
         autoComplete="off"
       />
-      <select className="admin-field" value={role} onChange={(e) => setRole(e.target.value as 'member' | 'viewer')}>
-        <option value="member">成员（可编辑）</option>
-        <option value="viewer">只读</option>
-      </select>
+      <Select className="admin-field" label={COPY.members.role} value={role} options={JOIN_ROLES} onChange={setRole} />
       <button className="admin-btn primary" type="submit" disabled={!name.trim()}>
         {COPY.members.add}
       </button>
@@ -347,10 +353,7 @@ function InviteCard({
   return (
     <Card title={invites && invites.length > 0 ? `邀请链接（${invites.length} 个有效）` : '邀请链接'}>
       <Row label="生成邀请链接" desc="拿到链接的人登录后即可加入本空间">
-        <select className="admin-field" value={role} onChange={(e) => setRole(e.target.value as 'member' | 'viewer')} aria-label="加入后的角色">
-          <option value="member">成员（可编辑）</option>
-          <option value="viewer">只读</option>
-        </select>
+        <Select className="admin-field" label="加入后的角色" value={role} options={JOIN_ROLES} onChange={setRole} />
         <button className="admin-btn primary" onClick={() => void create()}>
           生成
         </button>
@@ -366,10 +369,10 @@ function InviteCard({
       {invites?.map((invite) => (
         <div className="set-line" key={invite.token}>
           <span className="role-badge">{SPACE_ROLE_LABELS[invite.role]}</span>
-          <code className="invite-token" title={`/join/${invite.token}`}>
+          <code className="invite-token" data-tip={`/join/${invite.token}`}>
             /join/{invite.token}
           </code>
-          <ConfirmButton confirmLabel="确认撤销" onConfirm={() => void revoke(invite)} title="撤销后链接立即失效">
+          <ConfirmButton confirmLabel="确认撤销" onConfirm={() => void revoke(invite)} tip="撤销后链接立即失效">
             撤销
           </ConfirmButton>
         </div>

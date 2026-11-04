@@ -232,28 +232,29 @@ function Head({
   const head = info.status === 'ok' ? info.info : null
   const b = branch ?? (head ? { branch: head.branch, detached: head.detached, ahead: head.ahead, behind: head.behind } : null)
   const branchText = b?.branch ?? (b?.detached ? C.detached : head?.repo ? C.noBranch : '')
+  const status = head ? C.online : info.status === 'loading' ? C.connecting : C.offline
   return (
     <header className="project-head">
       <div className="project-head-main">
-        <span className={'project-dot' + (head ? ' is-on' : '')} title={head ? C.online : info.status === 'loading' ? C.connecting : C.offline} />
+        <span className={'project-dot' + (head ? ' is-on' : '')} data-tip={status} role="img" aria-label={status} />
         <span className="project-machine">{head?.machine.name ?? (label.split(' · ')[0] || C.connecting)}</span>
         {branchText && (
-          <span className="project-branch" title={branchText}>
+          <span className="project-branch" data-tip={branchText}>
             {branchText}
             {b?.ahead ? ` ↑${b.ahead}` : ''}
             {b?.behind ? ` ↓${b.behind}` : ''}
           </span>
         )}
         <span className="project-head-gap" />
-        <button type="button" className="project-icon-btn" onClick={onRefresh} title={C.refresh} aria-label={C.refresh}>
+        <button type="button" className="project-icon-btn" onClick={onRefresh} data-tip={C.refresh} aria-label={C.refresh}>
           <Icon name="refresh" size={14} />
         </button>
-        <button type="button" className="project-icon-btn" onClick={() => setProjectOpen(false)} title={`${C.close}（${PROJECT_TOGGLE_LABEL}）`} aria-label={C.close}>
+        <button type="button" className="project-icon-btn" onClick={() => setProjectOpen(false)} data-tip={`${C.close}（${PROJECT_TOGGLE_LABEL}）`} aria-label={C.close}>
           <Icon name="x" size={14} />
         </button>
       </div>
       {head && head.root && (
-        <div className="project-root" title={C.rootTitle(head.root)}>
+        <div className="project-root" data-tip={C.rootTitle(head.root)}>
           <bdi>{head.root}</bdi>
         </div>
       )}

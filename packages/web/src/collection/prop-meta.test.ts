@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest'
 import { newView, PROP_TYPES, TITLE_PROP, type CollectionProp } from '@ramet/shared/collection-model'
-import { columnWidth, formatDate, formatStamp, formulaDate, hrefOf, localDay, moveTo, nextColor, parseDateInput, parseNumberInput, TYPE_ORDER } from './prop-meta'
+import { columnWidth, formatDate, formatStamp, formulaDate, hrefOf, moveTo, nextColor, parseNumberInput, TYPE_ORDER } from './prop-meta'
 
 /* 不变量：数字 / 链接 / 时间的「输入 → 值」「值 → 显示」只在 prop-meta 定义；空输入 = 清空，认不出 = 不写 */
 
@@ -57,19 +57,6 @@ test('日期显示：单日原样，区间「开始 → 结束」；认不出原
   expect(formatDate('2026-01-02')).toBe('2026-01-02')
   expect(formatDate('2026-01-02/2026-01-05')).toBe('2026-01-02 → 2026-01-05')
   expect(formatDate('垃圾')).toBe('垃圾')
-  expect(localDay(new Date(2026, 0, 2, 23, 59))).toBe('2026-01-02')
-})
-
-test('日期输入：一天的几种写法与区间；「/」只在两侧都是 YYYY-MM-DD 时算区间', () => {
-  expect(parseDateInput('2026/1/2')).toBe('2026-01-02')
-  expect(parseDateInput('2026.1.2')).toBe('2026-01-02')
-  expect(parseDateInput('2026年1月2日')).toBe('2026-01-02')
-  expect(parseDateInput('2026-01-02/2026-01-05')).toBe('2026-01-02/2026-01-05')
-  expect(parseDateInput('2026-01-05 -> 2026-01-02')).toBe('2026-01-02/2026-01-05')
-  expect(parseDateInput('2026-01-02 ～ 2026-01-02')).toBe('2026-01-02')
-  expect(parseDateInput('2026-02-30')).toBeUndefined()
-  expect(parseDateInput('1')).toBeUndefined()
-  expect(parseDateInput('')).toBeUndefined()
 })
 
 test('公式算出的日期：单日 / 区间同日期格，时间戳同创建时间格（本地时区）', () => {

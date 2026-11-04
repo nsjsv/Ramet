@@ -16,9 +16,11 @@ type Props = {
   className?: string
   /** 'below' = 贴在触发元素下面（缺省）；'over' = 盖在它上面（单元格编辑） */
   place?: 'below' | 'over'
+  /** 至少与触发元素同宽（下拉列表：比触发器窄会像是挂歪了）；'over' 恒同宽 */
+  matchWidth?: boolean
 }
 
-export function Popover({ anchor, onClose, children, className, place = 'below' }: Props) {
+export function Popover({ anchor, onClose, children, className, place = 'below', matchWidth = false }: Props) {
   const ref = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState<{ left: number; top: number; minWidth?: number } | null>(null)
   const close = useRef(onClose)
@@ -34,16 +36,15 @@ export function Popover({ anchor, onClose, children, className, place = 'below' 
       const left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8))
       let top = place === 'over' ? r.top : r.bottom + 4
       if (top + h > window.innerHeight - 8) top = Math.max(8, (place === 'over' ? r.bottom : r.top - 4) - h)
-      setPos((prev) =>
-        prev && prev.left === left && prev.top === top ? prev : { left, top, ...(place === 'over' ? { minWidth: r.width } : {}) },
-      )
+      const minWidth = place === 'over' || matchWidth ? r.width : undefined
+      setPos((prev) => (prev && prev.left === left && prev.top === top && prev.minWidth === minWidth ? prev : { left, top, minWidth }))
     }
     place1()
     // 内容变高（选项多了、筛选条件加了）要重新定位，否则会伸出视口
     const ro = new ResizeObserver(place1)
     ro.observe(el)
     return () => ro.disconnect()
-  }, [anchor, place])
+  }, [anchor, place, matchWidth])
 
   useEffect(() => {
     const el = ref.current
@@ -52,7 +53,7 @@ export function Popover({ anchor, onClose, children, className, place = 'below' 
     const above = (): HTMLElement[] => stack.slice(stack.indexOf(el))
     const onDown = (e: MouseEvent): void => {
       const target = e.target as Node | null
-      if (!target || above().some((p) => p.contains(target)) || anchor?.contains(target)) return
+      if (!target || above().some((p) => p.contains(target)) || onTrigger(anchor, target)) return
       close.current()
     }
     const onKey = (e: KeyboardEvent): void => {
@@ -87,6 +88,15 @@ export function Popover({ anchor, onClose, children, className, place = 'below' 
     </div>,
     document.body,
   )
+}
+
+/** 点在触发元素上（不算外点）。以触发元素为控件的 <label>（包着它的、for 指向它的）也算：点 label 的文字会转发成一次点触发元素，
+ *  这里先关的话那次点击又把弹层打开。控件是别的元素的 label 照常算外点 */
+function onTrigger(anchor: HTMLElement | null, target: Node): boolean {
+  if (!anchor) return false
+  if (anchor.contains(target)) return true
+  const labels = 'labels' in anchor ? (anchor as HTMLButtonElement).labels : null
+  return labels ? [...labels].some((l) => l.contains(target)) : false
 }
 
 /** 从弹层里打开、盖在它上面的别的浮层（如列菜单里打开的公式编辑弹窗）：挂载期间登记进弹层栈。

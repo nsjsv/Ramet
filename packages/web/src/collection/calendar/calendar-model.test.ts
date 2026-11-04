@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest'
 import { dateSpan, type CollectionRow } from '@ramet/shared/collection-model'
 import { parseRange } from '@ramet/shared/collection-query'
-import { fitLanes, fitWeek, isMonth, itemsOn, layoutWeeks, monthGrid, shiftMonth, shiftSpan, type CalItem, type Placed } from './calendar-model'
+import { calendarGrid, fitLanes, fitWeek, isMonth, itemsOn, layoutWeeks, shiftSpan, type CalItem, type Placed } from './calendar-model'
 
 /* 日历排版：6 × 7 周一开头；条目按周截断、各周分车道（开始早、跨度长的先放）；放不下的收进「+N」，
  * 每天显示的 + 收起的 = 当天的全部条目；拖动整体平移，区间长度不变 */
@@ -20,31 +20,22 @@ const row = (id: string): CollectionRow => ({
 const item = (id: string, value: string): CalItem => ({ row: row(id), span: dateSpan(value)! })
 const brief = (p: Placed) => [p.row.id, p.colStart, p.colEnd, p.lane, p.clippedLeft, p.clippedRight]
 
+// 月格本身（42 格、翻月）的用例在 ui/date-model.test.ts
 describe('月历网格', () => {
-  test('周一开头的 42 格；范围是第一格到最后一格（取数用，合法的 range）', () => {
-    const grid = monthGrid('2026-11') // 11-01 是周日
-    expect(grid.days).toHaveLength(42)
-    expect(grid.from).toBe('2026-10-26')
-    expect(grid.days[6]).toBe('2026-11-01')
-    expect(grid.to).toBe('2026-12-06')
+  test('取数范围是第一格到最后一格（合法的 range）', () => {
+    const grid = calendarGrid('2026-11') // 11-01 是周日
     expect(grid.range).toBe('2026-10-26..2026-12-06')
     expect(parseRange(grid.range)).toEqual({ from: grid.from, to: grid.to })
-    // 1 号就是周一：第一格就是 1 号
-    expect(monthGrid('2026-06').from).toBe('2026-06-01')
-    expect(monthGrid('2024-02').days).toContain('2024-02-29')
   })
 
-  test('翻月跨年；月份写法校验', () => {
-    expect(shiftMonth('2026-12', 1)).toBe('2027-01')
-    expect(shiftMonth('2026-01', -1)).toBe('2025-12')
-    expect(shiftMonth('2026-05', -17)).toBe('2024-12')
+  test('月份写法校验', () => {
     expect(isMonth('2026-11')).toBe(true)
     for (const bad of ['2026-13', '2026-00', '2026-1', '0000-01', 202611, null]) expect(isMonth(bad)).toBe(false)
   })
 })
 
 describe('按周分车道', () => {
-  const grid = monthGrid('2026-11') // 第 0 周 10-26..11-01，第 1 周 11-02..11-08
+  const grid = calendarGrid('2026-11') // 第 0 周 10-26..11-01，第 1 周 11-02..11-08
   test('区间跨周在换行处断开、下一周从行首续画；单日落在对应列', () => {
     const weeks = layoutWeeks([item('a', '2026-10-31/2026-11-03'), item('b', '2026-11-04')], grid)
     expect(weeks[0]!.map(brief)).toEqual([['a', 5, 6, 0, false, true]])
@@ -76,7 +67,7 @@ describe('按周分车道', () => {
 })
 
 describe('「+N」', () => {
-  const grid = monthGrid('2026-11')
+  const grid = calendarGrid('2026-11')
   test('放得下全画；放不下时前 capacity - 1 条车道总显示，最后一条只在覆盖的每天都放得下时显示；显示的 + 收起的 = 当天全部', () => {
     const items = [
       item('a', '2026-11-02/2026-11-04'),

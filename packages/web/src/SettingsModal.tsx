@@ -3,7 +3,7 @@ import type { Page, Space, User } from './api'
 import { COPY } from './copy'
 import { Icon, type IconName } from './icons'
 import { MachinesPane } from './MachinesPane'
-import Modal from './Modal'
+import Modal from './ui/Modal'
 import { QuickAiPane } from './QuickAiPane'
 import SpaceSettings from './SpaceSettings'
 import { ConnectorsPane } from './ConnectorsPane'
@@ -17,8 +17,8 @@ import { AccountPane, AgentPane, AppearancePane, EditorPane, ShortcutsPane } fro
  *          · 机器（谁能用接入的机器：授权 / 申请 / 使用记录）
  * 空间组：无选中空间时不出现；连接器是写入口，只读成员不出现（成员能接入自己的机器，批准要空间所有者）；
  * 机器分页只读成员也看得到列表（只是不能申请）。
- * 权限只在分页可见性上表达；各分页内容自己管自己的动作权限。外壳是 Modal（portal 到 body，见 Modal.tsx）。
- * 卡片 / 行 / 开关等原语在 form-kit.tsx，各分页在 settings-panes.tsx 与 SpaceSettings.tsx。 */
+ * 权限只在分页可见性上表达；各分页内容自己管自己的动作权限。外壳是 Modal（portal 到 body，见 ui/Modal.tsx）。
+ * 卡片 / 行 / 开关等原语在 ui/form-kit.tsx，各分页在 settings-panes.tsx 与 SpaceSettings.tsx。 */
 
 type TabId = 'account' | 'appearance' | 'editor' | 'keys' | 'agent' | 'quick' | 'space' | 'connectors' | 'machines'
 
@@ -91,7 +91,7 @@ export default function SettingsModal({
         {personal.map(navItem)}
         {spaceTabs.length > 0 && space && (
           <>
-            <div className="set-nav-group" title={space.name}>
+            <div className="set-nav-group" data-tip={space.name}>
               空间 · {space.name}
             </div>
             {spaceTabs.map(navItem)}
@@ -104,7 +104,7 @@ export default function SettingsModal({
             <h2 className="set-main-title">{meta.label}</h2>
             <p className="set-main-desc">{active === 'space' && space ? `「${space.name}」的${meta.desc}` : meta.desc}</p>
           </div>
-          <button className="modal-close" onClick={onClose} title="关闭">
+          <button className="modal-close" onClick={onClose} data-tip="关闭" aria-label="关闭">
             <Icon name="x" size={16} />
           </button>
         </header>

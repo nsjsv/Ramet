@@ -15,6 +15,7 @@ import { blockDragTarget, moveBlockToPage } from './editor/page-drop'
 import { writeTitleFragment } from './editor/title-fragment'
 import { usePersistentSet } from './tree-state'
 import { peekDirPageDrag, takeDirPageDrag } from './tree-drag'
+import { toast, toastError } from './ui/toast'
 
 export interface PageNode extends Page {
   children: PageNode[]
@@ -194,7 +195,7 @@ export function PageTreeBoard({
     } catch (err) {
       console.error(err)
       const cycle = err instanceof Error && err.message === 'parent_id would create a cycle'
-      window.alert(cycle ? COPY.tree.moveIntoSelf : COPY.tree.moveFailed)
+      toast(cycle ? COPY.tree.moveIntoSelf : COPY.tree.moveFailed, { kind: 'error' })
       return
     }
     onChanged()
@@ -206,7 +207,7 @@ export function PageTreeBoard({
       await api.moveItemToPageTree(itemId, targetParentId, index)
     } catch (err) {
       console.error(err)
-      window.alert(err instanceof Error && err.message ? err.message : COPY.tree.moveFailed)
+      toastError(err, COPY.tree.moveFailed)
     }
     onChanged()
   }
@@ -445,7 +446,7 @@ function TreeItem({ node, depth, ...cb }: TreeCallbacks & { node: PageNode; dept
             <button
               className="arrow"
               onClick={() => cb.onToggle(node.id)}
-              title={expanded ? COPY.tree.collapse : COPY.tree.expand}
+              data-tip={expanded ? COPY.tree.collapse : COPY.tree.expand} aria-label={expanded ? COPY.tree.collapse : COPY.tree.expand}
               aria-expanded={expanded}
             >
               <Icon name="chevron" size={12} className={'chev' + (expanded ? ' open' : '')} />
@@ -472,7 +473,7 @@ function TreeItem({ node, depth, ...cb }: TreeCallbacks & { node: PageNode; dept
           <NavLink
             to={`/page/${node.id}`}
             className={({ isActive }) => 'tree-label' + (isActive ? ' active' : '')}
-            title={node.title || COPY.untitled}
+            data-tip={node.title || COPY.untitled}
             onDoubleClick={() => !cb.readOnly && cb.onRenameStart(node.id)}
             draggable={false}
           >
@@ -483,11 +484,11 @@ function TreeItem({ node, depth, ...cb }: TreeCallbacks & { node: PageNode; dept
           <span className="tree-actions">
             {/* 集合的行从表格「+ 新建」建，不在侧栏建子页 */}
             {!isCollection && (
-              <button className="icon-btn" title={COPY.tree.newChild} onClick={() => cb.onCreateChild(node.id)}>
+              <button className="icon-btn" data-tip={COPY.tree.newChild} aria-label={COPY.tree.newChild} onClick={() => cb.onCreateChild(node.id)}>
                 <Icon name="plus" size={14} />
               </button>
             )}
-            <button className="icon-btn danger" title={COPY.tree.remove} onClick={() => cb.onRemove(node)}>
+            <button className="icon-btn danger" data-tip={COPY.tree.remove} aria-label={COPY.tree.remove} onClick={() => cb.onRemove(node)}>
               <Icon name="x" size={14} />
             </button>
           </span>

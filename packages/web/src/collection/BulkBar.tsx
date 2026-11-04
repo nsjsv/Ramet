@@ -12,7 +12,7 @@ import { bulkEditable, editorKind, pickOnce } from './cells/editor-kind'
 import type { CollectionHandle } from './collection-store'
 import { useCollectionPages } from './collection-store'
 import { CollectionChooser } from './CollectionPicker'
-import { Popover, usePopover } from './popover'
+import { Popover, usePopover } from '../ui/popover'
 import { TYPE_ICON } from './prop-meta'
 import { moveRowsConfirmed, moveTargets, trashRowsConfirmed, type Animate } from './row-actions'
 

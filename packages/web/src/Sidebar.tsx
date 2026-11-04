@@ -18,6 +18,9 @@ import FavoritesList from './FavoritesList'
 import { Avatar } from './Avatar'
 import { useInbox } from './inbox/inbox-store'
 import { attentionCount } from './inbox/inbox-model'
+import { confirmDialog, promptDialog } from './ui/dialog'
+import { toast, toastError } from './ui/toast'
+import { Checkbox } from './ui/Checkbox'
 
 // 侧栏顶部搜索框：GET /api/search?q= 防抖下拉，命中点击跳页
 function SidebarSearch({ onPick }: { onPick: (id: string) => void }) {
@@ -27,6 +30,7 @@ function SidebarSearch({ onPick }: { onPick: (id: string) => void }) {
   /** 是否连 agent 工具调用过程页一起搜（默认不搜，见 api.search） */
   const [includeAgent, setIncludeAgent] = useState(false)
   const boxRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
 
   // 点外部收起下拉
   useEffect(() => {
@@ -59,26 +63,41 @@ function SidebarSearch({ onPick }: { onPick: (id: string) => void }) {
 
   return (
     <div className="sidebar-search" ref={boxRef}>
-      <input
-        className="sidebar-search-input"
-        type="search"
-        placeholder={COPY.side.search}
-        aria-label={COPY.side.search}
-        value={q}
-        onChange={(e) => setQ(e.target.value)}
-        onFocus={() => hits && setOpen(true)}
-      />
+      {/* 不用 type=search：它的清除叉是系统画的，跟不了主题。清除按钮与 Esc 清空自己做 */}
+      <div className="sidebar-search-field">
+        <input
+          ref={inputRef}
+          className="sidebar-search-input"
+          type="text"
+          role="searchbox"
+          placeholder={COPY.side.search}
+          aria-label={COPY.side.search}
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          onFocus={() => hits && setOpen(true)}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape' && q && !e.nativeEvent.isComposing) setQ('')
+          }}
+        />
+        {q && (
+          <button
+            type="button"
+            className="sidebar-search-clear"
+            aria-label={COPY.side.clearSearch}
+            data-tip={COPY.side.clearSearch}
+            onClick={() => {
+              setQ('')
+              inputRef.current?.focus()
+            }}
+          >
+            <Icon name="x" size={14} />
+          </button>
+        )}
+      </div>
       {open && hits !== null && (
         <div className="sidebar-search-results">
           {/* agent 过程页默认不出现在结果里（工具调用文本会淹没真实内容）；要搜就显式勾上 */}
-          <label className="sidebar-search-scope">
-            <input
-              type="checkbox"
-              checked={includeAgent}
-              onChange={(e) => setIncludeAgent(e.target.checked)}
-            />
-            {COPY.side.includeRuns}
-          </label>
+          <Checkbox className="sidebar-search-scope" label={COPY.side.includeRuns} checked={includeAgent} onChange={setIncludeAgent} />
           {hits.length === 0 && <div className="sidebar-search-empty">{COPY.side.noHits}</div>}
           {hits.map((hit) => (
             <button
@@ -182,7 +201,7 @@ export default function Sidebar({
       navigate(`/page/${created.id}`)
     } catch (err) {
       console.error(err)
-      window.alert(err instanceof Error && err.message ? err.message : COPY.collection.createFailed)
+      toastError(err, COPY.collection.createFailed)
     }
   }
 
@@ -194,25 +213,24 @@ export default function Sidebar({
 
   // 用户删页 = 移入回收站（可恢复）；只有回收站里的「永久删除」才走物理删（api.deletePage）
   async function remove(node: PageNode) {
-    if (!window.confirm(COPY.tree.confirmTrash(node.title || COPY.untitled))) return
+    if (!(await confirmDialog({ message: COPY.tree.confirmTrash(node.title || COPY.untitled), danger: true }))) return
     try {
       const { trashed } = await api.trashPage(node.id)
       pagesTrashed(trashed)
       onChanged()
     } catch (err) {
       console.error(err)
-      window.alert(COPY.side.trashFailed)
+      toast(COPY.side.trashFailed, { kind: 'error' })
     }
   }
 
   async function createSpace() {
-    const name = window.prompt(COPY.side.newSpaceName)
+    const name = await promptDialog({
+      title: COPY.side.newSpaceName,
+      validate: (v) => (v.trim() && v.trim().length <= 50 ? null : COPY.side.spaceNameInvalid),
+    })
     if (name === null) return
     const trimmed = name.trim()
-    if (!trimmed || trimmed.length > 50) {
-      window.alert(COPY.side.spaceNameInvalid)
-      return
-    }
     try {
       const created = await api.createSpace(trimmed)
       onChanged()
@@ -220,6 +238,7 @@ export default function Sidebar({
       setSpaceMenuOpen(false)
     } catch (err) {
       console.error(err)
+      toastError(err, COPY.retry)
     }
   }
 
@@ -231,7 +250,7 @@ export default function Sidebar({
           <button
             className="btn-collapse"
             onClick={onToggleCollapse}
-            title={collapsed ? COPY.side.expand : COPY.side.collapse}
+            data-tip={collapsed ? COPY.side.expand : COPY.side.collapse}
             aria-label={collapsed ? COPY.side.expand : COPY.side.collapse}
             aria-expanded={!collapsed}
           >
@@ -262,7 +281,7 @@ export default function Sidebar({
           </span>
           <span>{COPY.inbox.nav}</span>
           {inboxCount > 0 && (
-            <span className="side-nav-badge" title={COPY.inbox.badge(inboxCount)} aria-label={COPY.inbox.badge(inboxCount)}>
+            <span className="side-nav-badge" data-tip={COPY.inbox.badge(inboxCount)} aria-label={COPY.inbox.badge(inboxCount)}>
               {inboxCount > 99 ? '99+' : inboxCount}
             </span>
           )}
@@ -289,7 +308,7 @@ export default function Sidebar({
       {/* Notion 式工作区切换器，菜单向上弹 */}
       <div className="sidebar-footer">
         <>
-          <button className="ws-trigger" title={COPY.side.switchSpace} onClick={() => setSpaceMenuOpen((v) => !v)}>
+          <button className="ws-trigger" data-tip={COPY.side.switchSpace} onClick={() => setSpaceMenuOpen((v) => !v)}>
             <span className="ws-trigger-name">
               {selected?.name ?? (spaces === null ? COPY.loading : COPY.side.noSpace)}
             </span>
@@ -297,12 +316,12 @@ export default function Sidebar({
               <Icon name="caret" size={12} />
             </span>
           </button>
-          <button className="ws-cog" title={COPY.side.settings} aria-label={COPY.side.settings} onClick={() => setSettingsOpen(true)}>
+          <button className="ws-cog" data-tip={COPY.side.settings} aria-label={COPY.side.settings} onClick={() => setSettingsOpen(true)}>
             <Icon name="cog" size={16} />
           </button>
           {/* 回收站：写入口，viewer 空间不出现 */}
           {!isViewer && selected && (
-            <button className="ws-trash" title={COPY.side.trash} aria-label={COPY.side.trash} onClick={() => setTrashOpen(true)}>
+            <button className="ws-trash" data-tip={COPY.side.trash} aria-label={COPY.side.trash} onClick={() => setTrashOpen(true)}>
               <Icon name="trash" size={16} />
             </button>
           )}
@@ -323,7 +342,7 @@ export default function Sidebar({
                         setSpaceMenuOpen(false)
                       }}
                     >
-                      <span className="space-item-name" title={s.name}>
+                      <span className="space-item-name" data-tip={s.name}>
                         {s.name}
                       </span>
                       {s.id === selectedSpaceId && <Icon name="check" size={14} />}
@@ -340,14 +359,14 @@ export default function Sidebar({
                     <NavLink
                       to="/admin"
                       className="btn-admin"
-                      title={COPY.side.admin}
+                      data-tip={COPY.side.admin}
                       onClick={() => setSpaceMenuOpen(false)}
                     >
                       {COPY.side.admin}
                     </NavLink>
                   )}
                   <Avatar person={me} />
-                  <span className="sidebar-user" title={user.username}>
+                  <span className="sidebar-user" data-tip={user.username}>
                     {user.username}
                   </span>
                   <button className="btn-logout" onClick={onLogout}>

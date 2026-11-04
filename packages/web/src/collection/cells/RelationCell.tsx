@@ -22,7 +22,7 @@ export function RelationChip({ page, onOpen }: { page: Page; onOpen?: (pageId: s
   )
   if (!onOpen) {
     return (
-      <span className="cl-rel" title={label}>
+      <span className="cl-rel" data-tip={label}>
         {body}
       </span>
     )
@@ -31,7 +31,7 @@ export function RelationChip({ page, onOpen }: { page: Page; onOpen?: (pageId: s
     <button
       type="button"
       className="cl-rel is-link"
-      title={label}
+      data-tip={label}
       onClick={(e) => {
         e.stopPropagation()
         onOpen(page.id)

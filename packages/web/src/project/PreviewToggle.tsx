@@ -44,7 +44,7 @@ export default function PreviewToggle({ pageId }: { pageId: string | undefined }
       <button
         type="button"
         className="topbar-btn"
-        title={C.toggle}
+        data-tip={C.toggle}
         aria-label={C.toggle}
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}

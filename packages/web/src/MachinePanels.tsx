@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { ApiError, type Page } from './api'
 import { Avatar } from './Avatar'
 import { COPY } from './copy'
-import { ConfirmButton } from './form-kit'
+import { ConfirmButton } from './ui/form-kit'
 import { machineApi, type MachineGrant, type MachineRequest, type MachineUsage } from './machine-api'
 import { clockLabel, leftLabel, scopesLabel, usageText } from './machine-format'
 import { relativeTime } from './UpdatesFeed'
@@ -58,16 +58,16 @@ export function GrantsPanel({
       <div className="set-line" key={g.id}>
         <Avatar person={{ id: g.userId, username: g.username, avatar: null }} size={24} />
         <div className="set-line-main">
-          <span className="set-line-name" title={g.username}>
+          <span className="set-line-name" data-tip={g.username}>
             {g.username}
             <span className={`machine-badge is-${g.status}`}>{C.status[g.status]}</span>
           </span>
-          <span className="set-line-sub" title={sub.join(' · ')}>
+          <span className="set-line-sub" data-tip={sub.join(' · ')}>
             {[scopesLabel(g.scopes), ...sub].join(' · ')}
           </span>
         </div>
         {g.status === 'active' && (
-          <ConfirmButton confirmLabel={C.revokeConfirm} title={C.revokeTip} onConfirm={() => void revoke(g)}>
+          <ConfirmButton confirmLabel={C.revokeConfirm} tip={C.revokeTip} onConfirm={() => void revoke(g)}>
             {C.revoke}
           </ConfirmButton>
         )}
@@ -133,7 +133,7 @@ export function RequestsPanel({
         <div className="set-line" key={r.id}>
           <Avatar person={{ id: r.userId, username: r.username, avatar: null }} size={24} />
           <div className="set-line-main">
-            <span className="set-line-name" title={r.username}>
+            <span className="set-line-name" data-tip={r.username}>
               {r.username}
               <span className="machine-when">{relativeTime(r.createdAt)}</span>
             </span>
@@ -225,7 +225,7 @@ export function UsagePanel({
               {text.detail && <span className="set-line-sub machine-wrap">{text.detail}</span>}
               {text.code && <code className="machine-cmd">{text.code}</code>}
             </div>
-            <span className="machine-when" title={clockLabel(u.createdAt)}>
+            <span className="machine-when" data-tip={clockLabel(u.createdAt)}>
               {relativeTime(u.createdAt)}
             </span>
           </div>

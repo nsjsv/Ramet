@@ -55,7 +55,8 @@ function ensureMap(parent: YMap, key: string): YMap {
   return map
 }
 
-function readSchema(doc: Y.Doc): CollectionSchema {
+/** 文档里此刻的定义（不是哪次渲染拿到的快照）：异步确认之后要按它重新取目标 */
+export function readSchema(doc: Y.Doc): CollectionSchema {
   return parseCollection(rootOf(doc).toJSON())
 }
 

@@ -1,0 +1,511 @@
+/* ---------- 确认框 / 输入框（ui/dialog.tsx）----------
+ * 外壳是 .modal（settings.css），这里只给尺寸、排版和层级；按钮沿用 .admin-btn。 */
+
+/* 确认可能从集合弹层（.cl-pop 60）、命令面板（80）里发起：遮罩要压过它们 */
+.modal-overlay:has(> .ui-dialog) {
+  z-index: 85;
+}
+
+.modal.ui-dialog {
+  width: 420px;
+}
+
+.ui-dialog-box {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  outline: none;
+}
+
+.ui-dialog-message {
+  color: var(--ink);
+  font-size: var(--t-sm);
+  line-height: 1.6;
+  /* 文案里的 \n 照样换行（记忆删除确认带了正文摘录） */
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.ui-dialog-title + .ui-dialog-message {
+  color: var(--ink-2);
+}
+
+.ui-dialog-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ui-dialog-label {
+  font-size: var(--t-xs);
+  color: var(--ink-2);
+}
+
+.ui-dialog-input {
+  width: 100%;
+}
+
+.ui-dialog-input[aria-invalid='true'] {
+  border-color: var(--danger);
+}
+
+.ui-dialog-error {
+  margin: -6px 0 0;
+}
+
+.ui-dialog-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+/* 删除类的确认：实底红，与 ConfirmButton 第二步同一个样子 */
+.admin-btn.danger.is-solid {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: var(--on-accent);
+}
+
+.admin-btn.danger.is-solid:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 85%, var(--ink));
+}
+
+/* ---------- Toast（ui/toast.tsx）----------
+ * 底部居中，贴在软键盘上方；容器不接指针，只有条目本身接（不挡下面的页面）。 */
+
+.ui-toasts {
+  position: fixed;
+  left: 50%;
+  bottom: calc(24px + env(safe-area-inset-bottom) + var(--kb, 0px));
+  z-index: 88;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: max-content;
+  max-width: calc(100vw - 32px);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.ui-toast {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 440px;
+  padding: 6px 6px 6px 12px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: var(--t-sm);
+  line-height: 1.5;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-2);
+  pointer-events: auto;
+  animation: rise var(--d-2) var(--ease-out);
+  transition: opacity var(--d-1) var(--ease-out), transform var(--d-1) var(--ease-out);
+}
+
+/* 种类只用左侧一个色点区分，正文保持正文色（红字整段读起来刺眼） */
+.ui-toast::before {
+  content: '';
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.ui-toast.is-success::before {
+  background: var(--ok);
+}
+
+.ui-toast.is-error::before {
+  background: var(--danger);
+}
+
+.ui-toast.is-leaving {
+  opacity: 0;
+  transform: translateY(4px);
+  pointer-events: none;
+}
+
+.ui-toast-text {
+  flex: 1;
+  min-width: 0;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.ui-toast-close {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--r-sm);
+  color: var(--ink-3);
+  transition: background var(--d-1), color var(--d-1);
+}
+
+.ui-toast-close:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+/* ---------- 下拉选择（ui/Select.tsx）----------
+ * 尺寸（内边距、边框、字号）给的是缺省值，用 button:where() 压低优先级：调用处原有的输入框类（.admin-field、.login-input、
+ * .member-role-select…）照样管住它，和旁边的输入框一样高。这里只统一 caret、悬停、焦点、禁用与列表的样子。 */
+
+button:where(.ui-select) {
+  padding: 4px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--ink);
+}
+
+button:where(.ui-select.is-sm) {
+  padding: 2px 6px;
+}
+
+.ui-select {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--d-1) var(--ease-out), background-color var(--d-1) var(--ease-out);
+}
+
+.ui-select:hover:not(:disabled) {
+  border-color: var(--ink-3);
+}
+
+.ui-select[aria-expanded='true'],
+.ui-select:focus-visible {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.ui-select:focus-visible {
+  box-shadow: 0 0 0 2px var(--accent-tint);
+}
+
+.ui-select:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* 当前项与各选项的隐形副本叠在同一格里：格宽 = 最长的选项；放不下时当前项省略号截断 */
+.ui-select-text {
+  flex: 1;
+  display: grid;
+  min-width: 0;
+}
+
+.ui-select-text > * {
+  grid-area: 1 / 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ui-select-sizer {
+  height: 0;
+  visibility: hidden;
+}
+
+.ui-select.is-empty .ui-select-text {
+  color: var(--ink-3);
+}
+
+.ui-select-caret {
+  flex: none;
+  color: var(--ink-3);
+}
+
+/* 列表：可能开在 Modal（50）、集合弹层（60）、确认框（85）里，一律压在它们上面；外点 / 滚动即关，压住别人无害 */
+.cl-pop.ui-listbox {
+  z-index: 86;
+  max-height: min(320px, calc(100vh - 16px));
+  max-width: min(360px, calc(100vw - 16px));
+}
+
+.ui-listbox-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  outline: none;
+}
+
+.ui-option {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 4px 8px;
+  border-radius: var(--r-sm);
+  color: var(--ink);
+  cursor: pointer;
+  user-select: none;
+}
+
+.ui-option.is-active {
+  background: var(--hover);
+}
+
+.ui-option[aria-disabled='true'] {
+  color: var(--ink-3);
+  cursor: default;
+}
+
+.ui-option-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ui-option-check {
+  flex: none;
+  color: var(--accent);
+}
+
+/* ---------- 复选框（ui/Checkbox.tsx）----------
+ * 框本身的样子是 base.css 的全站复选框；这里只给带文字时的缺省排版，用 :where() 压低优先级，
+ * 调用处的包裹类（.share-option、.cl-check、.machine-check…）照样管住间距 / 字色 / 整行布局 */
+
+label:where(.ui-check) {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+label:where(.ui-check:has(> input:disabled)) {
+  cursor: default;
+}
+
+/* ask-form 的是 / 否开关与设置里的 Switch 同一个类；忙时整张表单禁用 */
+.set-switch:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ---------- 日历面板（ui/DatePanel.tsx）----------
+ * 7 列等宽，日格尺寸走 --ui-day-w / --ui-day-h（触屏在 mobile.css 放大）。今天描边、选中实底、非本月淡化、区间中间浅底；
+ * 区间的浅底要连成一条，所以格子之间不留缝，焦点框画在格子外面（z-index 压过邻格）。 */
+
+.ui-date {
+  --ui-day-w: 32px;
+  --ui-day-h: 30px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: max-content;
+  font-size: var(--t-sm);
+  user-select: none;
+}
+
+.ui-date-head {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 0 4px 6px;
+}
+
+.ui-date-title {
+  flex: 1;
+  color: var(--ink);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.ui-date-nav,
+.ui-date-today {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 26px;
+  border-radius: var(--r-sm);
+  color: var(--ink-3);
+  transition: background-color var(--d-1) var(--ease-out), color var(--d-1) var(--ease-out);
+}
+
+.ui-date-nav {
+  width: 26px;
+}
+
+.ui-date-nav.is-prev svg {
+  transform: scaleX(-1);
+}
+
+.ui-date-today {
+  padding: 0 8px;
+  color: var(--ink-2);
+  font-size: var(--t-xs);
+}
+
+.ui-date-nav:hover,
+.ui-date-today:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.ui-date-row {
+  display: grid;
+  grid-template-columns: repeat(7, var(--ui-day-w));
+}
+
+.ui-date-wd {
+  height: 24px;
+  line-height: 24px;
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+  text-align: center;
+}
+
+.ui-day {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--ui-day-h);
+  border-radius: var(--r-sm);
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: background-color var(--d-1) var(--ease-out);
+}
+
+.ui-day:hover {
+  background: var(--hover);
+}
+
+.ui-day.is-out {
+  color: var(--ink-3);
+}
+
+.ui-day.is-today {
+  color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.ui-day.is-between {
+  border-radius: 0;
+  background: var(--accent-tint);
+}
+
+.ui-day.is-selected {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.ui-day:focus-visible {
+  z-index: 1;
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* 带时间：底部 HH:MM */
+.ui-date-time {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  padding: 6px 6px 2px;
+  border-top: 1px solid var(--line);
+  color: var(--ink-2);
+  font-size: var(--t-xs);
+}
+
+.ui-date-time-input {
+  width: 72px;
+  padding: 3px 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--t-sm);
+  font-variant-numeric: tabular-nums;
+  outline: none;
+}
+
+.ui-date-time-input:focus {
+  border-color: var(--accent);
+}
+
+/* 日历弹层：可能开在集合弹层（60）、Modal（50）里，压在它们上面（同下拉列表） */
+.cl-pop.ui-datepop {
+  z-index: 86;
+  padding: 8px;
+}
+
+/* ---------- 日期框（ui/DateField.tsx；提问表单的 DOM 版同类名）----------
+ * 外框画边框，里面的文本框没有边框。外框的内边距 / 边框是 span:where() 低优先级缺省值，调用处的类照样管住尺寸。 */
+
+span:where(.ui-datefield) {
+  padding-right: 2px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+}
+
+.ui-datefield {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  min-width: 0;
+  transition: border-color var(--d-1) var(--ease-out);
+}
+
+.ui-datefield:focus-within {
+  border-color: var(--accent);
+}
+
+.ui-datefield.is-disabled {
+  opacity: 0.55;
+}
+
+.ui-datefield-input {
+  flex: 1;
+  width: 11ch;
+  min-width: 0;
+  padding: 3px 6px;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  outline: none;
+}
+
+.ui-datefield-btn {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--r-sm);
+  color: var(--ink-3);
+  transition: background-color var(--d-1) var(--ease-out), color var(--d-1) var(--ease-out);
+}
+
+.ui-datefield-btn:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.ui-datefield-btn[aria-expanded='true'] {
+  color: var(--accent);
+}

@@ -113,7 +113,7 @@ export default function CollectionSurface({ handle, readOnly, spaceId, onOpenRow
         {error && (
           <div className="cl-error" role="alert">
             <span>{error}</span>
-            <button type="button" className="icon-btn" title={C.dismiss} aria-label={C.dismiss} onClick={handle.clearError}>
+            <button type="button" className="icon-btn" data-tip={C.dismiss} aria-label={C.dismiss} onClick={handle.clearError}>
               <Icon name="x" size={14} />
             </button>
           </div>

@@ -1,12 +1,13 @@
 /* ---------- 列表拖动重排（视图标签、显示属性、选项共用；行的拖动在 table/ 里，要管分组与 FLIP） ----------
  * HTML5 拖放。落点按指针在目标项的前半 / 后半决定插在它前面还是后面；
  * onMove 收到的是「其余各项里的第 index 位」，与 schema-ops 的 moveProp / moveView / moveOption、prop-meta 的 moveTo 同一口径。 */
-import { useRef, useState, type DragEvent } from 'react'
+import { useRef, useState, type DragEvent, type PointerEvent } from 'react'
 
 type Over = { id: string; after: boolean }
 
 export type ReorderProps = {
   draggable?: boolean
+  onPointerDownCapture?: (e: PointerEvent<HTMLElement>) => void
   onDragStart?: (e: DragEvent<HTMLElement>) => void
   onDragOver?: (e: DragEvent<HTMLElement>) => void
   onDragLeave?: (e: DragEvent<HTMLElement>) => void
@@ -23,6 +24,8 @@ export function useReorder(
   enabled = true,
 ): (id: string) => ReorderProps {
   const dragged = useRef<string | null>(null)
+  /** 按下时指着的元素：dragstart 的 target 是可拖的那一项本身，看不出是从项里的哪个控件起手的 */
+  const pressed = useRef<Element | null>(null)
   const [over, setOver] = useState<Over | null>(null)
   const side = (e: DragEvent<HTMLElement>): boolean => {
     const r = e.currentTarget.getBoundingClientRect()
@@ -32,9 +35,14 @@ export function useReorder(
     if (!enabled) return {}
     return {
       draggable: true,
+      onPointerDownCapture: (e) => {
+        pressed.current = e.target instanceof Element ? e.target : null
+      },
       onDragStart: (e) => {
-        // 从输入框里起手是选文字，不是拖项
-        if ((e.target as HTMLElement).closest('input, textarea')) {
+        // 从输入框里起手是选文字，从下拉里起手是要选值，都不是拖项
+        const from = pressed.current ?? (e.target instanceof Element ? e.target : null)
+        pressed.current = null
+        if (from?.closest('input, textarea, .ui-select')) {
           e.preventDefault()
           return
         }

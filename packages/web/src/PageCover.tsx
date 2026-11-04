@@ -279,7 +279,7 @@ function CoverPicker({ onPick, onClose }: { onPick: (cover: PageCoverValue) => v
               key={p.name}
               type="button"
               className="cover-picker-item"
-              title={p.title}
+              data-tip={p.title}
               onClick={() => pick({ kind: 'preset', value: p.name, y: 50 })}
             >
               <img src={presetThumb(p.name)} alt={p.title} loading="lazy" decoding="async" />

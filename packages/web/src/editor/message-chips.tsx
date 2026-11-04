@@ -220,7 +220,7 @@ function MessageHead({ pageId, view, blockId, cfg, blank, mentions }: MessageHea
         <button
           type="button"
           className="msg-queued"
-          title={QUEUED_TIP}
+          data-tip={QUEUED_TIP}
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => void api.withdrawQueued(pageId, queued.id).catch(() => undefined)}
         >
@@ -232,7 +232,7 @@ function MessageHead({ pageId, view, blockId, cfg, blank, mentions }: MessageHea
           type="button"
           className="msg-send"
           aria-label={COPY.chips.send}
-          title={COPY.chips.send}
+          data-tip={COPY.chips.send}
           // 锁定的工具一台在线的都没有、又没 @ 别的 agent：发出去也只会被拒，提示在 chip 上
           disabled={blank || (lock !== '' && !agent && !mentions)}
           // 别把编辑器焦点抢走；发送本身走与「末尾空行回车」同一个 sendLast

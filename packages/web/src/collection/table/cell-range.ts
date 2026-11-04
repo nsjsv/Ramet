@@ -17,7 +17,8 @@ import {
   type CollectionRow,
   type PropValue,
 } from '@ramet/shared/collection-model'
-import { parseDateInput, parseNumberInput } from '../prop-meta'
+import { parseNumberInput } from '../prop-meta'
+import { parseDateInput } from '../../ui/date-model'
 import { shownText } from '../value-text'
 
 export type CellPos = { row: number; col: number }

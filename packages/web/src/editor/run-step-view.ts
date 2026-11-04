@@ -55,7 +55,7 @@ function actButton(act: string, label: string, icon: string): HTMLButtonElement 
   b.type = 'button'
   b.className = 'run-step-act'
   b.dataset.act = act
-  b.title = label
+  b.dataset.tip = label
   b.setAttribute('aria-label', label)
   b.innerHTML = icon
   return b
@@ -175,7 +175,7 @@ export function runStepView(pageId: string, opts: { editable: boolean; back: (pa
         else dom.removeAttribute('data-parent')
         ic.innerHTML = stepIcon(k, kind)
         verb.textContent = stepVerb(k, kind)
-        verb.title = typeof t === 'number' ? fmtClock(t) : ''
+        verb.dataset.tip = typeof t === 'number' ? fmtClock(t) : ''
         // 行上的字：只读镜像（一行，CSS 省略）；能改的那份在「高级」里
         label.textContent = stepText(current).replace(/\s+/g, ' ').trim()
         meta.textContent = typeof t === 'number' && typeof end === 'number' ? fmtDuration(end - t) : ''

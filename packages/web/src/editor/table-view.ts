@@ -146,7 +146,8 @@ export const tableView = $view(tableIdSchema.node, () => {
     menuBtn.type = 'button'
     menuBtn.className = 'table-menu-btn'
     menuBtn.contentEditable = 'false'
-    menuBtn.title = '表格操作'
+    menuBtn.dataset.tip = '表格操作'
+    menuBtn.setAttribute('aria-label', '表格操作')
     menuBtn.innerHTML = iconSvg('more', 16)
     const table = document.createElement('table')
     const colgroup = document.createElement('colgroup')

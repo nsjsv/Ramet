@@ -85,14 +85,14 @@ export default function FileViewer({
   return (
     <div className="project-viewer" ref={rootRef}>
       <div className="project-viewer-head">
-        <button type="button" className="project-icon-btn" onClick={onBack} title={C.back} aria-label={C.back}>
+        <button type="button" className="project-icon-btn" onClick={onBack} data-tip={C.back} aria-label={C.back}>
           <Icon name="chevron" className="project-back-ico" />
         </button>
-        <span className="project-viewer-path" title={path}>
+        <span className="project-viewer-path" data-tip={path}>
           {path}
         </span>
         {hint && <span className="project-hint">{hint}</span>}
-        <button type="button" className="project-chip-btn" onClick={reference} title={C.referenceTitle}>
+        <button type="button" className="project-chip-btn" onClick={reference} data-tip={C.referenceTitle}>
           {C.reference}
         </button>
       </div>
@@ -200,7 +200,7 @@ function Content({
           type="button"
           className="project-quick-hint"
           style={{ left: quick.hint.left, top: quick.hint.top }}
-          title={COPY.quick.code.menuTitle}
+          data-tip={COPY.quick.code.menuTitle} aria-label={COPY.quick.code.menuTitle}
           onMouseDown={(e) => e.preventDefault()}
           onClick={quick.open}
         >

@@ -15,7 +15,7 @@ export function formulaBroken(prop: CollectionProp): boolean {
 export function FormulaCell({ prop, row }: { prop: CollectionProp; row: CollectionRow }) {
   if (!prop.output) {
     return formulaBroken(prop) ? (
-      <span className="cl-text is-dim cl-formula-bad" title={prop.formulaError?.message}>
+      <span className="cl-text is-dim cl-formula-bad" data-tip={prop.formulaError?.message}>
         {F.bad}
       </span>
     ) : null

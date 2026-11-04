@@ -1,4 +1,4 @@
-/* ---------- 弹窗外壳（Modal.tsx：设置 / 回收站共用，portal 到 body）---------- */
+/* ---------- 弹窗外壳（ui/Modal.tsx：设置 / 回收站共用，portal 到 body）---------- */
 
 .modal-overlay {
   position: fixed;
@@ -171,7 +171,7 @@
   padding: 2px 24px 24px;
 }
 
-/* ---------- 卡片 / 行（form-kit.tsx）---------- */
+/* ---------- 卡片 / 行（ui/form-kit.tsx）---------- */
 
 .set-card-title {
   margin: 0 0 6px 2px;

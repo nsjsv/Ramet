@@ -54,7 +54,7 @@ export function useEditMode(): EditMode {
 export function EditModeItems() {
   const on = useEditMode() === 'source'
   return (
-    <button type="button" aria-pressed={on} title={COPY.editMode.sourceHint} onClick={() => setEditMode(on ? 'rich' : 'source')}>
+    <button type="button" aria-pressed={on} data-tip={COPY.editMode.sourceHint} onClick={() => setEditMode(on ? 'rich' : 'source')}>
       <Icon name="code-block" className="menu-icon" />
       {COPY.editMode.source}
       {on && <Icon name="check" size={14} className="menu-check" />}

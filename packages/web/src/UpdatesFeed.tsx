@@ -110,7 +110,7 @@ function UpdateItem({
           <button
             type="button"
             className="uf-jump"
-            title="在历史版本中查看"
+            data-tip="在历史版本中查看"
             aria-label="在历史版本中查看"
             onClick={() => onJump(entry.id)}
           >

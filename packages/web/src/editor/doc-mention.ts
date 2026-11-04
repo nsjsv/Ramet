@@ -129,7 +129,7 @@ function render(c: DocMentionController): void {
       const back = document.createElement('button')
       back.type = 'button'
       back.className = 'mention-back'
-      back.title = COPY.mention.back
+      back.dataset.tip = COPY.mention.back
       back.innerHTML = iconSvg('chevron', 12)
       back.append(row.title)
       back.addEventListener('mousedown', (e) => e.preventDefault())

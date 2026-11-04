@@ -436,6 +436,14 @@
   width: 160px;
 }
 
+/* 日期框（ui-datefield 的 DOM 版）：与旁边的单行框同高同字号 */
+.ask-date {
+  width: 220px;
+  max-width: 100%;
+  min-height: 30px;
+  font-size: var(--t-sm);
+}
+
 .ask-switch {
   display: inline-flex;
   align-items: center;

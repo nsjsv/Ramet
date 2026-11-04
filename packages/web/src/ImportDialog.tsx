@@ -2,7 +2,8 @@ import { useRef, useState, type DragEvent } from 'react'
 import { api, type Page } from './api'
 import { buildZip, type ZipFile } from './export/zip-write'
 import { Icon } from './icons'
-import Modal from './Modal'
+import Modal from './ui/Modal'
+import { Checkbox } from './ui/Checkbox'
 
 /* ---------- 导入 Markdown / Obsidian ----------
  * 选文件（.md / .markdown / .zip，可多选）、选文件夹、或拖进来；落在空间顶层或当前页下面。
@@ -130,7 +131,7 @@ export default function ImportDialog({
           <h2 className="modal-title">导入 Markdown</h2>
           <p className="create-sub">.md 文件、整个文件夹（含 Obsidian 库）或 .zip</p>
         </div>
-        <button className="modal-close" onClick={onClose} title="关闭">
+        <button className="modal-close" onClick={onClose} data-tip="关闭" aria-label="关闭">
           <Icon name="x" size={16} />
         </button>
       </header>
@@ -196,10 +197,12 @@ export default function ImportDialog({
       </ul>
 
       {currentPage && (
-        <label className="create-where">
-          <input type="checkbox" checked={underCurrent} onChange={(e) => setUnderCurrent(e.target.checked)} />
-          放在「{currentPage.title || '无标题'}」下面（不勾 = 空间顶层）
-        </label>
+        <Checkbox
+          className="create-where"
+          label={<>放在「{currentPage.title || '无标题'}」下面（不勾 = 空间顶层）</>}
+          checked={underCurrent}
+          onChange={setUnderCurrent}
+        />
       )}
       {error && <div className="modal-error">{error}</div>}
       <div className="create-foot">

@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { api, type Page } from './api'
 import { Icon } from './icons'
-import Modal from './Modal'
+import Modal from './ui/Modal'
+import { Checkbox } from './ui/Checkbox'
 import { PageIcon } from './PageIcon'
 import { builtinTemplates } from './templates-builtin'
 
@@ -57,7 +58,7 @@ export default function TemplatePicker({
           <h2 className="modal-title">从模板新建</h2>
           <p className="create-sub">页面 ⋮ 菜单里「设为模板」的页面会出现在这里</p>
         </div>
-        <button className="modal-close" onClick={onClose} title="关闭">
+        <button className="modal-close" onClick={onClose} data-tip="关闭" aria-label="关闭">
           <Icon name="x" size={16} />
         </button>
       </header>
@@ -100,10 +101,12 @@ export default function TemplatePicker({
       </div>
 
       {currentPage && (
-        <label className="create-where">
-          <input type="checkbox" checked={underCurrent} onChange={(e) => setUnderCurrent(e.target.checked)} />
-          放在「{currentPage.title || '无标题'}」下面（不勾 = 空间顶层）
-        </label>
+        <Checkbox
+          className="create-where"
+          label={<>放在「{currentPage.title || '无标题'}」下面（不勾 = 空间顶层）</>}
+          checked={underCurrent}
+          onChange={setUnderCurrent}
+        />
       )}
       {error && <div className="modal-error">{error}</div>}
     </Modal>

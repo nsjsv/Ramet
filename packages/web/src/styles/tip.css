@@ -1,4 +1,4 @@
-/* 悬停提示（tip.ts）：挂在 body 上的单个浮层，left / top 由 JS 逐帧写入，所以只做淡入淡出、不做位移动画。
+/* 悬停提示（ui/tip.ts）：挂在 body 上的单个浮层，left / top 由 JS 逐帧写入，所以只做淡入淡出、不做位移动画。
  * width: max-content 让宽度只看文字，不随上一次停的位置（离右缘多近）变窄折行。
  * z-index 90 压过所有浮层（最高的 80），菜单里的按钮也能出提示。 */
 .tip {
@@ -16,6 +16,8 @@
   font-size: var(--t-xs);
   font-weight: 500;
   line-height: 1.4;
+  /* 文字里的换行照样换行（用量明细、计划项这类分行说明），连续空格仍折成一个，单行提示不受影响 */
+  white-space: pre-line;
   overflow-wrap: anywhere;
   box-shadow: var(--tip-shadow);
   pointer-events: none;

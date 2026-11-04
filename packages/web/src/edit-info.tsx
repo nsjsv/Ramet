@@ -51,7 +51,7 @@ export function EditInfoLines({ words, info }: { words: number | null; info: Edi
             )}
             <span className="edit-info-name">{look.name}</span>
           </div>
-          <div className="edit-info-when" title={look.title}>
+          <div className="edit-info-when" data-tip={look.title}>
             {look.when}
           </div>
         </>
@@ -78,7 +78,7 @@ export function EditedAgo({ pageId, onOpen }: { pageId: string; onOpen: () => vo
   if (!info) return null
   const look = lookOf(info)
   return (
-    <button type="button" className="topbar-edited" title={`${look.name} · ${look.title}`} onClick={onOpen}>
+    <button type="button" className="topbar-edited" data-tip={`${look.name} · ${look.title}`} onClick={onOpen}>
       {COPY.editInfo.edited(look.when)}
     </button>
   )
@@ -112,7 +112,7 @@ export function renderEditInfo(host: HTMLElement, words: number | null, info: Ed
     name.textContent = look.name
     row.append(plate, name)
     const when = line('edit-info-when', look.when)
-    when.title = look.title
+    when.dataset.tip = look.title
     host.append(line('edit-info-label', COPY.editInfo.label), row, when)
   }
   if (words !== null) host.append(line('edit-info-words', COPY.editInfo.words(words)))

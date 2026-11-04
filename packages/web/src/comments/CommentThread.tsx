@@ -13,6 +13,7 @@ import CommentBody from './CommentBody'
 import CommentComposer from './CommentComposer'
 import type { Comment, CommentAuthor, Thread } from './comments-api'
 import { editComment, removeComment, replyTo, setResolved } from './comments-store'
+import { confirmDialog } from '../ui/dialog'
 
 const C = COPY.comments
 
@@ -42,7 +43,7 @@ function CommentItem({ comment, ctx }: { comment: Comment; ctx: CommentCtx }) {
   const canEdit = !ctx.readOnly && !comment.deleted && mine
 
   async function remove(): Promise<void> {
-    if (!window.confirm(C.confirmRemove)) return
+    if (!(await confirmDialog({ message: C.confirmRemove, danger: true }))) return
     setError(null)
     try {
       await removeComment(comment.id)
@@ -57,7 +58,7 @@ function CommentItem({ comment, ctx }: { comment: Comment; ctx: CommentCtx }) {
       <div className="cm-meta">
         <Avatar person={personFor(comment.author, ctx.spaceId)} size={20} />
         <span className="cm-name">{comment.author?.name ?? C.deletedUser}</span>
-        <span className="cm-time" title={new Date(comment.createdAt).toLocaleString()}>
+        <span className="cm-time" data-tip={new Date(comment.createdAt).toLocaleString()}>
           {relativeTime(comment.createdAt)}
         </span>
         {comment.editedAt && <span className="cm-time">{C.edited}</span>}

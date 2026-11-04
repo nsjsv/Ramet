@@ -56,10 +56,11 @@ function lineRectAt(a: HTMLElement, y: number): DOMRect {
 
 const sameRange = (a: LinkRange, b: LinkRange): boolean => a.from === b.from && a.to === b.to
 
-function button(icon: Parameters<typeof iconSvg>[0], title: string): HTMLButtonElement {
+function button(icon: Parameters<typeof iconSvg>[0], label: string): HTMLButtonElement {
   const btn = document.createElement('button')
   btn.type = 'button'
-  btn.title = title
+  btn.dataset.tip = label
+  btn.setAttribute('aria-label', label)
   btn.innerHTML = iconSvg(icon, 16)
   return btn
 }
@@ -108,7 +109,7 @@ function createLinkHover(view: EditorView, opts: LinkHoverOptions) {
   const unlink = document.createElement('button')
   unlink.type = 'button'
   unlink.className = 'lh-unlink'
-  unlink.title = L.unlinkTitle
+  unlink.dataset.tip = L.unlinkTitle
   unlink.innerHTML = iconSvg('trash', 14)
   unlink.append(L.unlink)
   const hint = document.createElement('span')
@@ -155,7 +156,7 @@ function createLinkHover(view: EditorView, opts: LinkHoverOptions) {
     editing = false
     bar.classList.remove('is-editing')
     addrText.textContent = shortHref(range.href) || range.href
-    addr.title = L.open(range.href)
+    addr.dataset.tip = L.open(range.href)
     edit.hidden = !view.editable
     toBookmark.hidden = !view.editable || !safeBookmarkUrl(range.href)
     copy.innerHTML = iconSvg('copy', 16)

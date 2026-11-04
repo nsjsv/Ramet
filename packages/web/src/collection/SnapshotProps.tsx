@@ -45,14 +45,14 @@ export default function SnapshotProps({ collectionId, spaceId, props, getDoc }: 
     <div className="vh-props" aria-label={H.snapshotProps}>
       {items.map(({ prop, blank, differs }) => (
         <div key={prop.id} className={'vh-prop' + (differs ? ' is-diff' : '')}>
-          <span className="vh-prop-name" title={prop.name || C.types[prop.type]}>
+          <span className="vh-prop-name" data-tip={prop.name || C.types[prop.type]}>
             <Icon name={TYPE_ICON[prop.type]} size={14} />
             <span>{prop.name || C.types[prop.type]}</span>
           </span>
           <span className="vh-prop-value">
             {blank !== null ? <span className="cl-text is-dim">{blank}</span> : <CellView prop={prop} row={row} spaceId={spaceId} />}
           </span>
-          {differs && <span className="vh-prop-diff" title={H.differs} aria-label={H.differs} />}
+          {differs && <span className="vh-prop-diff" data-tip={H.differs} aria-label={H.differs} />}
         </div>
       ))}
     </div>

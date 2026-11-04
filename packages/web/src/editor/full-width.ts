@@ -7,6 +7,7 @@ import { flushSync } from 'react-dom'
 import { api, type Page } from '../api'
 import { COPY } from '../copy'
 import { flip } from '../motion'
+import { toast } from '../ui/toast'
 
 type Pending = { id: string; on: boolean }
 
@@ -33,7 +34,7 @@ export function useFullWidth(
     api.setFullWidth(page.id, on).then(onChanged, (err: unknown) => {
       console.error('set full width failed:', err)
       apply(null)
-      window.alert(COPY.top.fullWidthFailed)
+      toast(COPY.top.fullWidthFailed, { kind: 'error' })
     })
   }
   return [mine ? pending.on : saved, toggle]

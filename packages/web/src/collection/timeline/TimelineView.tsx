@@ -22,7 +22,7 @@ import { RANGE_ROWS_CAP } from '../collection-windows'
 import { DateSetup } from '../date-setup'
 import { useLoadMore } from '../load-more'
 import { readPersonal, writePersonal } from '../personal'
-import { localDay } from '../prop-meta'
+import { localDay } from '../../ui/date-model'
 import { useRangeWindows } from '../range-rows'
 import {
   AXIS_DAYS,
@@ -268,7 +268,7 @@ export default function TimelineView({ handle, schema, view, readOnly, spaceId, 
         <div
           className={'cl-tl-bar' + (canDrag ? ' is-draggable' : '') + (preview?.rowId === row.id ? ' is-dragging' : '')}
           style={{ transform: `translateX(${left}px)`, width: w }}
-          title={!readOnly && !canDrag ? C.date.locked : undefined}
+          data-tip={!readOnly && !canDrag ? C.date.locked : undefined}
           role="button"
           tabIndex={-1}
           {...(canDrag
@@ -278,9 +278,9 @@ export default function TimelineView({ handle, schema, view, readOnly, spaceId, 
               } }
             : { onClick: () => onOpenRow(row.id) })}
         >
-          {canDrag && <span className="cl-tl-grip is-start" title={C.date.resizeStart} onPointerDown={(e) => startDrag(e, row, span, 'start')} />}
+          {canDrag && <span className="cl-tl-grip is-start" data-tip={C.date.resizeStart} onPointerDown={(e) => startDrag(e, row, span, 'start')} />}
           {inside && <span className="cl-tl-bar-name">{title}</span>}
-          {canDrag && <span className="cl-tl-grip is-end" title={C.date.resizeEnd} onPointerDown={(e) => startDrag(e, row, span, 'end')} />}
+          {canDrag && <span className="cl-tl-grip is-end" data-tip={C.date.resizeEnd} onPointerDown={(e) => startDrag(e, row, span, 'end')} />}
         </div>
         {!inside && (
           <span className="cl-tl-after" style={{ transform: `translateX(${left + w + 6}px)` }}>

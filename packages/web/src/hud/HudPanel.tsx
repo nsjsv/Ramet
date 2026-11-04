@@ -114,7 +114,7 @@ export function HudPanel({
           </button>
         )}
         {!embedded && (
-          <button type="button" className="hp-icon" onClick={onClose} title={C.close} aria-label={C.close}>
+          <button type="button" className="hp-icon" onClick={onClose} data-tip={C.close} aria-label={C.close}>
             <Icon name="x" size={16} />
           </button>
         )}

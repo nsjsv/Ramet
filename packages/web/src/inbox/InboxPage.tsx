@@ -18,6 +18,7 @@ import type { InboxItem } from './inbox-api'
 import { inboxApi } from './inbox-api'
 import { splitInbox } from './inbox-model'
 import { dropInboxItem, refreshInbox, useInbox } from './inbox-store'
+import { confirmDialog } from '../ui/dialog'
 
 const C = COPY.inbox
 
@@ -159,8 +160,9 @@ function PendingRow({ item }: { item: Of<'connector_pending'> }) {
             className="inbox-btn is-reject"
             type="button"
             disabled={busy}
-            onClick={() => {
-              if (window.confirm(C.pending.confirmReject(item.machine))) void run(() => api.rejectConnector(item.connectorId))
+            onClick={async () => {
+              const ok = await confirmDialog({ message: C.pending.confirmReject(item.machine), danger: true, confirmLabel: C.pending.reject })
+              if (ok) void run(() => api.rejectConnector(item.connectorId))
             }}
           >
             {C.pending.reject}

@@ -114,11 +114,11 @@ export function FilesEditor({ value, onCommit }: { value: PropValue | undefined;
                 <Icon name="handle" size={10} />
               </span>
               {isImage(file) ? <FileItem file={file} interactive={false} /> : <Icon name="paperclip" size={14} className="cl-files-icon" />}
-              <a className="cl-files-name" href={downloadUrl(file)} download={file.name} title={file.name} draggable={false}>
+              <a className="cl-files-name" href={downloadUrl(file)} download={file.name} data-tip={file.name} draggable={false}>
                 {file.name}
               </a>
               <span className="cl-files-size">{formatSize(file.size)}</span>
-              <button type="button" className="icon-btn" title={C.remove} aria-label={C.remove} onClick={() => commit(latest.current.filter((f) => f.id !== file.id))}>
+              <button type="button" className="icon-btn" data-tip={C.remove} aria-label={C.remove} onClick={() => commit(latest.current.filter((f) => f.id !== file.id))}>
                 <Icon name="x" size={14} />
               </button>
             </div>

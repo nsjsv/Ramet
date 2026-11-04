@@ -37,7 +37,7 @@ export default function MentionMenu({ matches, pages, trigger, category, activeI
               key="back"
               type="button"
               className="mention-back"
-              title={COPY.mention.back}
+              data-tip={COPY.mention.back}
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => onAct({ type: 'back' })}
             >

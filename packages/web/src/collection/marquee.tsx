@@ -90,6 +90,9 @@ export function useMarquee(o: Options): { onPointerDown: (e: React.PointerEvent)
     const { disabled, avoid, root } = opts.current
     const target = e.target as Element
     if (disabled || e.button !== 0 || !root.current || target.closest(NO_START) || (avoid && target.closest(avoid))) return
+    // 弹层（批量栏的值编辑、单元格编辑…）是 portal：React 事件照样沿组件树冒泡到这里，但 DOM 上不在视图里，
+    // 不是视图的空白处 —— 当成空白处单击会清空选择，批量栏连同弹层一起没了（点日历的日格就是这样）
+    if (!root.current.contains(target)) return
     const x0 = e.clientX
     const y0 = e.clientY
     const additive = e.shiftKey || e.metaKey || e.ctrlKey

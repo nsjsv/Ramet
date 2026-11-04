@@ -62,19 +62,19 @@ export default function FindBar(): React.ReactNode {
         <span className={'find-count' + (query && count === 0 ? ' none' : '')}>
           {query ? (count === 0 ? '无结果' : index >= 0 ? `${index + 1}/${count}` : `${count} 处`) : ''}
         </span>
-        <button type="button" className={'find-btn case' + (caseSensitive ? ' on' : '')} title="区分大小写" onClick={() => setFindCase(!caseSensitive)}>
+        <button type="button" className={'find-btn case' + (caseSensitive ? ' on' : '')} data-tip="区分大小写" aria-label="区分大小写" onClick={() => setFindCase(!caseSensitive)}>
           Aa
         </button>
-        <button type="button" className="find-btn" title="上一处（Shift+Enter）" disabled={count === 0} onClick={() => findNext(-1)}>
+        <button type="button" className="find-btn" data-tip="上一处（Shift+Enter）" aria-label="上一处（Shift+Enter）" disabled={count === 0} onClick={() => findNext(-1)}>
           <Icon name="arrow-up" size={14} />
         </button>
-        <button type="button" className="find-btn" title="下一处（Enter）" disabled={count === 0} onClick={() => findNext(1)}>
+        <button type="button" className="find-btn" data-tip="下一处（Enter）" aria-label="下一处（Enter）" disabled={count === 0} onClick={() => findNext(1)}>
           <Icon name="arrow-down" size={14} />
         </button>
-        <button type="button" className="find-btn" title="替换（Ctrl+H）" onClick={() => openFind(true)}>
+        <button type="button" className="find-btn" data-tip="替换（Ctrl+H）" aria-label="替换（Ctrl+H）" onClick={() => openFind(true)}>
           <Icon name="swap" size={14} />
         </button>
-        <button type="button" className="find-btn" title="关闭（Esc）" onClick={closeFind}>
+        <button type="button" className="find-btn" data-tip="关闭（Esc）" aria-label="关闭（Esc）" onClick={closeFind}>
           <Icon name="x" size={14} />
         </button>
       </div>
@@ -94,10 +94,10 @@ export default function FindBar(): React.ReactNode {
             }}
             spellCheck={false}
           />
-          <button type="button" className="find-btn" disabled={count === 0} title="替换当前" onClick={replaceCurrent}>
+          <button type="button" className="find-btn" disabled={count === 0} data-tip="替换当前" onClick={replaceCurrent}>
             替换
           </button>
-          <button type="button" className="find-btn" disabled={count === 0} title="全部替换" onClick={replaceAll}>
+          <button type="button" className="find-btn" disabled={count === 0} data-tip="全部替换" onClick={replaceAll}>
             全部
           </button>
         </div>

@@ -97,6 +97,17 @@ a.cl-file-chip:hover {
 
 .cl-date-row .cl-input {
   flex: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 开了结束日期时，点日历写进哪一端（焦点可能在日历上，框本身没有 :focus） */
+.cl-date-row .cl-input.is-active {
+  border-color: var(--accent);
+}
+
+.cl-date-panel {
+  align-self: center;
+  padding: 4px 0 2px;
 }
 
 .cl-date-toggle {

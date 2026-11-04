@@ -122,7 +122,7 @@
 .skill-panel textarea,
 .skill-head input,
 .skill-head textarea,
-.skill-head select {
+.skill-head .ui-select {
   width: 100%;
   box-sizing: border-box;
   padding: 6px 10px;
@@ -334,7 +334,7 @@
   font-size: var(--t-xs);
 }
 
-.skill-files-head select {
+.skill-files-head .ui-select {
   width: auto;
   padding: 3px 6px;
 }

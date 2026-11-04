@@ -4,11 +4,13 @@ import { Avatar } from './Avatar'
 import { copyText } from './clipboard'
 import { subscribeControl } from './control'
 import { COPY } from './copy'
-import { Card } from './form-kit'
+import { Card } from './ui/form-kit'
 import { Icon } from './icons'
 import { machineApi, type GrantCreated, type MachineScope, type MachineSummary } from './machine-api'
 import { clockLabel, mmss, scopesLabel } from './machine-format'
-import Modal from './Modal'
+import Modal from './ui/Modal'
+import { Checkbox } from './ui/Checkbox'
+import { NumberInput } from './ui/NumberInput'
 
 /* ---------- 授权流程（设置 → 机器 → 授权给某人）----------
  * 故意做得麻烦：选人 + 勾范围，读懂后果，手输对方用户名与机器名并重输密码，再到机器上本地确认。
@@ -52,7 +54,7 @@ export default function MachineGrantWizard({
   const [membersError, setMembersError] = useState(false)
   const [userId, setUserId] = useState(presetUserId ?? '')
   const [picked, setPicked] = useState<Record<MachineScope, boolean>>({ agent: false, machine: false })
-  const [days, setDays] = useState('7')
+  const [days, setDays] = useState(7)
   const [ack, setAck] = useState(false)
   const [typedUser, setTypedUser] = useState('')
   const [typedMachine, setTypedMachine] = useState('')
@@ -81,9 +83,8 @@ export default function MachineGrantWizard({
 
   const grantee = members?.find((m) => m.user_id === userId) ?? null
   const scopes = SCOPES.filter((s) => picked[s])
-  const daysNum = Number(days)
-  const daysOk = days.trim() !== '' && Number.isInteger(daysNum) && daysNum >= DAYS_MIN && daysNum <= DAYS_MAX
-  const step1Ok = grantee !== null && scopes.length > 0 && daysOk
+  // 有效期由数字框收进 1–30 的整数，这里不用再判
+  const step1Ok = grantee !== null && scopes.length > 0
   const typedOk = grantee !== null && typedUser === grantee.username && typedMachine === machine.name && password !== ''
 
   // 第 4 步：每秒走倒计时；每 3 秒（以及中心广播 agents 时）查一次这条授权是不是已经在机器上确认
@@ -138,7 +139,7 @@ export default function MachineGrantWizard({
         username: typedUser,
         machineName: typedMachine,
         scopes,
-        days: daysNum,
+        days,
         userId: grantee.user_id,
       })
       setCreated(res)
@@ -178,7 +179,7 @@ export default function MachineGrantWizard({
             {C.step(step)} · {C.steps[step - 1]}
           </p>
         </div>
-        <button type="button" className="modal-close" onClick={onClose} title={C.close}>
+        <button type="button" className="modal-close" onClick={onClose} data-tip={C.close} aria-label={C.close}>
           <Icon name="x" size={16} />
         </button>
       </header>
@@ -213,25 +214,14 @@ export default function MachineGrantWizard({
               <p className="mw-muted">{C.whoDesc}</p>
               <Card title={C.scopes}>
                 {SCOPES.map((s) => (
-                  <label key={s} className="machine-check">
-                    <input type="checkbox" checked={picked[s]} onChange={() => toggle(s)} />
-                    <span>{COPY.machines.scope[s]}</span>
-                  </label>
+                  <Checkbox key={s} className="machine-check" label={COPY.machines.scope[s]} checked={picked[s]} onChange={() => toggle(s)} />
                 ))}
               </Card>
               {askedScopes && askedScopes.length > 0 && <p className="mw-muted">{C.asked(scopesLabel(askedScopes))}</p>}
               <label className="set-field">
                 <span>{C.days}</span>
-                <input
-                  className="admin-field mw-days"
-                  type="number"
-                  min={DAYS_MIN}
-                  max={DAYS_MAX}
-                  step={1}
-                  value={days}
-                  onChange={(e) => setDays(e.target.value)}
-                />
-                <span className={daysOk ? 'mw-muted' : 'mw-bad'}>{daysOk ? C.daysHint : C.daysInvalid}</span>
+                <NumberInput className="admin-field mw-days" integer min={DAYS_MIN} max={DAYS_MAX} value={days} onChange={(v) => v !== null && setDays(v)} />
+                <span className="mw-muted">{C.daysHint}</span>
               </label>
             </>
           )}
@@ -246,7 +236,7 @@ export default function MachineGrantWizard({
                   {picked.agent && <li>{C.warnAgent}</li>}
                   {picked.machine && <li>{C.warnMachine}</li>}
                   <li>{C.warnWho}</li>
-                  <li>{C.warnTime(daysNum)}</li>
+                  <li>{C.warnTime(days)}</li>
                   <li>{C.warnLog}</li>
                 </ul>
               </div>
@@ -256,12 +246,9 @@ export default function MachineGrantWizard({
                 <dt>{C.sumScope}</dt>
                 <dd>{scopes.map((s) => COPY.machines.scope[s]).join('；')}</dd>
                 <dt>{C.sumDays}</dt>
-                <dd>{C.daysUnit(daysNum)}</dd>
+                <dd>{C.daysUnit(days)}</dd>
               </dl>
-              <label className="machine-check mw-ack">
-                <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} />
-                <span>{C.ack}</span>
-              </label>
+              <Checkbox className="machine-check mw-ack" label={C.ack} checked={ack} onChange={setAck} />
             </>
           )}
 

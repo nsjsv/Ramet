@@ -91,7 +91,8 @@ export class QuickPopover {
     const go = document.createElement('button')
     go.type = 'button'
     go.className = 'quick-go'
-    go.title = Q.run
+    go.dataset.tip = Q.run
+    go.setAttribute('aria-label', Q.run)
     go.innerHTML = iconSvg('arrow-up', 14)
     go.addEventListener('click', () => this.submit())
     head.append(input, go)

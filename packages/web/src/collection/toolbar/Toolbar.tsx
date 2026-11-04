@@ -8,7 +8,7 @@ import { findProp, layoutGroups, type CollectionSchema, type CollectionView } fr
 import { COPY } from '../../copy'
 import { Icon, type IconName } from '../../icons'
 import { usesDate } from '../layouts'
-import { Popover, usePopover } from '../popover'
+import { Popover, usePopover } from '../../ui/popover'
 import { FilterMenu } from './FilterMenu'
 import { GroupMenu, PropsMenu, SortMenu } from './menus'
 

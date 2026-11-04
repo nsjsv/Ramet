@@ -70,7 +70,8 @@ export function createToggleView(initial: PMNode, view: EditorView) {
     const open = !folded(node)
     dom.classList.toggle('is-open', open)
     caret.setAttribute('aria-expanded', String(open))
-    caret.title = open ? '收起' : '展开'
+    caret.dataset.tip = open ? '收起' : '展开'
+    caret.setAttribute('aria-label', caret.dataset.tip)
   }
   caret.addEventListener('mousedown', (e) => e.preventDefault())
   caret.addEventListener('click', () => {

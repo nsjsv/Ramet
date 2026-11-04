@@ -18,6 +18,7 @@ import { agentLabel } from './team-agents'
 import { planStore, teamApi, type PlanPatch } from './team-api'
 import { assigneeLabel, canEditPlan, depNumbers, startBlocker } from './team-model'
 import { startTeamPlan } from './team-send'
+import { confirmDialog } from '../ui/dialog'
 
 const T = COPY.team
 const P = T.plan
@@ -130,7 +131,8 @@ export function PlanCard({ pageId, team, canAct, snapshotOnly }: { pageId: strin
   }
 
   async function cancel(): Promise<void> {
-    if (!window.confirm(P.confirmCancel)) return
+    const ok = await confirmDialog({ message: P.confirmCancel, danger: true, confirmLabel: P.cancel, cancelLabel: COPY.dialog.back })
+    if (!ok) return
     setBusy(true)
     setError(null)
     try {
@@ -160,7 +162,7 @@ export function PlanCard({ pageId, team, canAct, snapshotOnly }: { pageId: strin
         <Icon name="users" size={14} />
         <span className="team-head-title">{P.cardTitle}</span>
         {!open && (
-          <span className="team-head-name" title={shown.title}>
+          <span className="team-head-name" data-tip={shown.title}>
             {shown.title}
           </span>
         )}
@@ -218,11 +220,11 @@ export function PlanCard({ pageId, team, canAct, snapshotOnly }: { pageId: strin
                         </>
                       ) : (
                         <>
-                          <span className="team-who" title={task.assignee}>
+                          <span className="team-who" data-tip={task.assignee}>
                             {assigneeLabel(task, agentLabel)}
                           </span>
                           {task.cwd && (
-                            <span className="team-who" title={T.task.cwdTip(task.cwd)}>
+                            <span className="team-who" data-tip={T.task.cwdTip(task.cwd)}>
                               <Icon name="folder" size={12} /> {baseName(task.cwd)}
                             </span>
                           )}

@@ -8,6 +8,7 @@ import { useEffect, useRef, useState } from 'react'
 import { api } from '../api'
 import { COPY } from '../copy'
 import { Icon } from '../icons'
+import { toast } from '../ui/toast'
 
 const C = COPY.comments
 const CLOSE_DELAY_MS = 180
@@ -29,7 +30,7 @@ export default function CommentSwitches({ pageId, state, onChanged }: { pageId: 
   const toggle = (col: 'inline_comments' | 'page_comments', on: boolean) => {
     api.setCommentSwitch(pageId, col, on).then(onChanged, (err: unknown) => {
       console.error('set comment switch failed:', err)
-      window.alert(C.switchFailed)
+      toast(C.switchFailed, { kind: 'error' })
     })
   }
   return (
@@ -41,11 +42,11 @@ export default function CommentSwitches({ pageId, state, onChanged }: { pageId: 
       </button>
       {open && (
         <div className="page-menu page-menu-sub" role="menu">
-          <button type="button" role="menuitemcheckbox" aria-checked={state.inline} title={C.inlineSwitchHint} onClick={() => toggle('inline_comments', !state.inline)}>
+          <button type="button" role="menuitemcheckbox" aria-checked={state.inline} data-tip={C.inlineSwitchHint} onClick={() => toggle('inline_comments', !state.inline)}>
             {C.inlineSwitch}
             {state.inline && <Icon name="check" size={14} className="menu-check" />}
           </button>
-          <button type="button" role="menuitemcheckbox" aria-checked={state.page} title={C.pageSwitchHint} onClick={() => toggle('page_comments', !state.page)}>
+          <button type="button" role="menuitemcheckbox" aria-checked={state.page} data-tip={C.pageSwitchHint} onClick={() => toggle('page_comments', !state.page)}>
             {C.pageSwitch}
             {state.page && <Icon name="check" size={14} className="menu-check" />}
           </button>

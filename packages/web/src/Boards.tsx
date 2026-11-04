@@ -19,6 +19,8 @@ import { PageTreeBoard, type PageDrag, type PageNode } from './PageTree'
 import { publishBoards } from './boards-store'
 import { Icon } from './icons'
 import { usePersistentSet } from './tree-state'
+import { confirmDialog } from './ui/dialog'
+import { toast, toastError } from './ui/toast'
 import {
   buildForest,
   FolderTreeBoard,
@@ -171,7 +173,7 @@ export default function Boards({
   const run = (fn: () => Promise<unknown>, fail = COPY.failed): void => {
     fn().then(refresh).catch((err: unknown) => {
       console.error(err)
-      window.alert(err instanceof Error && err.message ? err.message : fail)
+      toastError(err, fail)
     })
   }
 
@@ -211,7 +213,7 @@ export default function Boards({
       })
       .catch((err: unknown) => {
         console.error(err)
-        window.alert(err instanceof Error && err.message ? err.message : COPY.tree.createFailed)
+        toastError(err, COPY.tree.createFailed)
       })
   }
 
@@ -220,11 +222,11 @@ export default function Boards({
    *  挂上后页离开页面树（服务端同事务清掉父页并标记不进页面树，旧父页正文里的入口也由服务端摘） */
   function dropPage(drag: PageDrag, folderId: string | null, index?: number): void {
     if (drag.kind !== 'doc') {
-      window.alert(COPY.tree.dropNotDoc)
+      toast(COPY.tree.dropNotDoc, { kind: 'error' })
       return
     }
     if (drag.subtree.size > 1) {
-      window.alert(COPY.tree.dropHasChildren)
+      toast(COPY.tree.dropHasChildren, { kind: 'error' })
       return
     }
     const board = dirBoard
@@ -241,15 +243,15 @@ export default function Boards({
       })
       .catch((err: unknown) => {
         console.error(err)
-        window.alert(err instanceof Error && err.message ? err.message : COPY.tree.moveFailed)
+        toastError(err, COPY.tree.moveFailed)
         refresh()
         onPageChanged()
       })
   }
 
   /** 删目录树：树里挂的页面移入回收站（可恢复），文件条目只脱挂 */
-  function deleteBoardWithConfirm(board: Board): void {
-    if (!window.confirm(COPY.tree.confirmDeleteTree)) return
+  async function deleteBoardWithConfirm(board: Board): Promise<void> {
+    if (!(await confirmDialog({ message: COPY.tree.confirmDeleteTree, danger: true }))) return
     api
       .deleteBoard(board.id)
       .then(({ trashed }) => {
@@ -259,7 +261,7 @@ export default function Boards({
       })
       .catch((err: unknown) => {
         console.error(err)
-        window.alert(err instanceof Error && err.message ? err.message : COPY.tree.deleteFailed)
+        toastError(err, COPY.tree.deleteFailed)
       })
   }
 
@@ -288,12 +290,12 @@ export default function Boards({
     const isCollapsed = collapsed.has(pageKey)
     return (
       <div className="dir-board-header" onClick={() => toggleCollapsed(pageKey)}>
-        <span className="dir-board-name" title={COPY.tree.pageTree}>
+        <span className="dir-board-name" data-tip={COPY.tree.pageTree}>
           {COPY.tree.pageTree}
         </span>
         <button
           className="icon-btn dir-board-chev"
-          title={isCollapsed ? COPY.tree.expand : COPY.tree.collapse}
+          data-tip={isCollapsed ? COPY.tree.expand : COPY.tree.collapse} aria-label={isCollapsed ? COPY.tree.expand : COPY.tree.collapse}
           aria-expanded={!isCollapsed}
           onClick={(e) => {
             e.stopPropagation()
@@ -306,7 +308,7 @@ export default function Boards({
           <span className="tree-actions dir-board-actions" onClick={(e) => e.stopPropagation()}>
             <button
               className="icon-btn"
-              title={COPY.collection.addMenu}
+              data-tip={COPY.collection.addMenu} aria-label={COPY.collection.addMenu}
               onClick={(e) => {
                 if (menu?.type === 'page-plus' && menu.id === selectedSpaceId) setMenu(null)
                 else openMenu({ type: 'page-plus', id: selectedSpaceId }, e)
@@ -345,12 +347,12 @@ export default function Boards({
     const isCollapsed = collapsed.has(board.id)
     return (
       <div className="dir-board-header" onClick={() => toggleCollapsed(board.id)}>
-        <span className="dir-board-name" title={COPY.tree.dirTree}>
+        <span className="dir-board-name" data-tip={COPY.tree.dirTree}>
           {COPY.tree.dirTree}
         </span>
         <button
           className="icon-btn dir-board-chev"
-          title={isCollapsed ? COPY.tree.expand : COPY.tree.collapse}
+          data-tip={isCollapsed ? COPY.tree.expand : COPY.tree.collapse} aria-label={isCollapsed ? COPY.tree.expand : COPY.tree.collapse}
           aria-expanded={!isCollapsed}
           onClick={(e) => {
             e.stopPropagation()
@@ -363,7 +365,7 @@ export default function Boards({
           <span className="tree-actions dir-board-actions" onClick={(e) => e.stopPropagation()}>
             <button
               className="icon-btn"
-              title={COPY.tree.addMenu}
+              data-tip={COPY.tree.addMenu} aria-label={COPY.tree.addMenu}
               onClick={(e) => {
                 if (menu?.type === 'plus' && menu.id === board.id) setMenu(null)
                 else openMenu({ type: 'plus', id: board.id }, e)
@@ -371,7 +373,7 @@ export default function Boards({
             >
               <Icon name="plus" size={14} />
             </button>
-            <button className="icon-btn" title={COPY.tree.dirTreeMenu} onClick={(e) => openMenu({ type: 'board', id: board.id }, e)}>
+            <button className="icon-btn" data-tip={COPY.tree.dirTreeMenu} aria-label={COPY.tree.dirTreeMenu} onClick={(e) => openMenu({ type: 'board', id: board.id }, e)}>
               <Icon name="more" size={14} />
             </button>
             {menu?.type === 'board' && menu.id === board.id && (
@@ -380,7 +382,7 @@ export default function Boards({
                   className="danger"
                   onClick={() => {
                     setMenu(null)
-                    deleteBoardWithConfirm(board)
+                    void deleteBoardWithConfirm(board)
                   }}
                 >
                   {COPY.tree.deleteTree}
@@ -486,7 +488,7 @@ export default function Boards({
                     })
                     .catch((err: unknown) => {
                       console.error(err)
-                      window.alert(err instanceof Error && err.message ? err.message : COPY.tree.deleteFolderFailed)
+                      toastError(err, COPY.tree.deleteFolderFailed)
                     })
                 },
                 onMoveFolderChild: (sourceId, parentId) =>
@@ -498,14 +500,15 @@ export default function Boards({
                 onMoveItemTo: (id, parentId, index) =>
                   run(() => api.moveItem(id, parentId, index), COPY.tree.moveFailed),
                 onDropPage: dropPage,
-                onDetachItem: (it) => {
+                onDetachItem: async (it) => {
                   // 页面恒属一个空间：页面条目移入回收站（可恢复）；
                   // 文件条目只脱挂（文件永不删除）
                   if (it.kind === 'file') {
                     run(() => api.detachItem(it.id), COPY.tree.detachFailed)
                     return
                   }
-                  if (!window.confirm(COPY.tree.confirmTrash(it.title || COPY.untitled))) return
+                  const ok = await confirmDialog({ message: COPY.tree.confirmTrash(it.title || COPY.untitled), danger: true })
+                  if (!ok) return
                   api
                     .trashPage(it.item_id)
                     .then(({ trashed }) => {
@@ -521,7 +524,7 @@ export default function Boards({
                         return
                       }
                       console.error(err)
-                      window.alert(err instanceof Error && err.message ? err.message : COPY.tree.deleteFailed)
+                      toastError(err, COPY.tree.deleteFailed)
                     })
                 },
                 folders: data?.folders ?? [],
@@ -569,7 +572,7 @@ export default function Boards({
               .then(refresh)
               .catch((err: unknown) => {
                 console.error(err)
-                window.alert(err instanceof Error ? err.message : COPY.tree.uploadFailed)
+                toastError(err, COPY.tree.uploadFailed)
               })
           }}
         />

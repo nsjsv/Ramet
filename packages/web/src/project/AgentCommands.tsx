@@ -85,7 +85,7 @@ export default function AgentCommands({
             <div className="term-cmd-head">
               <button type="button" className="term-cmd-main" aria-expanded={expanded} onClick={() => toggle(c.key)}>
                 <span className="term-cmd-prompt">$</span>
-                <span className="term-cmd-line" title={c.command}>{c.command || C.unnamedCommand}</span>
+                <span className="term-cmd-line" data-tip={c.command}>{c.command || C.unnamedCommand}</span>
               </button>
               <span className="term-cmd-state">{stateText(c)}</span>
               {c.state === 'running' && c.terminalId && (

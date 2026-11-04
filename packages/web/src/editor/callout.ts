@@ -153,7 +153,8 @@ export function createCalloutView(initial: PMNode, view: EditorView, getPos: () 
     dom.className = `callout callout-${family}`
     dom.dataset.callout = str(node.attrs.kind)
     icon.innerHTML = iconSvg(`callout-${family}` as IconName, 16)
-    icon.title = view.editable ? '换类型' : CALLOUT_LABEL[family]
+    icon.dataset.tip = view.editable ? '换类型' : CALLOUT_LABEL[family]
+    icon.setAttribute('aria-label', icon.dataset.tip)
     title.placeholder = CALLOUT_LABEL[family]
     if (document.activeElement !== title) title.value = str(node.attrs.title)
     title.readOnly = !view.editable

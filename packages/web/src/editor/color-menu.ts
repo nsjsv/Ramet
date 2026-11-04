@@ -40,7 +40,8 @@ export function createColorMenu(view: EditorView): { button: HTMLButtonElement; 
     b.type = 'button'
     b.className = `color-swatch ${name === 'text_color' ? 'is-text' : 'is-bg'}${color === current ? ' is-current' : ''}`
     b.dataset.color = color || 'default'
-    b.title = color ? LABELS[color]! : '默认'
+    b.dataset.tip = color ? LABELS[color]! : '默认'
+    b.setAttribute('aria-label', b.dataset.tip)
     b.textContent = name === 'text_color' ? 'A' : ''
     b.addEventListener('mousedown', (e) => e.preventDefault())
     b.addEventListener('click', () => {

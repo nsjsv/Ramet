@@ -9,7 +9,7 @@ export function Avatar({ person, size = 20 }: { person: Person | null; size?: nu
     ...(look.kind === 'initial' ? { '--avatar-bg': look.color } : {}),
   } as React.CSSProperties
   return (
-    <span className={`avatar avatar-round is-${look.kind}`} style={style} title={look.kind === 'none' ? undefined : look.title} aria-hidden="true">
+    <span className={`avatar avatar-round is-${look.kind}`} style={style} data-tip={look.kind === 'none' ? undefined : look.title} aria-hidden="true">
       {look.kind === 'image' ? (
         <img src={look.src} alt="" draggable={false} />
       ) : look.kind === 'initial' ? (

@@ -5,7 +5,7 @@
 // 弹层要不要接着开由编辑器自己决定（单选、只能关联一行选完即关，多选、人员、文件、关联留着，日期 Enter 才关）。
 import type * as Y from 'yjs'
 import type { CollectionProp, PropValue } from '@ramet/shared/collection-model'
-import { Popover } from '../popover'
+import { Popover } from '../../ui/popover'
 import { DateEditor } from './DateEditor'
 import { editorKind } from './editor-kind'
 import { FilesEditor } from './FilesEditor'

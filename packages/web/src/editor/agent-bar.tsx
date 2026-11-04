@@ -651,7 +651,7 @@ function AskBar({ pageId, req }: { pageId: string; req: PermissionReq & { form: 
   }, [pageId, agentId, requestId, form])
   return (
     <div className="agent-permission is-form">
-      <span className="agent-permission-title" title={req.title}>
+      <span className="agent-permission-title" data-tip={req.title}>
         {req.title || COPY.ask.form.title}
       </span>
       <div className="agent-permission-form" ref={host} />
@@ -662,7 +662,7 @@ function AskBar({ pageId, req }: { pageId: string; req: PermissionReq & { form: 
 function PermissionBar({ req, onAnswer }: { req: PermissionReq; onAnswer: (optionId: string) => void }) {
   return (
     <div className="agent-permission">
-      <span className="agent-permission-title" title={req.title}>
+      <span className="agent-permission-title" data-tip={req.title}>
         {req.title || 'Agent 请求权限'}
       </span>
       <span className="agent-permission-actions">

@@ -28,6 +28,7 @@ export function buildDock(attrs: { id: unknown; agent: unknown; stats: unknown; 
   else island.el.classList.add('is-static')
   // 用量明细（输入 / 输出 / 缓存 / 上下文）挂在「总览」那一段的悬停提示上
   const tip = statsTip(decodeStats(attrs.stats), false)
-  island.el.querySelector<HTMLElement>('[data-tab="overview"]')?.setAttribute('title', tip)
+  const overview = island.el.querySelector<HTMLElement>('[data-tab="overview"]')
+  if (overview) overview.dataset.tip = tip
   return island.el
 }

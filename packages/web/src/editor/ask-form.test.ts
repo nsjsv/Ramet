@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { AskForm } from '../api'
-import { companionOf, firstProblem, quickPick } from './ask-form'
+import { companionOf, dateAnswer, firstProblem, numberAnswer, quickPick } from './ask-form'
 
 const form = (fields: AskForm['fields'], required: string[] = []): AskForm => ({ message: '问题', fields, required })
 const choice = (key: string, values: string[], multi = false) =>
@@ -50,5 +50,57 @@ describe('提交前的体验校验', () => {
     expect(firstProblem(f, { pick: 'a', n: Number.NaN })).toBe('「n」应为数字')
     expect(firstProblem(f, { pick: 'a', n: 0 })).toBe('「n」不能小于 1')
     expect(firstProblem(f, { pick: 'a', many: ['x'], code: '42', n: 3 })).toBeNull()
+  })
+})
+
+describe('数字字段读值（文本框，不用 type=number）', () => {
+  const f = form([{ key: 'n', kind: 'number', integer: true, min: 1, max: 10 }])
+  const problem = (text: string): string | null => {
+    const v = numberAnswer(text)
+    return firstProblem(f, v === undefined ? {} : { n: v })
+  }
+
+  it('空 = 没填；能读的照常读（千分位、首尾空白）', () => {
+    expect(numberAnswer('')).toBeUndefined()
+    expect(numberAnswer('  ')).toBeUndefined()
+    expect(numberAnswer(' 1,000 ')).toBe(1000)
+    expect(problem('')).toBeNull()
+    expect(problem('7')).toBeNull()
+  })
+
+  it('填错读成 NaN 报「应为数字」；越界、小数不夹取，交给校验说清楚', () => {
+    expect(numberAnswer('abc')).toBeNaN()
+    expect(problem('abc')).toBe('「n」应为数字')
+    expect(problem('2.5')).toBe('「n」应为整数')
+    expect(problem('0')).toBe('「n」不能小于 1')
+    expect(problem('11')).toBe('「n」不能大于 10')
+  })
+})
+
+describe('日期字段读值（文本框 + 日历，不用 type=date / datetime-local）', () => {
+  const f = form([
+    { key: 'd', kind: 'text', format: 'date' },
+    { key: 't', kind: 'text', format: 'date-time' },
+  ])
+
+  it('空 = 没填；日期的多种写法读成 YYYY-MM-DD', () => {
+    expect(dateAnswer('', false)).toBeUndefined()
+    expect(dateAnswer('  ', true)).toBeUndefined()
+    expect(dateAnswer('2026/1/2', false)).toBe('2026-01-02')
+    expect(dateAnswer('2026年11月3日', false)).toBe('2026-11-03')
+  })
+
+  it('日期时间按本地时间换成带偏移的 ISO；只写日期 = 当天 00:00', () => {
+    expect(dateAnswer('2026-11-03 14:30', true)).toBe(new Date(2026, 10, 3, 14, 30).toISOString())
+    expect(dateAnswer('2026-11-03T09:05', true)).toBe(new Date(2026, 10, 3, 9, 5).toISOString())
+    expect(dateAnswer('2026-11-03', true)).toBe(new Date(2026, 10, 3, 0, 0).toISOString())
+  })
+
+  it('读不出的原样交出，由校验报格式不对（同服务端口径）', () => {
+    expect(dateAnswer('明天', false)).toBe('明天')
+    expect(dateAnswer('2026-11-03 25:00', true)).toBe('2026-11-03 25:00')
+    expect(firstProblem(f, { d: '明天' })).toBe('「d」日期格式应为 YYYY-MM-DD')
+    expect(firstProblem(f, { t: '明天' })).toBe('「t」不是日期时间')
+    expect(firstProblem(f, { d: dateAnswer('2026/1/2', false)!, t: dateAnswer('2026-11-03 14:30', true)! })).toBeNull()
   })
 })

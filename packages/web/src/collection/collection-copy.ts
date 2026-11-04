@@ -140,6 +140,9 @@ export const COLLECTION_COPY = {
     value: '值',
     pick: '选择…',
     remove: '删除条件',
+    /** 条件行两个下拉的读屏名称 */
+    prop: '筛选的属性',
+    op: '比较方式',
   },
   sort: {
     add: '添加排序',
@@ -147,6 +150,9 @@ export const COLLECTION_COPY = {
     asc: '升序',
     desc: '降序',
     remove: '删除排序',
+    /** 排序行两个下拉的读屏名称 */
+    prop: '排序的属性',
+    dir: '排序方向',
   },
   group: {
     none: '不分组',

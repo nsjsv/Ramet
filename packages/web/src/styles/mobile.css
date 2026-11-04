@@ -35,9 +35,16 @@ html {
   .modal-close,
   .vh-close,
   .topbar-btn,
-  .btn-collapse {
+  .btn-collapse,
+  .ui-toast-close {
     min-width: 40px;
     min-height: 40px;
+  }
+
+  /* 确认框的按钮：一排两个，手指点得准 */
+  .ui-dialog-foot .admin-btn {
+    min-height: 40px;
+    padding: 0 16px;
   }
 
   /* 菜单项 / 列表行：一行至少 40px 高，手指点得准 */
@@ -51,8 +58,36 @@ html {
   .vh-item,
   .side-nav-item,
   .bl-title,
-  .bl-block {
+  .bl-block,
+  .ui-option {
     min-height: 40px;
+  }
+
+  .sidebar-search-clear {
+    width: 32px;
+    height: 32px;
+    right: 0;
+  }
+
+  /* 日历：日格、翻月按钮、日期框里的按钮都放大到手指点得准 */
+  .ui-date {
+    --ui-day-w: 40px;
+    --ui-day-h: 38px;
+  }
+
+  .ui-date-nav,
+  .ui-date-today {
+    min-width: 36px;
+    height: 36px;
+  }
+
+  .ui-datefield-btn {
+    width: 32px;
+    height: 32px;
+  }
+
+  .sidebar-search-field:has(.sidebar-search-clear) .sidebar-search-input {
+    padding-right: 34px;
   }
 
   .tree-item {
@@ -61,7 +96,6 @@ html {
 
   /* 输入框字号：iOS 聚焦时低于 16px 会把整页放大 */
   input:not([type='checkbox']):not([type='radio']):not([type='file']):not([type='range']),
-  select,
   textarea {
     font-size: 16px;
   }
@@ -81,7 +115,8 @@ html {
 
   .modal,
   .modal.settings-modal,
-  .modal.trash-modal {
+  .modal.trash-modal,
+  .modal.ui-dialog {
     width: 100%;
     max-width: 100%;
     max-height: 92vh;
@@ -91,6 +126,22 @@ html {
 
   .modal {
     padding-bottom: max(14px, env(safe-area-inset-bottom));
+  }
+
+  /* Toast：改到顶部、左右贴边留白撑满宽度。底部是确认框的抽屉和对话输入框，放在底下会盖住它们的按钮 */
+  .ui-toasts {
+    top: calc(12px + env(safe-area-inset-top));
+    bottom: auto;
+    left: 12px;
+    right: 12px;
+    width: auto;
+    max-width: none;
+    align-items: stretch;
+    transform: none;
+  }
+
+  .ui-toast {
+    max-width: none;
   }
 
   /* 设置：左分组导航改成顶部横滑的一排标签（分组标题 / 「设置」字样收起），正文在下面滚 */

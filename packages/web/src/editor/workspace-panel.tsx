@@ -86,7 +86,7 @@ export function WorkspacePanel({ pageId, agent, cwd, onApply, onClose }: Props) 
           </button>
         )}
         {listing?.dirs.map((d) => (
-          <button key={d.path} type="button" className="ws-row" role="menuitem" title={d.path} onClick={() => load(d.path)}>
+          <button key={d.path} type="button" className="ws-row" role="menuitem" data-tip={d.path} onClick={() => load(d.path)}>
             <Icon name="folder" size={14} />
             <span className="ws-name">{d.name}</span>
           </button>

@@ -25,7 +25,7 @@ export function FileItem({ file, interactive = true }: { file: FileRef; interact
       <button
         type="button"
         className="cl-file-thumb"
-        title={file.name}
+        data-tip={file.name}
         onClick={(e) => {
           e.stopPropagation()
           openLightbox(fileUrl(file.id))
@@ -45,13 +45,13 @@ export function FileItem({ file, interactive = true }: { file: FileRef; interact
   )
   if (broken || !interactive) {
     return (
-      <span className={'cl-file-chip' + (broken ? ' is-broken' : '')} title={broken ? C.unavailable : file.name}>
+      <span className={'cl-file-chip' + (broken ? ' is-broken' : '')} data-tip={broken ? C.unavailable : file.name}>
         {body}
       </span>
     )
   }
   return (
-    <a className="cl-file-chip" href={downloadUrl(file)} download={file.name} title={file.name} onClick={(e) => e.stopPropagation()}>
+    <a className="cl-file-chip" href={downloadUrl(file)} download={file.name} data-tip={file.name} onClick={(e) => e.stopPropagation()}>
       {body}
     </a>
   )

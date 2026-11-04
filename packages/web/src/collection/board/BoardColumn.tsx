@@ -102,7 +102,7 @@ export default function BoardColumn(p: Props) {
         {col.option ? <OptionChip option={col.option} status={p.status} /> : <span className="cl-section-none">{C.group.noValue}</span>}
         {win && <span className="cl-section-count">{win.total}</span>}
         {!p.readOnly && (
-          <button type="button" className="icon-btn cl-col-add" title={C.board.add} aria-label={C.board.add} onClick={() => p.onCreate(col.key)}>
+          <button type="button" className="icon-btn cl-col-add" data-tip={C.board.add} aria-label={C.board.add} onClick={() => p.onCreate(col.key)}>
             <Icon name="plus" size={14} />
           </button>
         )}

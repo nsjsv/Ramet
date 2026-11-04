@@ -2,9 +2,9 @@ import { useEffect, useState } from 'react'
 import { api, type Page, type Space, type TrashEntry } from './api'
 import { useCachedLoad } from './cached-load'
 import { COPY } from './copy'
-import { ConfirmButton } from './form-kit'
+import { ConfirmButton } from './ui/form-kit'
 import { Icon } from './icons'
-import Modal from './Modal'
+import Modal from './ui/Modal'
 import { PageIcon } from './PageIcon'
 import { relativeTime } from './UpdatesFeed'
 import { pagePath } from './editor/mention-rows'
@@ -73,7 +73,7 @@ export default function RecycleBin({
             {entries && entries.length > 0 && ` · ${entries.length} 项`}
           </p>
         </div>
-        <button className="modal-close" onClick={onClose} title="关闭">
+        <button className="modal-close" onClick={onClose} data-tip="关闭" aria-label="关闭">
           <Icon name="x" size={16} />
         </button>
       </header>
@@ -163,21 +163,21 @@ function TrashRow({
         {entry.kind === 'skill' ? <Icon name="skill" size={18} /> : <PageIcon icon={entry.icon} placeholder />}
       </span>
       <div className="trash-main">
-        <span className="trash-title" title={title}>
+        <span className="trash-title" data-tip={title}>
           {title}
         </span>
         {meta.length > 0 && <span className="trash-meta">{meta.join(' · ')}</span>}
       </div>
       <span className="trash-when">{relativeTime(entry.deleted_at)}</span>
       <div className="trash-acts">
-        <button type="button" className="trash-act" disabled={busy} onClick={onRestore} title="恢复到原位置（连同子页面）">
+        <button type="button" className="trash-act" disabled={busy} onClick={onRestore} data-tip="恢复到原位置（连同子页面）">
           <Icon name="undo" size={14} />
           恢复
         </button>
         <ConfirmButton
           className="trash-act danger"
           disabled={busy}
-          title="永久删除（正文与版本历史一并删除）"
+          tip="永久删除（正文与版本历史一并删除）"
           confirmLabel="确认删除"
           onConfirm={onPurge}
         >

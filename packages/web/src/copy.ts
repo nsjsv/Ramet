@@ -2,7 +2,7 @@
  * 按界面分组，带参数的串是函数。
  * 已迁入：外壳（侧栏、页面树 / 目录树、空间切换）、页面顶栏与分享、编辑方式、公开页，其余界面的串逐步迁入。
  * 收件箱的串在 inbox/inbox-copy.ts（并进 COPY.inbox；单独成文件是为了本文件不超过 800 行），
- * 公共记忆在 memory/memory-copy.ts，带队在 team/team-copy.ts，工具档位在 editor/tools-copy.ts，集合在 collection/collection-copy.ts，评论在 comments/comments-copy.ts（同理）。 */
+ * 公共记忆在 memory/memory-copy.ts，带队在 team/team-copy.ts，工具档位在 editor/tools-copy.ts，集合在 collection/collection-copy.ts，评论在 comments/comments-copy.ts，组件库的确认框 / Toast 在 ui/ui-copy.ts（同理）。 */
 import { CONNECT_COPY, CONNECTORS_COPY } from './connector-copy'
 import { INBOX_COPY } from './inbox/inbox-copy'
 import { MEMORY_COPY } from './memory/memory-copy'
@@ -10,6 +10,7 @@ import { TEAM_COPY } from './team/team-copy'
 import { TOOLS_COPY } from './editor/tools-copy'
 import { COLLECTION_COPY } from './collection/collection-copy'
 import { COMMENTS_COPY } from './comments/comments-copy'
+import { DIALOG_COPY } from './ui/ui-copy'
 
 export const COPY = {
   inbox: INBOX_COPY,
@@ -18,6 +19,7 @@ export const COPY = {
   team: TEAM_COPY,
   collection: COLLECTION_COPY,
   comments: COMMENTS_COPY,
+  dialog: DIALOG_COPY,
   untitled: '无标题',
   /** 浏览器标签页标题里空标题页的叫法 */
   blankPage: '新页面',
@@ -87,6 +89,7 @@ export const COPY = {
     collapse: '收起侧边栏',
     resize: '调整侧边栏宽度',
     search: '搜索页面…',
+    clearSearch: '清除搜索',
     includeRuns: '含 agent 过程',
     noHits: '无结果',
     noPages: '该空间还没有页面',
@@ -547,7 +550,6 @@ export const COPY = {
       scopes: '授权范围（默认都不勾，没勾就没有）',
       days: '有效期（天）',
       daysHint: '1–30 天，到期自动失效，随时可收回',
-      daysInvalid: '有效期要 1 到 30 天的整数',
       /** 第 2 步 */
       warnTitle: '这等于把你电脑的一部分交给他',
       warnAgent: '他可以在你的电脑上让 agent 读写文件、跑命令，并且能批准 agent 要执行的命令。',
@@ -710,6 +712,7 @@ export const COPY = {
     save: '保存',
     saving: '保存中…',
     cancel: '取消',
+    required: (field: string) => `请填写「${field}」`,
     saved: '已保存',
     loadFailed: '设置加载失败',
     delConfirm: '确认删除',

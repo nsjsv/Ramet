@@ -16,6 +16,7 @@ import type { Node as ProsemirrorNode } from '@milkdown/kit/prose/model'
 import { ySyncPluginKey, absolutePositionToRelativePosition, relativePositionToAbsolutePosition } from 'y-prosemirror'
 import { COPY } from '../copy'
 import { uploadFile, toDisplay, type FileMeta } from './media'
+import { toastError } from '../ui/toast'
 
 interface Slot {
   id: number
@@ -82,7 +83,7 @@ function placeholderDOM(slot: Slot): HTMLElement {
   const box = document.createElement('span')
   box.className = 'upload-ph'
   box.contentEditable = 'false'
-  box.title = COPY.upload.uploading(slot.file.name)
+  box.dataset.tip = COPY.upload.uploading(slot.file.name)
   const bar = document.createElement('span')
   bar.className = 'upload-ph-bar'
   bar.append(document.createElement('span'))
@@ -204,7 +205,7 @@ async function insertFiles(view: EditorView, files: File[], pos: number | null):
       settle(view, slot.id, node)
     } catch (err) {
       settle(view, slot.id, null)
-      window.alert(err instanceof Error && err.message ? err.message : '上传失败，请重试')
+      toastError(err, '上传失败，请重试')
     } finally {
       progress.delete(slot.id)
       boxes.delete(slot.id)

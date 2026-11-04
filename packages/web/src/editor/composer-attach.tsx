@@ -81,9 +81,9 @@ export function AttachStrip({ items, onRemove }: { items: Attachment[]; onRemove
   return (
     <div className="chat-attach">
       {items.map((a) => (
-        <div key={a.key} className={`chat-attach-item${a.url ? '' : a.failed ? ' is-failed' : ' is-uploading'}`} title={a.failed ? C.failed : a.url ? '' : C.uploading}>
+        <div key={a.key} className={`chat-attach-item${a.url ? '' : a.failed ? ' is-failed' : ' is-uploading'}`} data-tip={a.failed ? C.failed : a.url ? '' : C.uploading}>
           <img src={a.preview} alt="" />
-          <button type="button" className="chat-attach-x" onClick={() => onRemove(a.key)} aria-label={C.remove} title={C.remove}>
+          <button type="button" className="chat-attach-x" onClick={() => onRemove(a.key)} aria-label={C.remove} data-tip={C.remove}>
             <Icon name="x" size={12} />
           </button>
         </div>

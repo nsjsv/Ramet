@@ -102,7 +102,7 @@ export function AssigneeChip({
         className={`team-chip${usable ? '' : ' is-bad'}`}
         aria-haspopup="menu"
         aria-expanded={open}
-        title={usable ? T.assignee : T.unusableTip}
+        data-tip={usable ? T.assignee : T.unusableTip}
         disabled={disabled}
         onMouseDown={(e) => e.preventDefault()}
         onClick={() => setOpen((v) => !v)}
@@ -122,7 +122,7 @@ export function AssigneeChip({
               role="menuitemradio"
               aria-checked={a.id === assignee}
               aria-disabled={a.unavailable ? true : undefined}
-              title={a.unavailable}
+              data-tip={a.unavailable}
               onClick={() => {
                 if (a.unavailable) return
                 setOpen(false)
@@ -173,7 +173,7 @@ export function CwdChip({
         className="team-chip"
         aria-haspopup="menu"
         aria-expanded={open}
-        title={cwd ? T.cwdTip(cwd) : T.cwdDefaultTip}
+        data-tip={cwd ? T.cwdTip(cwd) : T.cwdDefaultTip}
         disabled={disabled}
         onMouseDown={(e) => e.preventDefault()}
         onClick={() => setOpen((v) => !v)}

@@ -122,12 +122,15 @@ export function createCodeView(initial: PMNode, view: EditorView, getPos: () => 
   const copyBtn = document.createElement('button')
   copyBtn.type = 'button'
   copyBtn.className = 'code-copy'
-  copyBtn.title = '复制代码'
+  copyBtn.dataset.tip = '复制代码'
+  copyBtn.setAttribute('aria-label', '复制代码')
   copyBtn.innerHTML = iconSvg('copy', 14)
   const wrapBtn = document.createElement('button')
   wrapBtn.type = 'button'
   wrapBtn.className = 'code-wrap'
   wrapBtn.innerHTML = iconSvg('wrap', 14)
+  // 开 / 关由 aria-pressed 报，名字不随状态变
+  wrapBtn.setAttribute('aria-label', '自动换行')
   const gap = document.createElement('span')
   gap.className = 'code-head-gap'
   head.append(langBtn, gap, modeBtn, wrapBtn, copyBtn)
@@ -170,7 +173,7 @@ export function createCodeView(initial: PMNode, view: EditorView, getPos: () => 
     dom.classList.toggle('is-nowrap', !wrap)
     wrapBtn.classList.toggle('is-on', wrap)
     wrapBtn.setAttribute('aria-pressed', String(wrap))
-    wrapBtn.title = wrap ? '自动换行：开' : '自动换行：关'
+    wrapBtn.dataset.tip = wrap ? '自动换行：开' : '自动换行：关'
     if (mermaid && !diagram.isConnected) {
       dom.append(diagram)
       rendered = null

@@ -5,6 +5,7 @@ import { errMessage } from './labels'
 import { previewApi, previewLabel, type PreviewItem } from './preview-api'
 import { usePagePreviews } from './preview-state'
 import PreviewRow from './PreviewRow'
+import { NumberInput } from '../ui/NumberInput'
 
 const C = COPY.project.preview
 
@@ -38,7 +39,7 @@ export default function PreviewTab({
     if (active) setShown(true)
   }, [active])
   const { data, error, reload } = usePagePreviews(pageId, shown)
-  const [port, setPort] = useState('')
+  const [port, setPort] = useState<number | null>(null)
   const [path, setPath] = useState('')
   const [busy, setBusy] = useState(false)
   const [problem, setProblem] = useState<string | null>(null)
@@ -52,8 +53,9 @@ export default function PreviewTab({
 
   async function submit(e: FormEvent): Promise<void> {
     e.preventDefault()
-    const n = Number(port)
-    if (!Number.isInteger(n) || n < 1024 || n > 65535) {
+    // 端口不夹取（80 夹成 1024 就分享了另一个端口），越界、带小数、没填都在这里报
+    const n = port
+    if (n === null || !Number.isInteger(n) || n < 1024 || n > 65535) {
       setProblem(C.badPort)
       return
     }
@@ -61,7 +63,7 @@ export default function PreviewTab({
     setProblem(null)
     try {
       await previewApi.share(pageId, agent, n, path.trim())
-      setPort('')
+      setPort(null)
       reload()
     } catch (err) {
       setProblem(C.shareFailed(errMessage(err)))
@@ -114,21 +116,13 @@ export default function PreviewTab({
           <div className="preview-fields">
             <label>
               <span>{C.portLabel}</span>
-              <input
-                type="number"
-                inputMode="numeric"
-                min={1024}
-                max={65535}
-                value={port}
-                placeholder={C.portPlaceholder}
-                onChange={(e) => setPort(e.target.value)}
-              />
+              <NumberInput integer nullable clamp={false} min={1024} max={65535} value={port} placeholder={C.portPlaceholder} onChange={setPort} />
             </label>
             <label>
               <span>{C.pathLabel}</span>
               <input type="text" value={path} placeholder={C.pathPlaceholder} onChange={(e) => setPath(e.target.value)} />
             </label>
-            <button type="submit" className="project-chip-btn" disabled={busy || !port}>
+            <button type="submit" className="project-chip-btn" disabled={busy}>
               {busy ? C.sharing : C.share}
             </button>
           </div>
@@ -155,10 +149,10 @@ export default function PreviewTab({
         <section className="preview-view" aria-label={C.frameTitle}>
           <header>
             <span className="preview-view-title">{C.viewing(viewing.label)}</span>
-            <button type="button" className="project-icon-btn" title={C.reload} aria-label={C.reload} onClick={() => void reloadView()}>
+            <button type="button" className="project-icon-btn" data-tip={C.reload} aria-label={C.reload} onClick={() => void reloadView()}>
               <Icon name="refresh" size={14} />
             </button>
-            <button type="button" className="project-icon-btn" title={C.closeView} aria-label={C.closeView} onClick={() => setViewing(null)}>
+            <button type="button" className="project-icon-btn" data-tip={C.closeView} aria-label={C.closeView} onClick={() => setViewing(null)}>
               <Icon name="x" size={14} />
             </button>
           </header>

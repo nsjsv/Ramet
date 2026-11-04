@@ -617,7 +617,7 @@ function Shell({ user }: { user: User }) {
       )}
       {/* 手机端抽屉没有悬停预览：折叠态保留左上角浮动展开按钮作唯一入口（桌面由 CSS 隐藏） */}
       {sidebarCollapsed && (
-        <button className="btn-expand" title={COPY.side.expand} onClick={toggleSidebar}>
+        <button className="btn-expand" data-tip={COPY.side.expand} aria-label={COPY.side.expand} onClick={toggleSidebar}>
           <Icon name="panel-expand" />
         </button>
       )}

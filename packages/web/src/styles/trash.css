@@ -222,7 +222,7 @@
   cursor: default;
 }
 
-/* 两步确认的第二步（form-kit.tsx ConfirmButton）：红底白字，提示再点就删了 */
+/* 两步确认的第二步（ui/form-kit.tsx ConfirmButton）：红底白字，提示再点就删了 */
 .trash-act.is-armed,
 .trash-act.is-armed:hover:not(:disabled),
 .admin-btn.danger.is-armed,

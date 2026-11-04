@@ -123,12 +123,12 @@ export function fillAvatar(plate: HTMLElement, person: Person | null): void {
     img.src = look.src
     img.alt = ''
     img.draggable = false
-    plate.title = look.title
+    plate.dataset.tip = look.title
     plate.append(img)
   } else if (look.kind === 'initial') {
     plate.textContent = look.text
     plate.style.setProperty('--avatar-bg', look.color)
-    plate.title = look.title
+    plate.dataset.tip = look.title
   } else {
     plate.innerHTML = iconSvg('user', 15)
   }

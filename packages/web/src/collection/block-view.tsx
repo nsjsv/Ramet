@@ -24,6 +24,7 @@ import CollectionSurface from './CollectionSurface'
 import { BulkSlot } from './bulk-slot'
 import { blockVerdict, blockWritable, needsState } from './embed-verdict'
 import { NameInput } from './name-input'
+import { toastError } from '../ui/toast'
 
 const C = COPY.collection.embed
 
@@ -154,7 +155,7 @@ function CollectionBlock({ attrs, link, opts, setViewId, removeBlock }: BlockPro
       .then(opts.onChanged)
       .catch((err: unknown) => {
         console.error(err)
-        window.alert(err instanceof Error && err.message ? err.message : C.restoreFailed)
+        toastError(err, C.restoreFailed)
       })
   }
 

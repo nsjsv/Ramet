@@ -58,5 +58,6 @@
 @import './styles/terminal.css';
 @import './styles/preview.css';
 @import './styles/update-notice.css';
+@import './styles/ui.css';
 @import './styles/mobile.css';
 @import './styles/dark.css';

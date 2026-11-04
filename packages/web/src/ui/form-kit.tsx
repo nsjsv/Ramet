@@ -89,14 +89,15 @@ export function ConfirmButton({
   onConfirm,
   disabled,
   className,
-  title,
+  tip,
 }: {
   children: ReactNode
   confirmLabel: string
   onConfirm: () => void
   disabled?: boolean
   className?: string
-  title?: string
+  /** 悬停提示（data-tip）；武装后按钮文字已经说明了下一下会做什么，提示收起 */
+  tip?: string
 }) {
   const [armed, setArmed] = useState(false)
   useEffect(() => {
@@ -109,7 +110,7 @@ export function ConfirmButton({
       type="button"
       className={(className ?? 'admin-btn danger') + (armed ? ' is-armed' : '')}
       disabled={disabled}
-      title={armed ? undefined : title}
+      data-tip={armed ? undefined : tip}
       onBlur={() => setArmed(false)}
       onClick={() => {
         if (!armed) return setArmed(true)

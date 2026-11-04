@@ -136,7 +136,7 @@ function FileRow({ file, entries }: { file: TallyFile; entries: readonly RunEntr
   const name = file.path.split(/[\\/]/).pop() || file.path
   return (
     <li className={open ? 'hp-file is-open' : 'hp-file'}>
-      <button type="button" className="hp-file-row" onClick={() => setOpen(!open)} aria-expanded={open} title={file.path}>
+      <button type="button" className="hp-file-row" onClick={() => setOpen(!open)} aria-expanded={open} data-tip={file.path}>
         <span className="hp-file-name">{name}</span>
         <span className="hp-file-dir">{file.path.slice(0, file.path.length - name.length)}</span>
         <span className="add">+{file.add}</span>

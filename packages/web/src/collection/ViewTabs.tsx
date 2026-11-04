@@ -9,10 +9,11 @@ import { Icon } from '../icons'
 import { DateSettings } from './date-setup'
 import GallerySettings from './gallery/GallerySettings'
 import { LAYOUT_ICON, READY_LAYOUTS, usesDate } from './layouts'
-import { Popover, usePopover } from './popover'
+import { Popover, usePopover } from '../ui/popover'
+import { confirmDialog } from '../ui/dialog'
 import { NameInput } from './name-input'
 import { useReorder } from './reorder'
-import { addView, deleteView, moveView, renameView, setLayout } from './schema-ops'
+import { addView, deleteView, moveView, readSchema, renameView, setLayout } from './schema-ops'
 
 const C = COPY.collection.views
 
@@ -109,11 +110,13 @@ export default function ViewTabs({ doc, schema, activeId, onSelect, readOnly: vi
               type="button"
               className="pop-row is-danger"
               disabled={schema.views.length <= 1}
-              title={schema.views.length <= 1 ? C.lastOne : undefined}
-              onClick={() => {
-                if (!window.confirm(C.confirmRemove(nameOf(editing)))) return
-                const rest = schema.views.filter((v) => v.id !== editing.id)
-                if (deleteView(doc, editing.id) && rest[0]) onSelect(rest[0].id)
+              data-tip={schema.views.length <= 1 ? C.lastOne : undefined}
+              onClick={async () => {
+                const id = editing.id
+                if (!(await confirmDialog({ message: C.confirmRemove(nameOf(editing)), danger: true }))) return
+                // 框开着时视图可能被别人增删过：剩下哪些按文档此刻的定义算
+                const rest = readSchema(doc).views.filter((v) => v.id !== id)
+                if (deleteView(doc, id) && rest[0]) onSelect(rest[0].id)
                 close()
               }}
             >

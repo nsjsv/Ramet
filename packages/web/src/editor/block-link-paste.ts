@@ -12,6 +12,7 @@ import { Plugin } from '@milkdown/kit/prose/state'
 import type { Node as PMNode } from '@milkdown/kit/prose/model'
 import type { EditorView } from '@milkdown/kit/prose/view'
 import { api } from '../api'
+import { toast } from '../ui/toast'
 
 // 同源相对路径或带任意 host 的绝对 URL 都认（跨端复制的是绝对地址），前后空白容忍
 export const BLOCK_LINK_RE = /^(?:https?:\/\/[^/]+)?\/page\/([\w-]+)\?block=([\w-]+)$/
@@ -53,7 +54,7 @@ async function insertMention(view: EditorView, target: BlockLinkTarget): Promise
     text = (await api.fetchBlockText(target.pageId, target.blockId)).text
   } catch (err) {
     console.error(err)
-    window.alert('无法读取源块（无权限或已被删除），已按原样粘贴链接')
+    toast('无法读取源块（无权限或已被删除），已按原样粘贴链接')
     insertPlain(view, target)
     return
   }

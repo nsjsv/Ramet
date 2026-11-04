@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNod
 import { ApiError, type Page, type Space, type User } from './api'
 import { subscribeControl } from './control'
 import { COPY } from './copy'
-import { Card, ConfirmButton, Segmented } from './form-kit'
+import { Card, ConfirmButton, Segmented } from './ui/form-kit'
 import MachineGrantWizard from './MachineGrantWizard'
 import { GrantsPanel, RequestsPanel, UsagePanel } from './MachinePanels'
 import {
@@ -13,6 +13,7 @@ import {
   type MachineSummary,
 } from './machine-api'
 import { clockLabel, leftLabel, scopesLabel } from './machine-format'
+import { Checkbox } from './ui/Checkbox'
 
 /* ---------- 设置 → 机器（按空间）----------
  * 机器归接入它的人（connector 的主人）：别人默认完全用不了，要用得由主人走授权流程（MachineGrantWizard）。
@@ -120,11 +121,12 @@ export function MachinesPane({
 
 /** 机器行左侧：在线点 + 名字 + 次行 */
 function MachineHead({ machine, sub, children }: { machine: MachineSummary; sub: string; children?: ReactNode }) {
+  const status = machine.online ? C.online : C.offline
   return (
     <div className="set-line machine-head">
-      <span className={'connector-dot' + (machine.online ? ' on' : '')} title={machine.online ? C.online : C.offline} />
+      <span className={'connector-dot' + (machine.online ? ' on' : '')} data-tip={status} role="img" aria-label={status} />
       <div className="set-line-main">
-        <span className="set-line-name" title={machine.name}>
+        <span className="set-line-name" data-tip={machine.name}>
           {machine.name}
           {machine.mine && <span className="role-badge is-owner">{C.mine}</span>}
         </span>
@@ -295,7 +297,7 @@ function OtherMachine({ machine, canRequest, onChanged }: { machine: MachineSumm
         {grant ? (
           <ConfirmButton
             confirmLabel={C.giveUpConfirm}
-            title={C.giveUpTip}
+            tip={C.giveUpTip}
             disabled={busy}
             onConfirm={() => void act(() => machineApi.revokeGrant(machine.id, grant.id))}
           >
@@ -322,7 +324,7 @@ function OtherMachine({ machine, canRequest, onChanged }: { machine: MachineSumm
       </MachineHead>
       <div className="machine-state-row">
         {grant ? (
-          <span className="machine-state is-ok" title={C.expireAt(clockLabel(grant.expiresAt))}>
+          <span className="machine-state is-ok" data-tip={C.expireAt(clockLabel(grant.expiresAt))}>
             {C.youHave(scopesLabel(grant.scopes), leftLabel(grant.expiresAt))}
           </span>
         ) : machine.request ? (
@@ -336,10 +338,7 @@ function OtherMachine({ machine, canRequest, onChanged }: { machine: MachineSumm
         <form className="machine-apply" onSubmit={(e) => void send(e)}>
           <div className="machine-apply-title">{C.applyTitle}</div>
           {SCOPES.map((s) => (
-            <label key={s} className="machine-check">
-              <input type="checkbox" checked={picked[s]} onChange={() => setPicked((p) => ({ ...p, [s]: !p[s] }))} />
-              <span>{C.scope[s]}</span>
-            </label>
+            <Checkbox key={s} className="machine-check" label={C.scope[s]} checked={picked[s]} onChange={() => setPicked((p) => ({ ...p, [s]: !p[s] }))} />
           ))}
           <input
             className="admin-field"

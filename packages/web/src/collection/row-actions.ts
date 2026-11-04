@@ -1,7 +1,9 @@
-/* ---------- 行的动作（批量操作栏与行手柄菜单共用）：删除 / 挪到别的集合要先确认，确认文案与动画在这一处 ---------- */
+/* ---------- 行的动作（批量操作栏与行手柄菜单共用）：删除 / 挪到别的集合要先确认，确认文案与动画在这一处 ----------
+ * 确认是异步的，框开着时别人可能已经删掉 / 挪走其中几行：trashRows / moveRowsTo 按 id 现取，不在窗口里的行跳过 */
 import type { Page } from '../api'
 import { COPY } from '../copy'
 import type { CollectionHandle } from './collection-store'
+import { confirmDialog } from '../ui/dialog'
 
 const S = COPY.collection.select
 
@@ -15,17 +17,21 @@ export function moveTargets(pages: readonly Page[] | null, handle: CollectionHan
 }
 
 export function trashRowsConfirmed(handle: CollectionHandle, ids: string[], done: () => void, animate: Animate = now): void {
-  if (!window.confirm(S.confirmRemove(ids.length))) return
-  animate(() => {
-    void handle.trashRows(ids)
-    done()
+  void confirmDialog({ message: S.confirmRemove(ids.length), danger: true }).then((ok) => {
+    if (!ok) return
+    animate(() => {
+      void handle.trashRows(ids)
+      done()
+    })
   })
 }
 
 export function moveRowsConfirmed(handle: CollectionHandle, ids: string[], to: Page, done: () => void, animate: Animate = now): void {
-  if (!window.confirm(S.confirmMove(ids.length, to.title || COPY.untitled))) return
-  animate(() => {
-    void handle.moveRowsTo(ids, to.id)
-    done()
+  void confirmDialog({ message: S.confirmMove(ids.length, to.title || COPY.untitled) }).then((ok) => {
+    if (!ok) return
+    animate(() => {
+      void handle.moveRowsTo(ids, to.id)
+      done()
+    })
   })
 }

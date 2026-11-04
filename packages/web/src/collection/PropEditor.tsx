@@ -27,7 +27,9 @@ import { useCollectionPages } from './collection-store'
 import { CollectionChooser } from './CollectionPicker'
 import { FormulaField } from './FormulaEditor'
 import { NameInput } from './name-input'
-import { usePopover } from './popover'
+import { usePopover } from '../ui/popover'
+import { confirmDialog } from '../ui/dialog'
+import { Select } from '../ui/Select'
 import { moveTo, nextColor, TYPE_ICON, TYPE_ORDER } from './prop-meta'
 import { useRelationCtx } from './relation-ctx'
 import { relatableCollections } from './relation-model'
@@ -96,7 +98,7 @@ function ColorDots({ value, onPick }: { value: ColorName; onPick: (c: ColorName)
           type="button"
           role="radio"
           aria-checked={c === value}
-          title={C.colors[c]}
+          data-tip={C.colors[c]} aria-label={C.colors[c]}
           className={'cl-color' + (c === value ? ' is-on' : '')}
           data-color={c}
           onClick={() => onPick(c)}
@@ -113,9 +115,9 @@ function OptionRow({ doc, prop, option, drag }: { doc: Y.Doc; prop: CollectionPr
       <span className="cl-grip" aria-hidden="true">
         <Icon name="handle" size={10} />
       </span>
-      <button type="button" className="cl-color is-on" data-color={option.color} title={C.prop.color} onClick={() => setOpen((v) => !v)} />
+      <button type="button" className="cl-color is-on" data-color={option.color} data-tip={C.prop.color} aria-label={C.prop.color} onClick={() => setOpen((v) => !v)} />
       <NameInput value={option.name} placeholder={C.prop.optionName} onCommit={(name) => updateOption(doc, prop.id, option.id, { name })} />
-      <button type="button" className="icon-btn" title={C.prop.removeOption} onClick={() => deleteOption(doc, prop.id, option.id)}>
+      <button type="button" className="icon-btn" data-tip={C.prop.removeOption} aria-label={C.prop.removeOption} onClick={() => deleteOption(doc, prop.id, option.id)}>
         <Icon name="x" size={14} />
       </button>
       {open && (
@@ -181,7 +183,9 @@ export default function PropEditor({ doc, schema, prop, view, onClose }: Props) 
   const other = collectionName(pages, prop.cfg.target) ?? R.broken
   const call = (fn: () => Promise<unknown>, then: () => void): void =>
     void fn().then(then, (err: unknown) => setError(err instanceof Error && err.message ? err.message : C.writeFailed))
-  const changeType = (type: PropType, el: HTMLElement): void => {
+  // 确认框是异步的：开着时属性可能被别人改 / 删了。下面的写都按 prop.id 落到活文档 / 服务端（属性没了是空操作），
+  // 不拿 await 之前读到的对象整份写回
+  const changeType = async (type: PropType, el: HTMLElement): Promise<void> => {
     if (type === prop.type) return
     // 改成关联要先有目标：选好集合后经服务端改（PATCH 带 target），取消就什么都不变
     if (type === 'relation') {
@@ -189,19 +193,20 @@ export default function PropEditor({ doc, schema, prop, view, onClose }: Props) 
       return
     }
     if (paired && ctx) {
-      if (!window.confirm(R.confirmRetype(other))) return
+      if (!(await confirmDialog({ message: R.confirmRetype(other), danger: true, confirmLabel: COPY.dialog.proceed }))) return
       call(() => collectionApi.patchRelation(ctx.cid, prop.id, { two_way: false }), () => setPropType(doc, prop.id, type))
       return
     }
     setPropType(doc, prop.id, type)
   }
-  const remove = (): void => {
+  const remove = async (): Promise<void> => {
     if (prop.type === 'relation' && ctx) {
-      if (!window.confirm(paired ? R.confirmRemove(name, other) : C.prop.confirmRemove(name))) return
+      const message = paired ? R.confirmRemove(name, other) : C.prop.confirmRemove(name)
+      if (!(await confirmDialog({ message, danger: true }))) return
       call(() => collectionApi.deleteRelation(ctx.cid, prop.id), onClose)
       return
     }
-    if (!window.confirm(C.prop.confirmRemove(name))) return
+    if (!(await confirmDialog({ message: C.prop.confirmRemove(name), danger: true }))) return
     deleteProp(doc, prop.id)
     onClose()
   }
@@ -210,13 +215,15 @@ export default function PropEditor({ doc, schema, prop, view, onClose }: Props) 
       <NameInput value={prop.name} placeholder={C.prop.name} autoFocus onCommit={(name) => renameProp(doc, prop.id, name)} />
       <label className="cl-field">
         <span>{C.prop.type}</span>
-        <select value={prop.type} disabled={reverse} title={reverse ? R.reverseType : undefined} onChange={(e) => changeType(e.target.value as PropType, e.currentTarget)}>
-          {TYPE_ORDER.map((t) => (
-            <option key={t} value={t}>
-              {C.types[t]}
-            </option>
-          ))}
-        </select>
+        <Select
+          size="sm"
+          label={C.prop.type}
+          value={prop.type}
+          disabled={reverse}
+          tip={reverse ? R.reverseType : undefined}
+          options={TYPE_ORDER.map((t) => ({ value: t, label: C.types[t] }))}
+          onChange={(t, trigger) => void changeType(t, trigger)}
+        />
         <Icon name={TYPE_ICON[prop.type]} size={14} />
       </label>
       {prop.type === 'unique_id' && <PrefixField doc={doc} prop={prop} />}

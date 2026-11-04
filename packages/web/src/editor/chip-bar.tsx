@@ -124,18 +124,18 @@ export function ChipBar({ pageId, agent, cwd, opts, size = 'card', onAgent, onCw
 
   return (
     <div className={`chip-bar is-${size}`}>
-      <Chip id={AGENT} open={open} anchors={anchors} onToggle={toggle} title={T.agent}>
+      <Chip id={AGENT} open={open} anchors={anchors} onToggle={toggle} tip={T.agent}>
         <AgentBadgeView badge={agentBadge(agent)} className="chip-mark" />
         <span className="chip-text">{info?.label ?? agent}</span>
       </Chip>
       {agent && (
-        <Chip id={CWD} open={open} anchors={anchors} onToggle={toggle} title={COPY.cwd.chipTitle(cwd)}>
+        <Chip id={CWD} open={open} anchors={anchors} onToggle={toggle} tip={COPY.cwd.chipTitle(cwd)}>
           <Icon name="folder" size={14} />
           <span className="chip-path">{cwd ? baseName(cwd) : COPY.cwd.defaultDir}</span>
         </Chip>
       )}
       {generative.length > 0 && (
-        <Chip id={GEN} open={open} anchors={anchors} onToggle={toggle} title={genLabel}>
+        <Chip id={GEN} open={open} anchors={anchors} onToggle={toggle} tip={genLabel}>
           <span className="chip-text">{genMain}</span>
           {genNames.slice(1).map((name, i) => (
             <span key={i} className="chip-sub">
@@ -150,7 +150,8 @@ export function ChipBar({ pageId, agent, cwd, opts, size = 'card', onAgent, onCw
           open={open}
           anchors={anchors}
           onToggle={toggle}
-          title={setupTitle}
+          tip={setupTitle}
+          label={setupNotes.length === 0 ? setupTitle : undefined}
           className={[setupCls, setupNotes.length === 0 ? 'is-icon' : ''].filter(Boolean).join(' ')}
         >
           <Icon name="cog" size={14} />
@@ -201,7 +202,8 @@ function Chip({
   open,
   anchors,
   onToggle,
-  title,
+  tip,
+  label,
   className,
   children,
 }: {
@@ -209,7 +211,9 @@ function Chip({
   open: string | null
   anchors: { current: Record<string, HTMLButtonElement | null> }
   onToggle: (id: string) => void
-  title: string
+  tip: string
+  /** 只有图标、没有可见文字时给读屏的名字 */
+  label?: string
   className?: string
   children: ReactNode
 }) {
@@ -219,7 +223,8 @@ function Chip({
       className={`chip${className ? ` ${className}` : ''}`}
       aria-haspopup="menu"
       aria-expanded={open === id}
-      title={title}
+      data-tip={tip}
+      aria-label={label}
       ref={(el) => {
         anchors.current[id] = el
       }}
@@ -258,7 +263,7 @@ function AgentMenu({
             role="menuitemradio"
             aria-checked={a.id === current}
             aria-disabled={a.unavailable ? true : undefined}
-            title={a.unavailable}
+            data-tip={a.unavailable}
             onClick={() => !a.unavailable && onPick(a.id)}
           >
             <AgentBadgeView badge={badge} className="chip-mark" />

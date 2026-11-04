@@ -6,7 +6,7 @@ import type { Page } from '../api'
 import { COPY } from '../copy'
 import { Icon } from '../icons'
 import { PageIcon } from '../PageIcon'
-import { Popover } from './popover'
+import { Popover } from '../ui/popover'
 
 const C = COPY.collection.embed
 

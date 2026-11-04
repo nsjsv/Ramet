@@ -45,7 +45,7 @@ export function QueueList({
         return (
           <div key={q.id} className="chat-queue-item" role="listitem">
             <Icon name="clock" size={13} />
-            <span className="chat-queue-text" title={text}>
+            <span className="chat-queue-text" data-tip={text}>
               {text}
               {q.images > 0 && <span className="chat-queue-meta"> · {C.images(q.images)}</span>}
               {!mine && <span className="chat-queue-meta"> · {C.by(q.username)}</span>}

@@ -25,7 +25,9 @@ import { usePeopleTick } from '../cells/CellView'
 import { RelationChip } from '../cells/RelationCell'
 import { RelationPicker } from '../cells/RelationPicker'
 import { useCollectionPages } from '../collection-store'
-import { Popover, usePopover } from '../popover'
+import { Popover, usePopover } from '../../ui/popover'
+import { DateField } from '../../ui/DateField'
+import { Select } from '../../ui/Select'
 import { parseNumberInput } from '../prop-meta'
 import { pageIndex } from '../relation-model'
 import { setFilter } from '../schema-ops'
@@ -91,16 +93,16 @@ function ValueInput({ prop, cond, spaceId, onValue }: { prop: CollectionProp; co
   if (!opNeedsValue(cond.op)) return null
   const raw = cond.value
   const pick = (choices: { id: string; name: string }[]) => (
-    <select value={typeof raw === 'string' ? raw : ''} onChange={(e) => onValue(e.target.value || undefined)}>
-      <option value="">{C.filter.pick}</option>
-      {choices.map((c) => (
-        <option key={c.id} value={c.id}>
-          {c.name}
-        </option>
-      ))}
-    </select>
+    <Select
+      size="sm"
+      label={C.filter.value}
+      value={typeof raw === 'string' ? raw : ''}
+      placeholder={C.filter.pick}
+      options={[{ value: '', label: C.filter.pick }, ...choices.map((c) => ({ value: c.id, label: c.name }))]}
+      onChange={(v) => onValue(v || undefined)}
+    />
   )
-  const dateInput = <input className="cl-input" type="date" value={typeof raw === 'string' ? raw : ''} onChange={(e) => onValue(e.target.value || undefined)} />
+  const dateInput = <DateField clearable value={typeof raw === 'string' ? raw : null} aria-label={C.filter.value} onChange={(v) => onValue(v ?? undefined)} />
   const numberInput = (
     <CommitInput
       kind="number"
@@ -156,40 +158,33 @@ export function FilterMenu({ doc, schema, view, spaceId }: { doc: Y.Doc; schema:
         const prop = findProp(schema, cond.prop) ?? TITLE_PROP
         return (
           <div key={i} className="cl-cond">
-            <select
+            <Select
+              size="sm"
+              label={C.filter.prop}
               value={prop.id}
-              onChange={(e) => {
-                const next = findProp(schema, e.target.value) ?? TITLE_PROP
+              options={props.map((p) => ({ value: p.id, label: p.name || C.types[p.type] }))}
+              onChange={(id) => {
+                const next = findProp(schema, id) ?? TITLE_PROP
                 replace(i, { prop: next.id, op: filterOps(next)[0] ?? 'empty' })
               }}
-            >
-              {props.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name || C.types[p.type]}
-                </option>
-              ))}
-            </select>
-            <select
+            />
+            <Select
+              size="sm"
+              label={C.filter.op}
               value={cond.op}
-              onChange={(e) => {
-                const op = e.target.value as FilterOp
+              options={filterOps(prop).map((op) => ({ value: op, label: opLabel(prop, op) }))}
+              onChange={(op) => {
                 // 换运算时值的形状可能变（状态的「属于组」比的是组）：不合用的交给 parseCollection 当没填
                 replace(i, cond.value === undefined || op === 'in_group' || cond.op === 'in_group' ? { prop: prop.id, op } : { ...cond, op })
               }}
-            >
-              {filterOps(prop).map((op) => (
-                <option key={op} value={op}>
-                  {opLabel(prop, op)}
-                </option>
-              ))}
-            </select>
+            />
             <ValueInput
               prop={prop}
               cond={cond}
               spaceId={spaceId}
               onValue={(value) => replace(i, value === undefined ? { prop: cond.prop, op: cond.op } : { ...cond, value })}
             />
-            <button type="button" className="icon-btn" title={C.filter.remove} onClick={() => write(conds.filter((_, j) => j !== i))}>
+            <button type="button" className="icon-btn" data-tip={C.filter.remove} aria-label={C.filter.remove} onClick={() => write(conds.filter((_, j) => j !== i))}>
               <Icon name="x" size={14} />
             </button>
           </div>

@@ -198,7 +198,7 @@ export default function TermPane({ pageId, agent, info, visible }: { pageId: str
       {banner && <p className={`term-banner is-${banner.kind}`} role="status">{banner.text}</p>}
       <div className="project-term" ref={host} />
       {visible && status !== 'ended' && (
-        <span className="term-link" title={C.linkTitle} data-status={status}>
+        <span className="term-link" data-tip={C.linkTitle} data-status={status}>
           {status === 'connecting'
             ? C.linkConnecting
             : status === 'reconnecting'
@@ -210,7 +210,7 @@ export default function TermPane({ pageId, agent, info, visible }: { pageId: str
         </span>
       )}
       {visible && !ask && (
-        <button type="button" className="term-ask-open" title={Q.term.menuTitle} onClick={() => setAsk(true)}>
+        <button type="button" className="term-ask-open" data-tip={Q.term.menuTitle} aria-label={Q.term.menuTitle} onClick={() => setAsk(true)}>
           <Icon name="sparkle" size={13} />
           <span>{QUICK_KEY_LABEL}</span>
         </button>

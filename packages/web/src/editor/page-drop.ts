@@ -25,6 +25,7 @@ import { COPY } from '../copy'
 import { findBlockIdPos } from './block-id'
 import { defaultNodeFilter, selectRootNodeByPoint } from './block-handle'
 import { topBlockDragSource } from './list-drag'
+import { toast } from '../ui/toast'
 
 /* ---------- 拖拽源登记（侧栏树用）----------
  * HTML5 受保护模式下 dragover 读不到 getData，而拖拽只发生在本 SPA 内，所以源信息直接记在
@@ -143,7 +144,7 @@ export async function moveBlockToPage(sourcePageId: string, blockId: string, tar
   // 含「集合」块（自己或容器里的）一律整块拒绝、原地不动：集合归宿主页的块所有，搬走后原页的块消失，
   // 存储钩子会把集合连同行回收。在任何写入之前判，不会搬一半；链接视图块照常可搬
   if (hasInlineCollection(node)) {
-    window.alert(COPY.collection.embed.noMove)
+    toast(COPY.collection.embed.noMove, { kind: 'error' })
     return false
   }
   const provider = new HocuspocusProvider({ url: collabUrl(), name: `page:${targetPageId}`, quiet: true })

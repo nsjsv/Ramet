@@ -14,6 +14,7 @@ import PreviewToggle from './project/PreviewToggle'
 import ProjectToggle from './project/ProjectToggle'
 import CommentsButton from './comments/CommentsButton'
 import CommentSwitches, { type CommentSwitchState } from './comments/CommentSwitches'
+import { Checkbox } from './ui/Checkbox'
 
 /* ---------- 页面顶栏 ----------
  * 一条 48px，sticky 钉在 .main 滚动口顶部：左面包屑（[data-flip]：侧栏收起 / 展开时 FLIP 跟着滑），
@@ -110,7 +111,7 @@ export default function TopBar(p: Props) {
           <button
             type="button"
             className="topbar-btn"
-            title={p.chatOn ? COPY.top.toDoc : COPY.top.toChat}
+            data-tip={p.chatOn ? COPY.top.toDoc : COPY.top.toChat}
             aria-label={p.chatOn ? COPY.top.toDoc : COPY.top.toChat}
             onClick={() => p.onViewChange?.(!p.chatOn)}
           >
@@ -124,7 +125,7 @@ export default function TopBar(p: Props) {
         <button
           type="button"
           className="topbar-btn"
-          title={COPY.top.more}
+          data-tip={COPY.top.more}
           aria-label={COPY.top.more}
           aria-expanded={menuOpen}
           onClick={() => {
@@ -163,7 +164,7 @@ export default function TopBar(p: Props) {
             {/* 编辑方式（源码模式）。过程页是结构化的（步骤是块），源码写回会把步骤压成段落，不提供 */}
             {!isRun && hasBody && <EditModeItems />}
             {p.onFullWidth && (
-              <button type="button" aria-pressed={!!p.fullWidth} title={COPY.top.fullWidthHint} onClick={() => p.onFullWidth?.(!p.fullWidth)}>
+              <button type="button" aria-pressed={!!p.fullWidth} data-tip={COPY.top.fullWidthHint} onClick={() => p.onFullWidth?.(!p.fullWidth)}>
                 <Icon name="full-width" className="menu-icon" />
                 {COPY.top.fullWidth}
                 {p.fullWidth && <Icon name="check" size={14} className="menu-check" />}
@@ -209,7 +210,7 @@ function FavoritePageButton({ pageId }: { pageId: string }) {
   const on = isFavorite(pageId)
   const label = on ? COPY.fav.removePage : COPY.fav.addPage
   return (
-    <button type="button" className="topbar-btn" title={label} aria-label={label} aria-pressed={on} onClick={() => void toggleFavorite(pageId)}>
+    <button type="button" className="topbar-btn" data-tip={label} aria-label={label} aria-pressed={on} onClick={() => void toggleFavorite(pageId)}>
       <Icon name={on ? 'star-fill' : 'star'} />
     </button>
   )
@@ -247,19 +248,19 @@ function Crumbs({ pages, pageId, onNavigate }: { pages: Page[] | null; pageId: s
   return (
     <nav className="crumbs" aria-label={COPY.top.crumbs} data-flip>
       {folders.map((f) => (
-        <span key={f.id} className="crumb" title={f.name}>
+        <span key={f.id} className="crumb" data-tip={f.name}>
           <Icon name="folder" size={16} />
           <span>{f.name}</span>
         </span>
       ))}
       {chain.map((pg) => (
-        <button key={pg.id} type="button" className="crumb" title={pg.title || COPY.untitled} onClick={() => onNavigate(`/page/${pg.id}`)}>
+        <button key={pg.id} type="button" className="crumb" data-tip={pg.title || COPY.untitled} onClick={() => onNavigate(`/page/${pg.id}`)}>
           <PageIcon icon={pg.icon} placeholder />
           <span>{pg.title || COPY.untitled}</span>
         </button>
       ))}
       {current && (
-        <span className="crumb is-current" aria-current="page" title={current.title || COPY.untitled}>
+        <span className="crumb is-current" aria-current="page" data-tip={current.title || COPY.untitled}>
           <PageIcon icon={current.icon} placeholder />
           <span>{current.title || COPY.untitled}</span>
         </span>
@@ -273,7 +274,7 @@ function Presence({ peers }: { peers: Identity[] }) {
   if (peers.length === 0) return null
   const names = peers.map((x) => x.name)
   return (
-    <span className="presence" role="img" aria-label={COPY.top.presence(names)} title={COPY.top.presence(names)}>
+    <span className="presence" role="img" aria-label={COPY.top.presence(names)} data-tip={COPY.top.presence(names)}>
       {peers.slice(0, 4).map((x) => (
         <i key={x.name} style={{ backgroundColor: x.color }}>
           {Array.from(x.name)[0]}
@@ -326,10 +327,7 @@ function SharePopover({
   }
 
   const runsToggle = (
-    <label className="share-option">
-      <input type="checkbox" checked={includeRuns} disabled={busy} onChange={(e) => void save(published, e.target.checked)} />
-      {COPY.share.includeRuns}
-    </label>
+    <Checkbox className="share-option" label={COPY.share.includeRuns} checked={includeRuns} disabled={busy} onChange={(on) => void save(published, on)} />
   )
 
   return (

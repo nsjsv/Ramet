@@ -40,8 +40,9 @@ function avatarHtml(view: IslandView): string {
   return `<span class="hud-av${ring}">${markHtml(view.agent)}${badge}</span>`
 }
 
-const seg = (tab: HudTab, body: string, cls = ''): string =>
-  `<button class="il-seg${cls}" type="button" data-tab="${tab}" title="${esc(C.tip[tab])}">${body}</button>`
+/** named：这一段没有可见文字（只有头像），提示文字同时当读屏名称 */
+const seg = (tab: HudTab, body: string, cls = '', named = false): string =>
+  `<button class="il-seg${cls}" type="button" data-tab="${tab}" data-tip="${esc(C.tip[tab])}"${named ? ` aria-label="${esc(C.tip[tab])}"` : ''}>${body}</button>`
 
 function delta(add: number, del: number): string {
   return `<span class="il-delta"><span class="add">+${add}</span>${del ? ` <span class="del">−${del}</span>` : ''}</span>`
@@ -60,7 +61,7 @@ function floatHtml(view: IslandView, ask: AskBar | null): string {
   let h = seg('overview', `${avatarHtml(view)}<span class="il-now" data-f="now"></span><span class="il-time" data-f="time"></span>`, ' il-agent')
   if (view.plan) h += seg('tasks', `<span class="il-ring" data-f="ring"></span><span data-f="plan"></span>`)
   if (view.files) h += seg('files', `${iconSvg('file', 14)}<b data-f="files"></b><span data-f="delta"></span>`, ' il-files')
-  if (view.agents) h += seg('agents', `<span class="il-stack" data-f="stack"></span>`, ' il-agents')
+  if (view.agents) h += seg('agents', `<span class="il-stack" data-f="stack"></span>`, ' il-agents', true)
   return `${h}<span class="il-bar" data-f="bar"></span>`
 }
 

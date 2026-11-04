@@ -14,6 +14,7 @@ import PropEditor from '../PropEditor'
 import { moveTo, TITLE_ICON, TYPE_ICON, TYPE_ORDER } from '../prop-meta'
 import { RelationCreate } from '../relation-settings'
 import { useReorder } from '../reorder'
+import { Select } from '../../ui/Select'
 import { addProp, groupChoices, newPropId, setGroupBy, setShown, setSorts, shownProps, toggleShown } from '../schema-ops'
 
 const C = COPY.collection
@@ -41,20 +42,24 @@ export function SortMenu({ doc, schema, view }: MenuProps) {
           <span className="cl-grip" aria-hidden="true">
             <Icon name="handle" size={10} />
           </span>
-          <select value={sort.prop} onChange={(e) => write(sorts.map((s, j) => (j === i ? { ...s, prop: e.target.value } : s)))}>
-            {props
-              .filter((p) => p.id === sort.prop || !sorts.some((s) => s.prop === p.id))
-              .map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name || C.types[p.type]}
-                </option>
-              ))}
-          </select>
-          <select value={sort.dir} onChange={(e) => write(sorts.map((s, j) => (j === i ? { ...s, dir: e.target.value === 'desc' ? 'desc' : 'asc' } : s)))}>
-            <option value="asc">{C.sort.asc}</option>
-            <option value="desc">{C.sort.desc}</option>
-          </select>
-          <button type="button" className="icon-btn" title={C.sort.remove} onClick={() => write(sorts.filter((_, j) => j !== i))}>
+          <Select
+            size="sm"
+            label={C.sort.prop}
+            value={sort.prop}
+            options={props.filter((p) => p.id === sort.prop || !sorts.some((s) => s.prop === p.id)).map((p) => ({ value: p.id, label: p.name || C.types[p.type] }))}
+            onChange={(id) => write(sorts.map((s, j) => (j === i ? { ...s, prop: id } : s)))}
+          />
+          <Select
+            size="sm"
+            label={C.sort.dir}
+            value={sort.dir}
+            options={[
+              { value: 'asc', label: C.sort.asc },
+              { value: 'desc', label: C.sort.desc },
+            ]}
+            onChange={(dir) => write(sorts.map((s, j) => (j === i ? { ...s, dir } : s)))}
+          />
+          <button type="button" className="icon-btn" data-tip={C.sort.remove} aria-label={C.sort.remove} onClick={() => write(sorts.filter((_, j) => j !== i))}>
             <Icon name="x" size={14} />
           </button>
         </div>
@@ -199,11 +204,17 @@ export function PropsMenu({ doc, schema, view }: MenuProps) {
         <span className="cl-grip" aria-hidden="true">
           {on && <Icon name="handle" size={10} />}
         </span>
-        <button type="button" className="cl-prop-name" title={C.props.edit} onClick={() => setPage(id)}>
+        <button type="button" className="cl-prop-name" data-tip={C.props.edit} onClick={() => setPage(id)}>
           <Icon name={TYPE_ICON[prop.type]} size={14} />
           <span>{prop.name || C.types[prop.type]}</span>
         </button>
-        <button type="button" className="icon-btn" title={on ? C.props.hide : C.props.show} onClick={() => toggleShown(doc, view.id, id, !on)}>
+        <button
+          type="button"
+          className="icon-btn"
+          data-tip={on ? C.props.hide : C.props.show}
+          aria-label={on ? C.props.hide : C.props.show}
+          onClick={() => toggleShown(doc, view.id, id, !on)}
+        >
           <Icon name={on ? 'eye' : 'eye-off'} size={14} />
         </button>
       </div>

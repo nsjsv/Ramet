@@ -23,7 +23,10 @@ import { collectionApi, type RelationPatch } from './collection-api'
 import { useCollectionPages } from './collection-store'
 import { CollectionChooser, CollectionList } from './CollectionPicker'
 import { NameInput } from './name-input'
-import { usePopover } from './popover'
+import { usePopover } from '../ui/popover'
+import { confirmDialog } from '../ui/dialog'
+import { Checkbox } from '../ui/Checkbox'
+import { Select } from '../ui/Select'
 import { useRelationCtx } from './relation-ctx'
 import { pageIndex, relatableCollections } from './relation-model'
 import { setPropCfg } from './schema-ops'
@@ -111,10 +114,7 @@ export function RelationSettings({ prop, schema }: { prop: CollectionProp; schem
   const counterpart = other?.props.find((p) => p.id === (reverse ? prop.cfg.mirror : prop.cfg.reverse))
   const single = (reverse ? counterpart?.cfg.single : prop.cfg.single) === true
   const singleBox = (
-    <label className="cl-check">
-      <input type="checkbox" checked={single} disabled={busy || (reverse && !counterpart)} onChange={(e) => patch({ single: e.target.checked })} />
-      <span>{R.single}</span>
-    </label>
+    <Checkbox className="cl-check" label={R.single} checked={single} disabled={busy || (reverse && !counterpart)} onChange={(on) => patch({ single: on })} />
   )
   if (reverse) {
     return (
@@ -133,18 +133,17 @@ export function RelationSettings({ prop, schema }: { prop: CollectionProp; schem
           {target ?? R.broken}
         </button>
       </div>
-      <label className="cl-check">
-        <input
-          type="checkbox"
-          checked={!!prop.cfg.reverse}
-          disabled={busy || !target}
-          onChange={(e) => {
-            if (e.target.checked) patch({ two_way: true })
-            else if (window.confirm(R.confirmOneWay(target ?? ''))) patch({ two_way: false })
-          }}
-        />
-        <span>{R.twoWay(target ?? '')}</span>
-      </label>
+      <Checkbox
+        className="cl-check"
+        label={R.twoWay(target ?? '')}
+        checked={!!prop.cfg.reverse}
+        disabled={busy || !target}
+        onChange={(on) => {
+          if (on) return patch({ two_way: true })
+          const message = R.confirmOneWay(target ?? '')
+          void confirmDialog({ message, danger: true, confirmLabel: COPY.dialog.proceed }).then((ok) => ok && patch({ two_way: false }))
+        }}
+      />
       {prop.cfg.reverse && counterpart && (
         <NameInput value={counterpart.name} placeholder={R.reverseName} onCommit={(name) => patch({ reverse_name: name })} />
       )}
@@ -159,7 +158,9 @@ export function RelationSettings({ prop, schema }: { prop: CollectionProp; schem
           onClose={close}
           onPick={(page) => {
             close()
-            if (page.id !== prop.cfg.target && window.confirm(R.confirmRetarget(prop.cfg.reverse ? target : null))) patch({ target: page.id })
+            if (page.id === prop.cfg.target) return
+            const message = R.confirmRetarget(prop.cfg.reverse ? target : null)
+            void confirmDialog({ message, danger: !!prop.cfg.reverse, confirmLabel: COPY.dialog.proceed }).then((ok) => ok && patch({ target: page.id }))
           }}
         />
       )}
@@ -181,55 +182,44 @@ export function RollupSettings({ doc, schema, prop }: { doc: Y.Doc; schema: Coll
     <div className="cl-rollup-settings">
       <label className="cl-field">
         <span>{U.relation}</span>
-        <select
-          value={relation?.id ?? ''}
+        <Select
+          size="sm"
+          label={U.relation}
+          value={relation?.id ?? null}
+          placeholder={U.pick}
+          options={relations.map((p) => ({ value: p.id, label: p.name || C.types.relation }))}
           // 换了关联，对方集合也换了：目标属性回到「名称」，计算方式回到「显示原值」（对哪种目标都适用）
-          onChange={(e) => setPropCfg(doc, prop.id, { relation: e.target.value, prop: TITLE_PROP_ID, fn: 'show_original' })}
-        >
-          <option value="" disabled>
-            {U.pick}
-          </option>
-          {relations.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name || C.types.relation}
-            </option>
-          ))}
-        </select>
+          onChange={(id) => setPropCfg(doc, prop.id, { relation: id, prop: TITLE_PROP_ID, fn: 'show_original' })}
+        />
       </label>
       <label className="cl-field">
         <span>{U.prop}</span>
-        <select
-          value={target?.id ?? ''}
+        <Select
+          size="sm"
+          label={U.prop}
+          value={target?.id ?? null}
           disabled={!relation || !other}
-          onChange={(e) => {
-            const next = targets.find((p) => p.id === e.target.value)
+          placeholder={relation && !other ? U.loading : U.pick}
+          options={targets.map((p) => ({ value: p.id, label: p.id === TITLE_PROP_ID ? C.props.title : p.name || C.types[p.type] }))}
+          onChange={(id) => {
+            const next = targets.find((p) => p.id === id)
             if (!next) return
             const fn = prop.cfg.fn && rollupFns(next.type).includes(prop.cfg.fn) ? prop.cfg.fn : 'show_original'
             setPropCfg(doc, prop.id, { prop: next.id, fn })
           }}
-        >
-          <option value="" disabled>
-            {relation && !other ? U.loading : U.pick}
-          </option>
-          {targets.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.id === TITLE_PROP_ID ? C.props.title : p.name || C.types[p.type]}
-            </option>
-          ))}
-        </select>
+        />
       </label>
       <label className="cl-field">
         <span>{U.fn}</span>
-        <select value={prop.cfg.fn && fns.includes(prop.cfg.fn) ? prop.cfg.fn : ''} disabled={!target} onChange={(e) => setPropCfg(doc, prop.id, { fn: e.target.value })}>
-          <option value="" disabled>
-            {U.pick}
-          </option>
-          {fns.map((fn) => (
-            <option key={fn} value={fn}>
-              {U.fns[fn]}
-            </option>
-          ))}
-        </select>
+        <Select
+          size="sm"
+          label={U.fn}
+          value={prop.cfg.fn && fns.includes(prop.cfg.fn) ? prop.cfg.fn : null}
+          disabled={!target}
+          placeholder={U.pick}
+          options={fns.map((fn) => ({ value: fn, label: U.fns[fn] }))}
+          onChange={(fn) => setPropCfg(doc, prop.id, { fn })}
+        />
       </label>
     </div>
   )
@@ -285,10 +275,7 @@ export function RelationCreate({ onCreated, onBack }: { onCreated: (propId: stri
           <span className="cl-rel-name">{name}</span>
         </span>
       </div>
-      <label className="cl-check">
-        <input type="checkbox" checked={twoWay} onChange={(e) => setTwoWay(e.target.checked)} />
-        <span>{R.twoWay(name)}</span>
-      </label>
+      <Checkbox className="cl-check" label={R.twoWay(name)} checked={twoWay} onChange={setTwoWay} />
       {twoWay && (
         <div className="cl-field">
           <span>{R.reverseName}</span>
@@ -301,10 +288,7 @@ export function RelationCreate({ onCreated, onBack }: { onCreated: (propId: stri
           />
         </div>
       )}
-      <label className="cl-check">
-        <input type="checkbox" checked={single} onChange={(e) => setSingle(e.target.checked)} />
-        <span>{R.single}</span>
-      </label>
+      <Checkbox className="cl-check" label={R.single} checked={single} onChange={setSingle} />
       <button type="button" className="cl-bar-btn is-on cl-rel-add" disabled={busy} onClick={create}>
         {busy ? R.creating : R.create}
       </button>

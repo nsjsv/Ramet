@@ -39,7 +39,7 @@ export default function PreviewRow({
         <button
           type="button"
           className="project-icon-btn"
-          title={C.openTab}
+          data-tip={C.openTab}
           aria-label={`${C.openTab}：${previewLabel(item)}`}
           onClick={() => void openPreviewTab(pageId, item.id).catch((err: unknown) => onError(errMessage(err)))}
         >

@@ -78,7 +78,7 @@ export function ContextRing({ info, canCompact, onCompact }: { info: CtxInfo; ca
       <button
         type="button"
         className={`ctx-ring ${ctxLevel(info)}`.trim()}
-        title={C.title}
+        data-tip={C.title}
         aria-label={C.title}
         aria-expanded={open}
         onClick={() => setOpen(!open)}
@@ -94,7 +94,7 @@ export function ContextRing({ info, canCompact, onCompact }: { info: CtxInfo; ca
             <button
               type="button"
               className="ctx-compact"
-              title={C.compactHint}
+              data-tip={C.compactHint}
               onClick={() => {
                 setOpen(false)
                 onCompact()

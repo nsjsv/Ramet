@@ -11,7 +11,7 @@ export default function ProjectToggle({ pageId }: { pageId: string | undefined }
     <button
       type="button"
       className="topbar-btn"
-      title={`${COPY.project.toggle}（${PROJECT_TOGGLE_LABEL}）`}
+      data-tip={`${COPY.project.toggle}（${PROJECT_TOGGLE_LABEL}）`}
       aria-label={COPY.project.toggle}
       aria-pressed={open}
       onClick={toggle}

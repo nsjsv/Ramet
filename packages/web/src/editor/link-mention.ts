@@ -60,7 +60,7 @@ function render(dom: HTMLElement, url: string, meta: LinkMeta | null): void {
   a.href = url
   a.target = '_blank'
   a.rel = 'noopener noreferrer'
-  a.title = url
+  a.dataset.tip = url
   const icon = meta ? iconOf(meta, url) : undefined
   if (icon) a.append(remoteImg(icon, 'link-mention-icon', (img) => img.remove()))
   a.append(el('span', 'link-mention-title', meta?.title || meta?.site || hostOf(url)))

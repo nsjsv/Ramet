@@ -1,14 +1,20 @@
 // ---------- 提问表单：运行条的提问卡与底部兜底弹条共用 ----------
 // 纯 DOM（弹条在 React 里挂一个 ref）。字段按服务端归一好的 AskForm 渲染（api.ts 同口径）：
 //   choice   按钮式选项（单选 radio 语义 / 多选 checkbox 语义），选项说明在按钮下面
-//   text     多行框自动长高（omp 的 editor 是整段预填文字）；有 format 用对应的单行 type；secret 用密码框
-//   number   number 输入；boolean 开关
+//   text     多行框自动长高（omp 的 editor 是整段预填文字）；邮箱 / 网址用对应的单行 type；secret 用密码框；
+//            日期 / 日期时间是文本框 + 日历按钮（ui/DateField 的 DOM 版，弹层经 openDatePicker 托管）
+//   number   文本框 + ui/number.ts 的解析（不用 type=number：系统步进箭头跟不了主题，填错读出来是空串）；boolean 开关
 // 两条各家形状的规则，与服务端 agents/ask-form.ts 同口径：
 //   补充文本  紧跟在选择题 K 后面、键名以 `K_` 开头的文本字段（claude _custom / codex _note / omp __other）挂在该题下面
 //   快选      只有一个单选题或一个是 / 否题的表单（omp 的 select / confirm / 计划审批 / 工具审批、简单单选）点一下就提交
 // 这里的校验只为体验，服务端才是准绳（不合返回 400，原因经 setError 显示）。
 import { api, ApiError, type AskContent, type AskField, type AskForm, type AskValue } from '../api'
 import { COPY } from '../copy'
+import { iconSvg } from '../icons'
+import { openDatePicker } from '../ui/DateField'
+import { formatDateTime, localDateTimeOf, parseDateTime, parseDay } from '../ui/date-model'
+import { parseNumberText, stepNumber } from '../ui/number'
+import { DATE_COPY } from '../ui/ui-copy'
 
 type Choice = Extract<AskField, { kind: 'choice' }>
 type Text = Extract<AskField, { kind: 'text' }>
@@ -59,6 +65,8 @@ export function firstProblem(form: AskForm, content: AskContent): string | null 
       if (f.minLength !== undefined && v.length < f.minLength) return `${name}至少 ${f.minLength} 个字`
       if (f.maxLength !== undefined && v.length > f.maxLength) return `${name}最多 ${f.maxLength} 个字`
       if (f.pattern && !safeTest(f.pattern, v)) return `${name}格式不对`
+      if (f.format === 'date' && !/^\d{4}-\d{2}-\d{2}$/.test(v)) return `${name}日期格式应为 YYYY-MM-DD`
+      if (f.format === 'date-time' && Number.isNaN(Date.parse(v))) return `${name}不是日期时间`
     } else if (f.kind === 'number') {
       if (typeof v !== 'number' || !Number.isFinite(v)) return `${name}应为数字`
       if (f.integer && !Number.isInteger(v)) return `${name}应为整数`
@@ -121,17 +129,18 @@ function choiceInput(f: Choice, onChange: () => void): { el: HTMLElement; read: 
   return { el: box, read: () => (f.multi ? [...picked] : [...picked][0]) }
 }
 
-const FORMAT_TYPE: Record<NonNullable<Text['format']>, string> = { email: 'email', uri: 'url', date: 'date', 'date-time': 'datetime-local' }
+/** 单行框的 type（日期另走 dateInput） */
+const FORMAT_TYPE: Record<'email' | 'uri', string> = { email: 'email', uri: 'url' }
 
 function textInput(f: Text, placeholder?: string): { el: HTMLElement; read: Reader } {
+  if (!f.secret && (f.format === 'date' || f.format === 'date-time')) return dateInput(f, f.format === 'date-time')
   if (f.format || f.secret) {
     const input = el('input', 'ask-input')
-    input.type = f.secret ? 'password' : FORMAT_TYPE[f.format!]
+    input.type = f.secret ? 'password' : FORMAT_TYPE[f.format as 'email' | 'uri']
     if (f.secret) input.autocomplete = 'off'
-    if (f.default !== undefined && !f.secret) input.value = f.format === 'date-time' ? f.default.slice(0, 16) : f.default
+    if (f.default !== undefined && !f.secret) input.value = f.default
     if (placeholder) input.placeholder = placeholder
-    // datetime-local 没有时区：按本地时间换成带偏移的 ISO（JSON Schema 的 date-time）
-    const read: Reader = () => (input.value === '' ? undefined : f.format === 'date-time' ? new Date(input.value).toISOString() : input.value)
+    const read: Reader = () => (input.value === '' ? undefined : f.format === 'date-time' ? dateAnswer(input.value, true) : input.value)
     return { el: input, read }
   }
   const area = el('textarea', 'ask-input')
@@ -149,24 +158,116 @@ function textInput(f: Text, placeholder?: string): { el: HTMLElement; read: Read
   return { el: area, read: () => (area.value === '' ? undefined : area.value) }
 }
 
-function numberInput(f: Num): { el: HTMLElement; read: Reader } {
-  const input = el('input', 'ask-input is-num')
-  input.type = 'number'
-  if (f.min !== undefined) input.min = String(f.min)
-  if (f.max !== undefined) input.max = String(f.max)
-  input.step = f.integer ? '1' : 'any'
-  if (f.default !== undefined) input.value = String(f.default)
-  // 填了但不是数字会得到 NaN，交给校验报「应为数字」
-  return { el: input, read: () => (input.value === '' ? undefined : input.valueAsNumber) }
+/** 日期 / 日期时间：文本框（可以直接敲，认法同集合里的日期）+ 日历按钮，同 ui/DateField 的类名与外观。
+ *  这里是纯 DOM、没有卸载钩子，不给每个字段建 React 根：日历弹层由 openDatePicker 统一托管 */
+function dateInput(f: Text, withTime: boolean): { el: HTMLElement; read: Reader } {
+  const box = el('span', 'ui-datefield ask-date')
+  const input = el('input', 'ui-datefield-input')
+  input.type = 'text'
+  input.autocomplete = 'off'
+  input.spellcheck = false
+  input.placeholder = withTime ? DATE_COPY.placeholderTime : DATE_COPY.placeholder
+  // date-time 的缺省值多半带 Z / 偏移：换成本地钟点显示，原样交回时还是同一个时刻；认不出就原样显示
+  if (f.default !== undefined) {
+    const local = withTime ? localDateTimeOf(f.default) : undefined
+    input.value = local ? formatDateTime(local) : f.default
+  }
+  const btn = el('button', 'ui-datefield-btn')
+  btn.type = 'button'
+  btn.setAttribute('aria-label', DATE_COPY.pick)
+  btn.setAttribute('aria-haspopup', 'dialog')
+  btn.setAttribute('aria-expanded', 'false')
+  btn.dataset.tip = DATE_COPY.pick
+  btn.innerHTML = iconSvg('calendar', 14)
+  const parse = (): string | undefined => (withTime ? parseDateTime(input.value) : parseDay(input.value))
+  const show = (v: string): string => (withTime ? formatDateTime(v) : v)
+  let closePicker: (() => void) | null = null
+  const toggle = (): void => {
+    if (closePicker) return closePicker()
+    btn.setAttribute('aria-expanded', 'true')
+    closePicker = openDatePicker(box, {
+      value: parse() ?? null,
+      withTime,
+      focus: input,
+      onPick: (v) => {
+        input.value = show(v)
+      },
+      onClose: () => {
+        closePicker = null
+        btn.setAttribute('aria-expanded', 'false')
+      },
+    })
+  }
+  btn.addEventListener('click', toggle)
+  input.addEventListener('keydown', (e) => {
+    if (e.key !== 'ArrowDown' || e.ctrlKey || e.metaKey || e.shiftKey || e.isComposing) return
+    e.preventDefault()
+    if (!closePicker) toggle()
+  })
+  // 失焦时认得出的写法换成规范写法（2026/1/2 → 2026-01-02）；认不出的留着，提交时由校验说清楚
+  input.addEventListener('blur', () => {
+    const v = parse()
+    if (v) input.value = show(v)
+  })
+  box.append(input, btn)
+  return { el: box, read: () => dateAnswer(input.value, withTime) }
 }
 
+/** 日期框的答案：空 = 没填（undefined）；读得出 = 'YYYY-MM-DD'，带时间的按本地时间换成带偏移的 ISO（JSON Schema 的 date-time）；
+ *  读不出 = 原文，交给 firstProblem 报格式不对（同服务端的口径） */
+export function dateAnswer(text: string, withTime: boolean): string | undefined {
+  const t = text.trim()
+  if (t === '') return undefined
+  if (!withTime) return parseDay(t) ?? t
+  const v = parseDateTime(t)
+  return v ? new Date(v).toISOString() : t
+}
+
+function numberInput(f: Num): { el: HTMLElement; read: Reader } {
+  const input = el('input', 'ask-input is-num')
+  input.type = 'text'
+  input.inputMode = f.min !== undefined && f.min >= 0 ? (f.integer ? 'numeric' : 'decimal') : 'text'
+  input.autocomplete = 'off'
+  input.spellcheck = false
+  if (f.default !== undefined) input.value = String(f.default)
+  // ↑↓ 步进（Shift ×10），收进 min / max；越界或填错不在这里改，交给提交时的校验说清楚
+  input.addEventListener('keydown', (e) => {
+    if ((e.key !== 'ArrowUp' && e.key !== 'ArrowDown') || e.altKey || e.ctrlKey || e.metaKey || e.isComposing) return
+    e.preventDefault()
+    const delta = (e.key === 'ArrowUp' ? 1 : -1) * (e.shiftKey ? 10 : 1)
+    input.value = String(stepNumber(input.value, f.default ?? null, delta, f))
+  })
+  return { el: input, read: () => numberAnswer(input.value) }
+}
+
+/** 数字框的答案：空 = 没填（undefined）；填了但不是数字 = NaN，交给 firstProblem 报「应为数字」。越界 / 小数原样交出，由校验说清楚 */
+export function numberAnswer(text: string): number | undefined {
+  const n = parseNumberText(text)
+  return n === null ? undefined : (n ?? Number.NaN)
+}
+
+/** 是 / 否：同设置里的开关（ui/form-kit 的 Switch，同类名同外观）；旁边的字跟着显示「是 / 否」，点字也能切 */
 function booleanInput(f: Extract<AskField, { kind: 'boolean' }>): { el: HTMLElement; read: Reader } {
   const label = el('label', 'ask-switch')
-  const box = el('input', '')
-  box.type = 'checkbox'
-  box.checked = f.default === true
-  label.append(box, el('span', '', COPY.ask.form.yes))
-  return { el: label, read: () => box.checked }
+  const btn = el('button', 'set-switch')
+  btn.type = 'button'
+  btn.setAttribute('role', 'switch')
+  btn.setAttribute('aria-label', fieldName(f))
+  btn.append(el('span', 'set-switch-knob'))
+  const text = el('span', '')
+  let on = f.default === true
+  const sync = (): void => {
+    btn.setAttribute('aria-checked', String(on))
+    btn.classList.toggle('is-on', on)
+    text.textContent = on ? COPY.ask.form.yes : COPY.ask.form.no
+  }
+  btn.addEventListener('click', () => {
+    on = !on
+    sync()
+  })
+  sync()
+  label.append(btn, text)
+  return { el: label, read: () => on }
 }
 
 export type AskFormHandlers = {

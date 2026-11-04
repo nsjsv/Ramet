@@ -90,11 +90,13 @@ export function createLinkEditor(host: HTMLElement): LinkEditor {
   input.spellcheck = false
   const ok = document.createElement('button')
   ok.type = 'button'
-  ok.title = '应用'
+  ok.dataset.tip = '应用'
+  ok.setAttribute('aria-label', '应用')
   ok.innerHTML = iconSvg('check', 16)
   const remove = document.createElement('button')
   remove.type = 'button'
-  remove.title = '移除链接'
+  remove.dataset.tip = '移除链接'
+  remove.setAttribute('aria-label', '移除链接')
   remove.innerHTML = iconSvg('clear-format', 16)
   row.append(input, ok, remove)
 

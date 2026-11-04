@@ -38,6 +38,7 @@ import { applyChanges, changesBox, clearBox, copyBox, fillBox, pasteBox, setCell
 import { createUndoStack } from './undo'
 import { useFillDrag } from './fill-drag'
 import { columnsOf, dropNeighbors, ROW_DRAG_TYPE, gridTemplate, moveCursor, sectionsOf, type Section } from './table-model'
+import { Checkbox } from '../../ui/Checkbox'
 
 const C = COPY.collection
 
@@ -390,7 +391,7 @@ export default function TableView({ handle, schema, view, readOnly, spaceId, onO
             className="cl-handle"
             role="button"
             draggable={canDrag}
-            title={canDrag ? C.handle.tipDrag : C.handle.tip}
+            data-tip={canDrag ? C.handle.tipDrag : C.handle.tip} aria-label={canDrag ? C.handle.tipDrag : C.handle.tip}
             aria-haspopup="menu"
             onClick={(e) =>
               openRowMenu(rowMenu, e.currentTarget, {
@@ -419,12 +420,11 @@ export default function TableView({ handle, schema, view, readOnly, spaceId, onO
           </span>
         )}
         {!readOnly && (
-          <input
-            type="checkbox"
+          <Checkbox
             className="cl-pick"
             aria-label={C.select.row}
             checked={picked.has(row.id)}
-            onChange={(e) => picking.pick(row.id, (e.nativeEvent as MouseEvent).shiftKey === true, visible.map((r) => r.id))}
+            onChange={(_, e) => picking.pick(row.id, (e.nativeEvent as MouseEvent).shiftKey === true, visible.map((r) => r.id))}
           />
         )}
       </div>
@@ -538,7 +538,7 @@ export default function TableView({ handle, schema, view, readOnly, spaceId, onO
             <div key={section.key ?? '-'} className="cl-section">
               {section.key !== null && (
                 <div className="cl-section-head">
-                  <button type="button" className="icon-btn" title={C.fold} aria-expanded={!closed} onClick={() => fold(section.key!)}>
+                  <button type="button" className="icon-btn" data-tip={C.fold} aria-label={C.fold} aria-expanded={!closed} onClick={() => fold(section.key!)}>
                     <Icon name="chevron" size={12} className={'chev' + (closed ? '' : ' open')} />
                   </button>
                   {section.option ? (

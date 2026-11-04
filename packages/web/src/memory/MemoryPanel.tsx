@@ -12,6 +12,7 @@ import { subscribeControl } from '../control'
 import { Icon } from '../icons'
 import { relativeTime } from '../UpdatesFeed'
 import { memoryApi, type MemoryList } from './memory-api'
+import { confirmDialog } from '../ui/dialog'
 
 const C = COPY.memory
 const REFRESH_DEBOUNCE_MS = 200
@@ -78,7 +79,7 @@ export default function MemoryPanel({ space }: { space: Space | null }) {
   }
 
   async function remove(id: string, text: string) {
-    if (!spaceId || !window.confirm(C.confirmRemove(text))) return
+    if (!spaceId || !(await confirmDialog({ message: C.confirmRemove(text), danger: true }))) return
     try {
       await memoryApi.remove(spaceId, id)
       await reload()
@@ -108,7 +109,7 @@ export default function MemoryPanel({ space }: { space: Space | null }) {
       {error && (
         <div className="memory-error" role="alert">
           <span>{error}</span>
-          <button className="memory-error-close" title={COPY.failed} onClick={() => setError(null)}>
+          <button className="memory-error-close" data-tip={COPY.failed} aria-label={COPY.failed} onClick={() => setError(null)}>
             <Icon name="x" size={12} />
           </button>
         </div>
@@ -163,7 +164,7 @@ export default function MemoryPanel({ space }: { space: Space | null }) {
               </div>
             </div>
             {canWrite && (
-              <button className="memory-row-del" title={C.remove} aria-label={C.remove} onClick={() => void remove(m.id, m.text)}>
+              <button className="memory-row-del" data-tip={C.remove} aria-label={C.remove} onClick={() => void remove(m.id, m.text)}>
                 <Icon name="trash" size={14} />
               </button>
             )}

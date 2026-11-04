@@ -96,8 +96,8 @@ export default function ChangesTab({
           const { dir, name } = splitPath(f.path)
           return (
             <li key={f.path}>
-              <button type="button" className="project-change-row" onClick={() => onDiff(f.path)} title={f.from ? `${f.from} → ${f.path}` : f.path}>
-                <span className={`project-mark ${markClass(f.mark)}`} title={C.mark[f.mark]}>
+              <button type="button" className="project-change-row" onClick={() => onDiff(f.path)} data-tip={f.from ? `${f.from} → ${f.path}` : f.path}>
+                <span className={`project-mark ${markClass(f.mark)}`} data-tip={C.mark[f.mark]}>
                   {f.mark}
                 </span>
                 <span className="project-change-path">
@@ -169,10 +169,10 @@ function DiffView({
   return (
     <div className="project-viewer">
       <div className="project-viewer-head">
-        <button type="button" className="project-icon-btn" onClick={onBack} title={C.back} aria-label={C.back}>
+        <button type="button" className="project-icon-btn" onClick={onBack} data-tip={C.back} aria-label={C.back}>
           <Icon name="chevron" className="project-back-ico" />
         </button>
-        <span className="project-viewer-path" title={path}>
+        <span className="project-viewer-path" data-tip={path}>
           {path}
         </span>
         <span className={'project-by' + (by === C.youQuick ? ' is-quick' : by !== C.you ? ' is-agent' : '')}>{by}</span>

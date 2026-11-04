@@ -5,9 +5,17 @@ import { diagnosticsEnabled, initClientDiagnostics } from './debug-log'
 import { installFileFallback } from './file-fallback'
 import './styles.css'
 import { installTheme } from './theme'
-import { installTips } from './tip'
+import { installLayerGuards } from './ui/layer-host'
+import { installTips } from './ui/tip'
+import { installToasts } from './ui/toast'
 import UpdateNotice from './UpdateNotice'
 import { trackKeyboardInset } from './viewport'
+
+// 浮层守卫：对话框开着时按键只归它、点浮层不穿透到页面。必须排在所有 window 捕获监听之前注册（见 ui/layer-host.tsx）
+installLayerGuards()
+
+// Toast 列表是读屏的播报区域，要先于第一条消息挂在页面上（见 ui/toast.tsx）
+installToasts()
 
 // 客户端诊断：只在 ?diag=1 / localStorage['ramet:diag']='1' 时挂监听并上报（默认零开销）
 if (diagnosticsEnabled()) initClientDiagnostics()
@@ -18,7 +26,7 @@ installFileFallback()
 // 界面明暗：首帧由 index.html 的内联脚本定好，这里接手系统明暗变化与跨标签页同步（见 theme.ts）
 installTheme()
 
-// 悬停提示：带 data-tip 的元素悬停 / 键盘聚焦时在上方出提示（见 tip.ts）
+// 悬停提示：带 data-tip 的元素悬停 / 键盘聚焦时在上方出提示（见 ui/tip.ts）
 installTips()
 
 // 软键盘：把被键盘盖住的高度写进 --kb（iOS Safari 键盘不改布局视口，见 viewport.ts）

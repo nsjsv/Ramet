@@ -544,6 +544,37 @@
     box-shadow var(--d-1);
 }
 
+/* 输入框 + 自己的清除按钮（type=search 的系统叉跟不了主题，改成 text + 这个按钮） */
+.sidebar-search-field {
+  position: relative;
+}
+
+.sidebar-search-field:has(.sidebar-search-clear) .sidebar-search-input {
+  padding-right: 30px;
+}
+
+.sidebar-search-clear {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--r-sm);
+  color: var(--ink-3);
+  transform: translateY(-50%);
+  transition:
+    background var(--d-1),
+    color var(--d-1);
+}
+
+.sidebar-search-clear:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
 .sidebar-search-input::placeholder {
   color: var(--ink-3);
 }

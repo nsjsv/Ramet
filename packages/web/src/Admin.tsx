@@ -4,6 +4,8 @@ import { api } from './api'
 import { COPY } from './copy'
 import { copyText } from './clipboard'
 import { Icon } from './icons'
+import { confirmDialog } from './ui/dialog'
+import { Select } from './ui/Select'
 
 interface Me {
   id: string
@@ -100,7 +102,7 @@ export default function Admin() {
       setError(apiError(err, COPY.adminUsers.impactFailed))
       return
     }
-    if (!window.confirm(COPY.adminUsers.confirmDelete(user.username, impact))) return
+    if (!(await confirmDialog({ message: COPY.adminUsers.confirmDelete(user.username, impact), danger: true }))) return
     try {
       const res = await request(`/api/admin/users/${user.id}`, { method: 'DELETE' })
       if (!res.ok) {
@@ -115,7 +117,11 @@ export default function Admin() {
 
   // 重置密码：服务端生成临时密码，不收手输密码；确认文案明示现有登录全部失效
   async function resetPassword(user: AdminUser) {
-    if (!window.confirm(`重置「${user.username}」的密码？将生成临时密码，该用户现有登录全部失效。`)) return
+    const ok = await confirmDialog({
+      message: `重置「${user.username}」的密码？将生成临时密码，该用户现有登录全部失效。`,
+      confirmLabel: '重置密码',
+    })
+    if (!ok) return
     setError(null)
     try {
       // 请求体为空：契约与建号对齐，不收手输密码
@@ -142,7 +148,7 @@ export default function Admin() {
       {error && (
         <div className="admin-banner" role="alert">
           <span>{error}</span>
-          <button className="admin-banner-close" title="关闭" onClick={() => setError(null)}>
+          <button className="admin-banner-close" data-tip="关闭" aria-label="关闭" onClick={() => setError(null)}>
             <Icon name="x" size={14} />
           </button>
         </div>
@@ -191,7 +197,7 @@ export default function Admin() {
                         <button
                           className="admin-btn danger"
                           disabled={user.id === me?.id}
-                          title={user.id === me?.id ? '不能删除自己' : undefined}
+                          data-tip={user.id === me?.id ? '不能删除自己' : undefined}
                           onClick={() => void removeUser(user)}
                         >
                           删除
@@ -229,7 +235,7 @@ function TempPasswordBanner({ title, password, onClose }: { title: string; passw
         <button className="admin-btn" onClick={() => void copy()}>
           {copied ? '已复制' : '复制'}
         </button>
-        <button className="admin-banner-close is-temp" title="关闭" onClick={onClose}>
+        <button className="admin-banner-close is-temp" data-tip="关闭" aria-label="关闭" onClick={onClose}>
           <Icon name="x" size={14} />
         </button>
       </span>
@@ -292,14 +298,16 @@ function CreateUserForm({ onCreated }: { onCreated: (tempPassword: string) => vo
         value={username}
         onChange={(e) => setUsername(e.target.value)}
       />
-      <select
+      <Select
         className="admin-field"
+        label="角色"
         value={role}
-        onChange={(e) => setRole(e.currentTarget.value === 'admin' ? 'admin' : 'user')}
-      >
-        <option value="user">普通用户</option>
-        <option value="admin">管理员</option>
-      </select>
+        options={[
+          { value: 'user', label: '普通用户' },
+          { value: 'admin', label: '管理员' },
+        ]}
+        onChange={setRole}
+      />
       <button className="admin-btn primary" type="submit" disabled={busy}>
         {busy ? '创建中…' : '创建'}
       </button>

@@ -45,7 +45,7 @@ export function tableGrow({ view, block, scroller, table, tbody, getNode, getPos
     const bar = document.createElement('div')
     bar.className = `table-add is-${axis}`
     bar.contentEditable = 'false'
-    bar.title = axis === 'row' ? '点击加一行，拖动加多行' : '点击加一列，拖动加多列'
+    bar.dataset.tip = axis === 'row' ? '点击加一行，拖动加多行' : '点击加一列，拖动加多列'
     bar.innerHTML = iconSvg('plus', 14)
     return bar
   }

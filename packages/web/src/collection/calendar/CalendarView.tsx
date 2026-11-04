@@ -20,10 +20,10 @@ import type { CollectionHandle } from '../collection-store'
 import { RANGE_ROWS_CAP } from '../collection-windows'
 import { DateSetup } from '../date-setup'
 import { readPersonal, writePersonal } from '../personal'
-import { Popover } from '../popover'
-import { localDay } from '../prop-meta'
+import { Popover } from '../../ui/popover'
 import { useRangeRows } from '../range-rows'
-import { DAY_HEAD, fitLanes, fitWeek, isMonth, itemsOn, LANE_H, layoutWeeks, monthGrid, monthOf, shiftMonth, shiftSpan, type CalItem, type Placed } from './calendar-model'
+import { localDay, monthOf, shiftMonth } from '../../ui/date-model'
+import { calendarGrid, DAY_HEAD, fitLanes, fitWeek, isMonth, itemsOn, LANE_H, layoutWeeks, shiftSpan, type CalItem, type Placed } from './calendar-model'
 
 const C = COPY.collection
 
@@ -55,7 +55,7 @@ const month1 = (day: string): number => Number(day.slice(5, 7))
 export default function CalendarView({ handle, schema, view, readOnly, spaceId, onOpenRow }: Props) {
   const prop = dateByProp(view, schema)
   const [month, setMonthState] = useState(() => readMonth(view.id))
-  const grid = useMemo(() => monthGrid(month), [month])
+  const grid = useMemo(() => calendarGrid(month), [month])
   const data = useRangeRows(handle, prop ? view.id : null, grid.range)
   const ctx = useMemo(() => handle.queryCtx(), [handle])
   const items = useMemo<CalItem[]>(
@@ -166,7 +166,7 @@ export default function CalendarView({ handle, schema, view, readOnly, spaceId, 
           (canWrite ? ' is-draggable' : '')
         }
         style={style}
-        title={!readOnly && !canWrite ? C.date.locked : undefined}
+        data-tip={!readOnly && !canWrite ? C.date.locked : undefined}
         onClick={() => {
           if (dragged.current) {
             dragged.current = false
@@ -197,13 +197,13 @@ export default function CalendarView({ handle, schema, view, readOnly, spaceId, 
         {data.capped && <span className="cl-hint">{C.date.capped(RANGE_ROWS_CAP)}</span>}
         {data.error && <span className="cl-hint">{C.notFound}</span>}
         <div className="cl-cal-nav">
-          <button type="button" className="icon-btn" title={C.date.prevMonth} aria-label={C.date.prevMonth} onClick={() => setMonth(shiftMonth(month, -1))}>
+          <button type="button" className="icon-btn" data-tip={C.date.prevMonth} aria-label={C.date.prevMonth} onClick={() => setMonth(shiftMonth(month, -1))}>
             <Icon name="chevron" size={14} className="cl-flip-x" />
           </button>
           <button type="button" className="cl-bar-btn" onClick={() => setMonth(monthOf(today))}>
             {C.date.today}
           </button>
-          <button type="button" className="icon-btn" title={C.date.nextMonth} aria-label={C.date.nextMonth} onClick={() => setMonth(shiftMonth(month, 1))}>
+          <button type="button" className="icon-btn" data-tip={C.date.nextMonth} aria-label={C.date.nextMonth} onClick={() => setMonth(shiftMonth(month, 1))}>
             <Icon name="chevron" size={14} />
           </button>
         </div>
@@ -228,12 +228,12 @@ export default function CalendarView({ handle, schema, view, readOnly, spaceId, 
                   >
                     <span className="cl-cal-num">{day1(day) === 1 ? C.date.firstDay(month1(day), 1) : day1(day)}</span>
                     {canWrite && (
-                      <button type="button" className="icon-btn cl-cal-add" title={C.date.add} aria-label={C.date.add} onClick={() => create(day)}>
+                      <button type="button" className="icon-btn cl-cal-add" data-tip={C.date.add} aria-label={C.date.add} onClick={() => create(day)}>
                         <Icon name="plus" size={12} />
                       </button>
                     )}
                     {more > 0 && (
-                      <button type="button" className="cl-cal-more" title={C.date.moreTip(more)} onClick={(e) => setMoreAt({ day, el: e.currentTarget })}>
+                      <button type="button" className="cl-cal-more" data-tip={C.date.moreTip(more)} onClick={(e) => setMoreAt({ day, el: e.currentTarget })}>
                         {C.date.more(more)}
                       </button>
                     )}

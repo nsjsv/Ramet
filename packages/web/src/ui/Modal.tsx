@@ -22,7 +22,7 @@ export default function Modal({
   children,
 }: {
   onClose: () => void
-  /** 遮罩元素（从集合的弹层里打开时要登记进弹层栈，见 collection/popover.tsx 的 usePopoverLayer） */
+  /** 遮罩元素（从集合的弹层里打开时要登记进弹层栈，见 popover.tsx 的 usePopoverLayer） */
   overlayRef?: (el: HTMLDivElement | null) => void
   /** false = 点遮罩不关（多步填写的弹窗：误点一下不该丢掉填到一半的内容；Esc / 关闭按钮照常） */
   overlayCloses?: boolean

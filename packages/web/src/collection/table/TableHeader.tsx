@@ -13,7 +13,8 @@ import {
 import { COPY } from '../../copy'
 import { Icon } from '../../icons'
 import PropEditor from '../PropEditor'
-import { Popover, usePopover } from '../popover'
+import { Popover, usePopover } from '../../ui/popover'
+import { Checkbox } from '../../ui/Checkbox'
 import { columnWidth, TITLE_ICON, TYPE_ICON } from '../prop-meta'
 import { formulaBroken } from '../cells/FormulaCell'
 import { NewPropMenu } from '../toolbar/menus'
@@ -74,15 +75,12 @@ export default function TableHeader({ doc, schema, view, cols, readOnly, picked,
     <div className="cl-row cl-head" role="row">
       <div className="cl-gutter">
         {!readOnly && (
-          <input
-            type="checkbox"
+          <Checkbox
             className="cl-pick"
             aria-label={C.select.all}
-            title={C.select.all}
+            tip={C.select.all}
             checked={picked === 'all'}
-            ref={(el) => {
-              if (el) el.indeterminate = picked === 'some'
-            }}
+            indeterminate={picked === 'some'}
             onChange={onPickAll}
           />
         )}
@@ -97,13 +95,13 @@ export default function TableHeader({ doc, schema, view, cols, readOnly, picked,
               className="cl-th-btn"
               data-prop={prop.id}
               disabled={!clickable}
-              title={clickable ? C.props.edit : undefined}
+              data-tip={clickable ? C.props.edit : undefined}
               onClick={(e) => open(e.currentTarget)}
             >
               <Icon name={isTitle ? TITLE_ICON : TYPE_ICON[prop.type]} size={14} />
               <span>{prop.name || C.types[prop.type]}</span>
               {formulaBroken(prop) && (
-                <span className="cl-th-warn" title={prop.formulaError?.message} aria-label={C.formula.bad}>
+                <span className="cl-th-warn" data-tip={prop.formulaError?.message} aria-label={C.formula.bad}>
                   <Icon name="callout-warning" size={14} />
                 </span>
               )}
@@ -114,7 +112,7 @@ export default function TableHeader({ doc, schema, view, cols, readOnly, picked,
       })}
       <div className="cl-th cl-th-add">
         {!readOnly && (
-          <button type="button" className="cl-th-btn" data-prop="" title={C.props.add} aria-label={C.props.add} onClick={(e) => open(e.currentTarget)}>
+          <button type="button" className="cl-th-btn" data-prop="" data-tip={C.props.add} aria-label={C.props.add} onClick={(e) => open(e.currentTarget)}>
             <Icon name="plus" size={14} />
           </button>
         )}

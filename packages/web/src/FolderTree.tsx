@@ -11,6 +11,7 @@ import { PageIcon } from './PageIcon'
 import { peekPageDrag, takePageDrag, type PageDrag } from './PageTree'
 import { startDirPageDrag } from './tree-drag'
 import { Icon } from './icons'
+import { confirmDialog } from './ui/dialog'
 
 export interface FolderNode extends BoardFolder {
   children: FolderNode[]
@@ -426,7 +427,12 @@ function DirRow({ node, depth, cb }: { node: FolderNode; depth: number; cb: Fold
         {/* 同页面树：展开态不参与箭头接管，悬停 / 键盘聚焦才显箭头（见 sidebar.css 块首注释） */}
         <span className={'tree-twisty' + (hasChildren ? ' parent' : '')}>
           {hasChildren && (
-            <button className="arrow" title={isOpen ? COPY.tree.collapse : COPY.tree.expand} aria-expanded={isOpen}>
+            <button
+              className="arrow"
+              data-tip={isOpen ? COPY.tree.collapse : COPY.tree.expand}
+              aria-label={isOpen ? COPY.tree.collapse : COPY.tree.expand}
+              aria-expanded={isOpen}
+            >
               <Icon name="chevron" size={12} className={'chev' + (isOpen ? ' open' : '')} />
             </button>
           )}
@@ -447,7 +453,7 @@ function DirRow({ node, depth, cb }: { node: FolderNode; depth: number; cb: Fold
         ) : (
           <span
             className="tree-label"
-            title={node.name}
+            data-tip={node.name}
             onDoubleClick={() => !cb.readOnly && cb.onRenameStart({ type: 'folder', id: node.id })}
           >
             {node.name}
@@ -456,8 +462,12 @@ function DirRow({ node, depth, cb }: { node: FolderNode; depth: number; cb: Fold
         {!cb.readOnly && (
           <span className="tree-actions">
             {/* ＋ 打开行内菜单（同目录树头 ＋ 模式）：建子目录 / 建文档 / 传文件进该目录 */}
-            <button className="icon-btn" title={COPY.tree.addMenu} onClick={(e) => cb.onMenu({ type: 'folder-plus', id: node.id }, e)}><Icon name="plus" size={14} /></button>
-            <button className="icon-btn" title={COPY.tree.folderMenu} onClick={(e) => cb.onMenu({ type: 'folder', id: node.id }, e)}><Icon name="more" size={14} /></button>
+            <button className="icon-btn" data-tip={COPY.tree.addMenu} aria-label={COPY.tree.addMenu} onClick={(e) => cb.onMenu({ type: 'folder-plus', id: node.id }, e)}>
+              <Icon name="plus" size={14} />
+            </button>
+            <button className="icon-btn" data-tip={COPY.tree.folderMenu} aria-label={COPY.tree.folderMenu} onClick={(e) => cb.onMenu({ type: 'folder', id: node.id }, e)}>
+              <Icon name="more" size={14} />
+            </button>
           </span>
         )}
         {menuOpen && (
@@ -468,8 +478,9 @@ function DirRow({ node, depth, cb }: { node: FolderNode; depth: number; cb: Fold
               className="danger"
               onClick={() => {
                 cb.onMenu(null)
-                if (!window.confirm(COPY.tree.confirmDeleteFolder(node.name))) return
-                cb.onDeleteFolder(node.id)
+                void confirmDialog({ message: COPY.tree.confirmDeleteFolder(node.name), danger: true }).then(
+                  (ok) => ok && cb.onDeleteFolder(node.id),
+                )
               }}
             >
               {COPY.tree.remove}
@@ -546,7 +557,7 @@ function ItemRow({ item, depth, cb }: { item: BoardItem; depth: number; cb: Fold
         <NavLink
           to={`/page/${item.item_id}`}
           className={({ isActive }) => 'tree-label' + (isActive ? ' active' : '')}
-          title={item.title || COPY.untitled}
+          data-tip={item.title || COPY.untitled}
           draggable={false}
         >
           {item.title || COPY.untitled}
@@ -554,7 +565,7 @@ function ItemRow({ item, depth, cb }: { item: BoardItem; depth: number; cb: Fold
       ) : (
         <button
           className="tree-label"
-          title={item.name || ''}
+          data-tip={item.name || ''}
           onClick={() => window.open(`/api/files/${item.item_id}/display`, '_blank')}
         >
           {item.name || COPY.tree.unnamedFile}
@@ -564,7 +575,7 @@ function ItemRow({ item, depth, cb }: { item: BoardItem; depth: number; cb: Fold
         <span className="tree-actions">
           <button
             className="icon-btn danger"
-            title={item.kind === 'page' ? COPY.tree.removePage : COPY.tree.detachFile}
+            data-tip={item.kind === 'page' ? COPY.tree.removePage : COPY.tree.detachFile} aria-label={item.kind === 'page' ? COPY.tree.removePage : COPY.tree.detachFile}
             onClick={() => cb.onDetachItem(item)}
           >
             <Icon name="x" size={14} />

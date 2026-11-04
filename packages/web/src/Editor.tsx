@@ -28,6 +28,8 @@ import { exportZip } from './export/export-pages'
 import { COPY } from './copy'
 import { countNodeWords } from './word-count'
 import { refreshEditMarks } from './edit-marks-store'
+import { toast } from './ui/toast'
+import { TOAST_MS } from './ui/toast-store'
 import SkillHead from './editor/skill-head'
 import RowProperties from './collection/RowProperties'
 import { restoreRowProps } from './collection/schema-ops'
@@ -246,11 +248,12 @@ export default function EditorPage({
       const label = (agentId: string): string => agentName(agentId) || agentId
       try {
         const { warnings, truncated } = await exportZip(editor, id, label)
-        if (warnings > 0 || truncated) window.alert(COPY.export.partial(warnings, truncated))
+        // 部分没导出不算失败，但要读完：停留时间同出错
+        if (warnings > 0 || truncated) toast(COPY.export.partial(warnings, truncated), { duration: TOAST_MS.error })
         return true
       } catch (err) {
         console.error(err)
-        window.alert(COPY.export.failed)
+        toast(COPY.export.failed, { kind: 'error' })
         return false
       }
     },

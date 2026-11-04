@@ -193,7 +193,7 @@ export default function ListView({ handle, schema, view, readOnly, spaceId, onOp
             <div key={section.key ?? '-'} className="cl-section">
               {section.key !== null && (
                 <div className="cl-section-head">
-                  <button type="button" className="icon-btn" title={C.fold} aria-expanded={!closed} onClick={() => fold(section.key!)}>
+                  <button type="button" className="icon-btn" data-tip={C.fold} aria-label={C.fold} aria-expanded={!closed} onClick={() => fold(section.key!)}>
                     <Icon name="chevron" size={12} className={'chev' + (closed ? '' : ' open')} />
                   </button>
                   {section.option ? (

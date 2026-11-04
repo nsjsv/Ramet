@@ -66,9 +66,11 @@ export default function TableCell(p: Props) {
       aria-selected={p.selected}
       className={'cl-cell' + (p.selected ? ' is-selected' : '') + (p.inRange ? ' is-in-range' : '') + (p.inFill ? ' is-in-fill' : '') + (isTitle ? ' is-title' : '') + (locked ? ' is-locked' : '')}
       data-type={prop.type}
-      title={kind === 'none' ? COPY.collection.cell.readonly : undefined}
+      data-tip={kind === 'none' ? COPY.collection.cell.readonly : undefined}
       onMouseDown={(e) => {
-        if (e.button !== 0 || (e.target as HTMLElement).closest('a, button, input')) return
+        // 编辑弹层是 portal，里面的按下也沿 React 树冒泡上来（日历的日格是 div）：当成按在格子上的话会收起选区、把焦点抢回表格
+        const target = e.target as HTMLElement
+        if (e.button !== 0 || !e.currentTarget.contains(target) || target.closest('a, button, input')) return
         p.onSelect(e.shiftKey)
       }}
       onMouseEnter={(e) => {

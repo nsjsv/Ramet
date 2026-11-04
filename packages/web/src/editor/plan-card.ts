@@ -30,7 +30,7 @@ function itemTip(entry: PlanEntry): string {
 function paintItem(li: HTMLElement, entry: PlanEntry): void {
   li.className = `plan-item is-${entry.status}`
   li.dataset.priority = entry.priority ?? ''
-  li.title = itemTip(entry)
+  li.dataset.tip = itemTip(entry)
   const text = li.querySelector('.plan-text')
   if (text && text.textContent !== entry.content) text.textContent = entry.content
 }

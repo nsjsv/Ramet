@@ -8,7 +8,7 @@ import { agentBadge } from './editor/ai-block'
 import { setEditMode, useEditMode, type EditMode } from './editor/edit-mode'
 import { keyCaps, MARKDOWN_RULES, SHORTCUT_GROUPS } from './editor/shortcuts'
 import { uploadFile } from './editor/media'
-import { Card, Row, Segmented } from './form-kit'
+import { Card, Row, Segmented } from './ui/form-kit'
 import { Icon } from './icons'
 import { PASSWORD_MIN, passwordError } from './password'
 import { setThemePref, useThemePref, type ThemePref } from './theme'
@@ -278,7 +278,7 @@ export function AgentPane() {
           aria-checked={a.id === current}
           className={'set-pick' + (a.id === current ? ' is-on' : '')}
           disabled={Boolean(a.unavailable)}
-          title={a.unavailable}
+          data-tip={a.unavailable}
           onClick={() => setDefaultAgent(a.id)}
         >
           <AgentBadgeView badge={agentBadge(a.id)} className="agent-mark-row" />

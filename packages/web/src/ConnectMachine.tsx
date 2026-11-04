@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { api, ApiError, type ConnectPreview, type Space } from './api'
 import { COPY } from './copy'
 import { Icon } from './icons'
+import { Select } from './ui/Select'
 
 type Done = { kind: 'approved' | 'pending'; space: string } | { kind: 'rejected' }
 
@@ -176,13 +177,13 @@ export default function ConnectMachine({ selectedSpaceId }: { selectedSpaceId: s
             ) : (
               <label className="login-field">
                 {C.space}
-                <select className="login-input" value={spaceId ?? ''} onChange={(e) => setSpaceId(e.target.value)}>
-                  {eligible.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
-                  ))}
-                </select>
+                <Select
+                  className="login-input"
+                  label={C.space}
+                  value={spaceId}
+                  options={eligible.map((s) => ({ value: s.id, label: s.name }))}
+                  onChange={setSpaceId}
+                />
               </label>
             )}
             {space?.my_role === 'member' && <p className="connect-warn">{C.memberNote}</p>}

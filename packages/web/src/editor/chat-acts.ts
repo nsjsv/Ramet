@@ -55,7 +55,7 @@ export function buildActs(
     btn.type = 'button'
     btn.className = `chat-act${danger ? ' is-danger' : ''}`
     btn.dataset.act = act
-    btn.title = label
+    btn.dataset.tip = label
     btn.setAttribute('aria-label', label)
     btn.innerHTML = iconSvg(icon, 14)
     btn.addEventListener('click', () => run(btn))
@@ -77,8 +77,8 @@ export function buildActs(
     add('fav', on ? 'star-fill' : 'star', on ? COPY.fav.remove : COPY.fav.add, (btn) => {
       void acts.favorite(node).then((now) => {
         btn.innerHTML = iconSvg(now ? 'star-fill' : 'star', 14)
-        btn.title = now ? COPY.fav.remove : COPY.fav.add
-        btn.setAttribute('aria-label', btn.title)
+        btn.dataset.tip = now ? COPY.fav.remove : COPY.fav.add
+        btn.setAttribute('aria-label', btn.dataset.tip)
         btn.classList.toggle('is-on', now)
         btn.classList.remove('is-pop')
         void btn.offsetWidth // 重播动画

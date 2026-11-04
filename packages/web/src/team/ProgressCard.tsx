@@ -54,10 +54,10 @@ function TaskRow({ n, task, team, rel }: { n: number; task: TeamTask; team: Team
       <div className="team-task-main">
         <div className="team-task-top">
           <span className="team-no">{n}</span>
-          <span className="team-task-title" title={task.title}>
+          <span className="team-task-title" data-tip={task.title}>
             {task.title}
           </span>
-          <span className="team-who" title={task.assignee}>
+          <span className="team-who" data-tip={task.assignee}>
             {assigneeLabel(task, agentLabel)}
           </span>
         </div>
@@ -108,7 +108,7 @@ export function ProgressCard({ team, startedAt, ended }: { team: TeamState; star
       <button type="button" className="team-head" aria-expanded={open} aria-label={T.toggle} onMouseDown={(e) => e.preventDefault()} onClick={toggle}>
         <Icon name="users" size={14} />
         <span className="team-head-title">{T.title}</span>
-        <span className="team-head-name" title={team.title}>
+        <span className="team-head-name" data-tip={team.title}>
           {team.title}
         </span>
         <span className="team-head-sum">{T.summary(done, total, wall > 0 ? fmtDuration(wall) : '')}</span>

@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { api, type AgentInfo } from './api'
 import { COPY } from './copy'
-import { Card, ConfirmButton, Row, Segmented } from './form-kit'
+import { Card, ConfirmButton, Row, Segmented } from './ui/form-kit'
 import { Icon } from './icons'
+import { Select } from './ui/Select'
 import {
   ANTHROPIC_MODELS,
   quickApi,
@@ -119,22 +120,20 @@ export function QuickAiPane() {
         </Row>
         {settings.channel === 'local' && (
           <Row label={C.localAgentLabel} desc={agents.length === 0 ? C.localAgentEmpty : C.localAgentDesc} htmlFor="quick-local-agent">
-            <select
+            <Select
               id="quick-local-agent"
               className="admin-field"
+              label={C.localAgentLabel}
               value={settings.localAgent ?? ''}
-              onChange={(e) => void act(() => quickApi.setSettings({ localAgent: e.target.value || null }))}
-            >
-              <option value="">{C.localAgentNone}</option>
-              {settings.localAgent && !agents.some((a) => a.id === settings.localAgent) && (
-                <option value={settings.localAgent}>{C.localAgentGone(settings.localAgent.replace(/^c:[^:]+:/, ''))}</option>
-              )}
-              {agents.map((a) => (
-                <option key={a.id} value={a.id} disabled={Boolean(a.unavailable)} title={a.unavailable}>
-                  {a.label}
-                </option>
-              ))}
-            </select>
+              options={[
+                { value: '', label: C.localAgentNone },
+                ...(settings.localAgent && !agents.some((a) => a.id === settings.localAgent)
+                  ? [{ value: settings.localAgent, label: C.localAgentGone(settings.localAgent.replace(/^c:[^:]+:/, '')) }]
+                  : []),
+                ...agents.map((a) => ({ value: a.id, label: a.label, disabled: Boolean(a.unavailable), tip: a.unavailable })),
+              ]}
+              onChange={(v) => void act(() => quickApi.setSettings({ localAgent: v || null }))}
+            />
           </Row>
         )}
       </Card>
@@ -208,6 +207,10 @@ function ConnectionForm({
   const [test, setTest] = useState<{ ok: boolean; text: string } | null>(null)
   const editing = form.id !== null
   const official = form.protocol === 'anthropic' && !form.baseUrl.trim()
+  const nameRef = useRef<HTMLInputElement>(null)
+  const urlRef = useRef<HTMLInputElement>(null)
+  const modelRef = useRef<HTMLInputElement>(null)
+  const keyRef = useRef<HTMLInputElement>(null)
   const set = (patch: Partial<Form>) => {
     setTest(null)
     onChange({ ...form, ...patch })
@@ -242,8 +245,26 @@ function ConnectionForm({
     }
   }
 
+  /** 第一个没填的必填项（不用 required：系统的校验气泡跟不了主题，位置也不在表单的错误条上） */
+  function firstMissing(): { label: string; input: HTMLInputElement | null } | null {
+    const checks: Array<[boolean, string, HTMLInputElement | null]> = [
+      [!form.name.trim(), C.name, nameRef.current],
+      [form.protocol === 'openai' && !form.baseUrl.trim(), C.baseUrl, urlRef.current],
+      [!official && !form.model.trim(), C.model, modelRef.current],
+      [!editing && !form.apiKey.trim(), C.apiKey, keyRef.current],
+    ]
+    const hit = checks.find(([missing]) => missing)
+    return hit ? { label: hit[1], input: hit[2] } : null
+  }
+
   async function submit(e: FormEvent) {
     e.preventDefault()
+    const missing = firstMissing()
+    if (missing) {
+      setError(C.required(missing.label))
+      missing.input?.focus()
+      return
+    }
     setBusy('save')
     setError(null)
     try {
@@ -259,7 +280,7 @@ function ConnectionForm({
 
   return (
     <Card title={editing ? C.formEdit : C.formNew}>
-      <form className="quick-set-form" onSubmit={(e) => void submit(e)}>
+      <form className="quick-set-form" noValidate onSubmit={(e) => void submit(e)}>
         {!editing && (
           <Row label={C.protocol} desc={form.protocol === 'openai' ? C.protoOpenaiHint : C.protoAnthropicHint}>
             <Segmented
@@ -278,39 +299,40 @@ function ConnectionForm({
         )}
         <label className="quick-set-field">
           <span>{C.name}</span>
-          <input className="admin-field" value={form.name} maxLength={40} placeholder={C.namePlaceholder} onChange={(e) => set({ name: e.target.value })} required />
+          <input ref={nameRef} className="admin-field" value={form.name} maxLength={40} placeholder={C.namePlaceholder} onChange={(e) => set({ name: e.target.value })} />
         </label>
         <label className="quick-set-field">
           <span>{form.protocol === 'openai' ? C.baseUrl : C.baseUrlOptional}</span>
           <input
+            ref={urlRef}
             className="admin-field"
             value={form.baseUrl}
             maxLength={300}
             spellCheck={false}
             placeholder={form.protocol === 'openai' ? C.baseUrlOpenai : C.baseUrlAnthropic}
             onChange={(e) => setBaseUrl(e.target.value)}
-            required={form.protocol === 'openai'}
           />
           <small>{C.baseUrlRule}</small>
         </label>
         <label className="quick-set-field">
           <span>{C.model}</span>
           {official ? (
-            <select className="admin-field" value={form.model} onChange={(e) => set({ model: e.target.value })}>
-              {ANTHROPIC_MODELS.map((m) => (
-                <option key={m} value={m}>
-                  {C.models[m] ?? m}
-                </option>
-              ))}
-            </select>
+            <Select
+              className="admin-field"
+              label={C.model}
+              value={form.model}
+              options={ANTHROPIC_MODELS.map((m) => ({ value: m, label: C.models[m] ?? m }))}
+              onChange={(model) => set({ model })}
+            />
           ) : (
-            <input className="admin-field" value={form.model} maxLength={100} spellCheck={false} placeholder={C.modelPlaceholder} onChange={(e) => set({ model: e.target.value })} required />
+            <input ref={modelRef} className="admin-field" value={form.model} maxLength={100} spellCheck={false} placeholder={C.modelPlaceholder} onChange={(e) => set({ model: e.target.value })} />
           )}
           {official && <small>{C.modelHint}</small>}
         </label>
         <label className="quick-set-field">
           <span>{C.apiKey}</span>
           <input
+            ref={keyRef}
             className="admin-field"
             type="password"
             autoComplete="off"
@@ -318,10 +340,13 @@ function ConnectionForm({
             value={form.apiKey}
             placeholder={editing ? C.apiKeyKeep(form.keyLast4) : C.apiKeyPlaceholder}
             onChange={(e) => set({ apiKey: e.target.value })}
-            required={!editing}
           />
         </label>
-        {error && <div className="admin-form-error">{error}</div>}
+        {error && (
+          <div className="admin-form-error" role="alert">
+            {error}
+          </div>
+        )}
         {test && <div className={'quick-set-test' + (test.ok ? ' is-ok' : ' is-bad')}>{test.text}</div>}
         <div className="quick-set-acts">
           <button type="button" className="admin-btn" disabled={busy !== null} onClick={() => void runTest()}>

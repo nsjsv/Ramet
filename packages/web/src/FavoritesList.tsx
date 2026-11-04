@@ -42,7 +42,7 @@ function Row({ fav, page, onNavigate }: { fav: FavoriteView; page: Page | undefi
           <Icon name={blockIcon(fav.blockType)} size={18} className="dir-glyph" />
         )}
       </span>
-      <button type="button" className="tree-label" disabled={!target} title={hint} onClick={() => target && onNavigate(target)}>
+      <button type="button" className="tree-label" disabled={!target} data-tip={hint} onClick={() => target && onNavigate(target)}>
         {primary}
       </button>
       {fav.gone && <em className="fav-gone">{isPage ? COPY.fav.gonePage : COPY.fav.goneBlock}</em>}
@@ -50,7 +50,7 @@ function Row({ fav, page, onNavigate }: { fav: FavoriteView; page: Page | undefi
         <button
           type="button"
           className="icon-btn danger"
-          title={COPY.fav.remove}
+          data-tip={COPY.fav.remove}
           aria-label={COPY.fav.remove}
           onClick={() => void toggleFavorite(fav.pageId, fav.blockId ?? '')}
         >
@@ -92,13 +92,13 @@ export default function FavoritesList({
   return (
     <section className="fav-board">
       <div className="dir-board-header" onClick={toggle}>
-        <span className="dir-board-name" title={COPY.fav.section}>
+        <span className="dir-board-name" data-tip={COPY.fav.section}>
           {COPY.fav.section}
         </span>
         <button
           type="button"
           className="icon-btn dir-board-chev"
-          title={open ? COPY.tree.collapse : COPY.tree.expand}
+          data-tip={open ? COPY.tree.collapse : COPY.tree.expand} aria-label={open ? COPY.tree.collapse : COPY.tree.expand}
           aria-expanded={open}
           onClick={(e) => {
             e.stopPropagation()

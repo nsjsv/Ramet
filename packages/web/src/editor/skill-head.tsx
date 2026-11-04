@@ -9,6 +9,8 @@ import type { Page } from '../api'
 import { COPY } from '../copy'
 import { Icon } from '../icons'
 import { fmtSize, invalidateSkills, skillApi, type SkillDetail } from '../skill-api'
+import { confirmDialog } from '../ui/dialog'
+import { Select } from '../ui/Select'
 
 const C = COPY.skillHead
 const DIRS = ['scripts', 'references', 'assets', ''] as const
@@ -75,7 +77,7 @@ export default function SkillHead({ pageId, readOnly, pages }: { pageId: string;
   }
 
   async function removeFile(path: string) {
-    if (!window.confirm(C.confirmDeleteFile(path))) return
+    if (!(await confirmDialog({ message: C.confirmDeleteFile(path), danger: true }))) return
     try {
       await skillApi.deleteFile(pageId, path)
       await reload()
@@ -92,7 +94,7 @@ export default function SkillHead({ pageId, readOnly, pages }: { pageId: string;
           <Icon name="skill" size={13} /> {C.library}
         </button>
         {source && (
-          <span title={source.url ?? ''}>
+          <span data-tip={source.url ?? ''}>
             {C.source}：{source.type === 'github' ? COPY.skills.fromGithub : source.type === 'folder' ? COPY.skills.fromFolder : COPY.skills.fromZip}
             {source.url ? ` · ${source.url}` : ''}
           </span>
@@ -128,13 +130,7 @@ export default function SkillHead({ pageId, readOnly, pages }: { pageId: string;
         </span>
         {!readOnly && (
           <>
-            <select value={dir} onChange={(e) => setDir(e.target.value as (typeof DIRS)[number])} aria-label={C.addFile}>
-              {DIRS.map((d) => (
-                <option key={d} value={d}>
-                  {d ? `${d}/` : C.dirRoot}
-                </option>
-              ))}
-            </select>
+            <Select size="sm" label={C.addFile} value={dir} options={DIRS.map((d) => ({ value: d, label: d ? `${d}/` : C.dirRoot }))} onChange={setDir} />
             <label className="skill-file-add">
               <Icon name="plus" size={12} /> {C.addFile}
               <input

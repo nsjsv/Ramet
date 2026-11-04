@@ -3,13 +3,12 @@
 // 条目按 [开始, 结束] 截到每一周、各周各自分车道：开始早的、跨度长的先放（同样的按窗口顺序），放进第一条空着的车道；
 // 区间跨周就在换行处断开，下一周从行首接着画（clippedLeft / clippedRight 标出断口）。
 // 一格放不下的车道收进「+N」：前 capacity - 1 条车道总显示，最后一条车道只在它覆盖的每一天都放得下时显示，其余的数进当天的 N。
-import { addDays, dateSpan, daysBetween, joinDate, weekdayOf, type CollectionRow, type DateSpan } from '@ramet/shared/collection-model'
+import { addDays, dateSpan, daysBetween, joinDate, type CollectionRow, type DateSpan } from '@ramet/shared/collection-model'
 import { joinRange } from '@ramet/shared/collection-query'
+import { monthGrid, WEEKS, type MonthGrid } from '../../ui/date-model'
 
-export const WEEKS = 6
-
-/** 一屏月历：days 是 42 个日期（周一开头），from / to 是第一格 / 最后一格，range 是取数用的日期范围 */
-export type MonthGrid = { month: string; days: string[]; from: string; to: string; range: string }
+/** 日历视图的一屏：月格（ui/date-model，日期选择器同一份）+ 取数用的日期范围（第一格到最后一格） */
+export type CalendarGrid = MonthGrid & { range: string }
 
 const MONTH_RE = /^(\d{4})-(0[1-9]|1[0-2])$/
 
@@ -18,21 +17,9 @@ export function isMonth(raw: unknown): raw is string {
   return typeof raw === 'string' && MONTH_RE.test(raw) && raw.slice(0, 4) !== '0000'
 }
 
-export const monthOf = (day: string): string => day.slice(0, 7)
-
-/** 往后（n < 0 往前）翻 n 个月 */
-export function shiftMonth(month: string, n: number): string {
-  const index = Number(month.slice(0, 4)) * 12 + Number(month.slice(5, 7)) - 1 + n
-  const year = Math.floor(index / 12)
-  return `${String(year).padStart(4, '0')}-${String((index % 12) + 1).padStart(2, '0')}`
-}
-
-export function monthGrid(month: string): MonthGrid {
-  const first = `${month}-01`
-  const from = addDays(first, -weekdayOf(first))
-  const days = Array.from({ length: WEEKS * 7 }, (_, i) => addDays(from, i))
-  const to = days[days.length - 1]!
-  return { month, days, from, to, range: joinRange(from, to) }
+export function calendarGrid(month: string): CalendarGrid {
+  const grid = monthGrid(month)
+  return { ...grid, range: joinRange(grid.from, grid.to) }
 }
 
 /** 一个要排进日历的条目：行 + 它在日期属性上占的日子 */

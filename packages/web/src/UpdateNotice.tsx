@@ -74,7 +74,7 @@ export default function UpdateNotice() {
       </button>
       <button
         className="update-notice-close"
-        title={COPY.update.later}
+        data-tip={COPY.update.later}
         aria-label={COPY.update.later}
         onClick={() => setDismissed(latest)}
       >

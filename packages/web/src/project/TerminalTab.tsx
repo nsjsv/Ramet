@@ -123,7 +123,7 @@ export default function TerminalTab({
                 onClose={() => void closeOne(p.ptyId)}
               />
             ))}
-            <button type="button" className="project-icon-btn term-new" title={C.newTitle} aria-label={C.newTitle} disabled={opening} onClick={() => void openOne()}>
+            <button type="button" className="project-icon-btn term-new" data-tip={C.newTitle} aria-label={C.newTitle} disabled={opening} onClick={() => void openOne()}>
               <Icon name="plus" size={14} />
             </button>
           </div>
@@ -157,7 +157,7 @@ export default function TerminalTab({
             {others.map((p) => (
               <li key={p.ptyId}>
                 <span className="term-other-who">{C.othersOwner(p.owner || '?')}</span>
-                <span className="term-other-root" title={p.root}><bdi>{p.root}</bdi></span>
+                <span className="term-other-root" data-tip={p.root}><bdi>{p.root}</bdi></span>
                 <span className="term-other-state">{p.alive ? C.alive : C.exited(p.exitCode)}</span>
                 <button type="button" className="project-chip-btn" onClick={() => void closeOne(p.ptyId)}>
                   {C.closeOther}
@@ -190,11 +190,11 @@ function TermTabButton({
 }) {
   return (
     <span className={'term-tab-btn' + (on ? ' is-on' : '') + (info.alive ? '' : ' is-exited')}>
-      <button type="button" role="tab" aria-selected={on} title={info.root} onClick={onSelect}>
+      <button type="button" role="tab" aria-selected={on} data-tip={info.root} onClick={onSelect}>
         {C.tabName(index)}
         {info.alive ? '' : C.tabExited}
       </button>
-      <button type="button" className="term-tab-close" title={C.closeTab} aria-label={`${C.closeTab}：${C.tabName(index)}`} onClick={onClose}>
+      <button type="button" className="term-tab-close" data-tip={C.closeTab} aria-label={`${C.closeTab}：${C.tabName(index)}`} onClick={onClose}>
         <Icon name="x" size={12} />
       </button>
     </span>

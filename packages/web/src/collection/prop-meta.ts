@@ -4,9 +4,7 @@
 import { COLOR_NAMES, type ColorName } from '@ramet/shared/md-dialect'
 import {
   dateSpan,
-  isCalendarDate,
   isUnsafeUrl,
-  joinDate,
   timeMs,
   TITLE_PROP_ID,
   type CollectionProp,
@@ -14,6 +12,7 @@ import {
   type PropType,
 } from '@ramet/shared/collection-model'
 import type { IconName } from '../icons'
+import { parseNumberText } from '../ui/number'
 
 /** 新建属性菜单里的类型顺序 */
 export const TYPE_ORDER: readonly PropType[] = [
@@ -76,14 +75,8 @@ export function columnWidth(view: CollectionView, prop: CollectionProp): number 
   return 160
 }
 
-/** 数字输入：空 = 清空（null）；认不出 = undefined（不写）。允许千分位逗号与首尾空白 */
-export function parseNumberInput(text: string): number | null | undefined {
-  const t = text.trim().replace(/,/g, '')
-  if (t === '') return null
-  if (!/^[+-]?(\d+(\.\d*)?|\.\d+)(e[+-]?\d+)?$/i.test(t)) return undefined
-  const n = Number(t)
-  return Number.isFinite(n) ? n : undefined
-}
+/** 数字输入：空 = 清空（null）；认不出 = undefined（不写）。与全站数字框同一份解析 */
+export const parseNumberInput = parseNumberText
 
 /** 链接值 → 可点的地址：没写协议的补 https://；危险协议（javascript: 等）不给链接 */
 export function hrefOf(url: string): string | null {
@@ -113,32 +106,6 @@ export function formatDate(value: string): string {
 /** 公式算出的日期的显示：单日 / 区间同日期格，带时刻的（ISO 时间戳）同创建时间格，按本地时区 */
 export function formulaDate(value: string): string {
   return dateSpan(value) ? formatDate(value) : formatStamp(value)
-}
-
-/** 本地时区的今天（'YYYY-MM-DD'） */
-export function localDay(now: Date = new Date()): string {
-  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
-}
-
-/** 一天：YYYY-MM-DD，也认 2026/1/2、2026.1.2、2026年1月2日 */
-function parseDay(text: string): string | undefined {
-  const m = /^(\d{4})\s*[-/.年]\s*(\d{1,2})\s*[-/.月]\s*(\d{1,2})\s*日?$/.exec(text.trim())
-  if (!m) return undefined
-  const iso = `${m[1]}-${m[2]!.padStart(2, '0')}-${m[3]!.padStart(2, '0')}`
-  return isCalendarDate(iso) ? iso : undefined
-}
-
-/** 日期（含区间）的文字 → 日期值；认不出 = undefined。区间认「开始 → 结束」「开始/结束」「开始 ~ 结束」「开始 至 结束」，
- *  「/」只认两侧都是 YYYY-MM-DD 的写法（2026/1/2 是一天，不是区间） */
-export function parseDateInput(text: string): string | undefined {
-  const t = text.trim()
-  const iso = /^(\d{4}-\d{1,2}-\d{1,2})\s*\/\s*(\d{4}-\d{1,2}-\d{1,2})$/.exec(t)
-  const parts = iso ? [iso[1]!, iso[2]!] : t.split(/\s*(?:→|->|~|～|至)\s*/)
-  if (parts.length === 1) return parseDay(t)
-  if (parts.length !== 2) return undefined
-  const start = parseDay(parts[0]!)
-  const end = parseDay(parts[1]!)
-  return start && end ? joinDate(start, end) : undefined
 }
 
 /** 新选项的颜色：挑一个这个属性还没用过的（都用过就按个数轮转） */

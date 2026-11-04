@@ -10,6 +10,7 @@ import { Icon } from '../../icons'
 import { PageIcon } from '../../PageIcon'
 import { ItemFields, ItemName, useItemEdit } from '../item-fields'
 import { ROW_DRAG_TYPE } from '../table/table-model'
+import { Checkbox } from '../../ui/Checkbox'
 
 const C = COPY.collection
 
@@ -54,7 +55,7 @@ export default function ListRow(p: Props) {
             className="cl-handle"
             role="button"
             draggable={p.canDrag}
-            title={p.canDrag ? C.handle.tipDrag : C.handle.tip}
+            data-tip={p.canDrag ? C.handle.tipDrag : C.handle.tip} aria-label={p.canDrag ? C.handle.tipDrag : C.handle.tip}
             aria-haspopup="menu"
             onClick={(e) => p.onMenu(e.currentTarget)}
             onDragStart={(e) => {
@@ -70,12 +71,11 @@ export default function ListRow(p: Props) {
           </span>
         )}
         {!p.readOnly && (
-          <input
-            type="checkbox"
+          <Checkbox
             className="cl-pick"
             aria-label={C.select.row}
             checked={p.picked}
-            onChange={(e) => p.onPick((e.nativeEvent as MouseEvent).shiftKey === true)}
+            onChange={(_, e) => p.onPick((e.nativeEvent as MouseEvent).shiftKey === true)}
           />
         )}
       </div>

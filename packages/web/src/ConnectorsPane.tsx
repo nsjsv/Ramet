@@ -3,7 +3,7 @@ import { api, ApiError, type ConnectorSummary, type Space } from './api'
 import { copyText } from './clipboard'
 import { COPY } from './copy'
 import { subscribeControl } from './control'
-import { Card, ConfirmButton } from './form-kit'
+import { Card, ConfirmButton } from './ui/form-kit'
 import { Icon } from './icons'
 import { relativeTime } from './UpdatesFeed'
 
@@ -154,11 +154,12 @@ function ConnectorLine({
     : connector.online
       ? C.noAgentOnline
       : C.noAgentOffline
+  const status = connector.online ? C.online : C.offline
   return (
     <div className="set-line">
-      <span className={'connector-dot' + (connector.online ? ' on' : '')} title={connector.online ? C.online : C.offline} />
+      <span className={'connector-dot' + (connector.online ? ' on' : '')} data-tip={status} role="img" aria-label={status} />
       <div className="set-line-main">
-        <span className="set-line-name" title={connector.name}>
+        <span className="set-line-name" data-tip={connector.name}>
           {connector.name}
           {connector.mine && <span className="role-badge is-owner">{C.mine}</span>}
           {pending && <span className="role-badge">{C.pendingBadge}</span>}
@@ -170,7 +171,7 @@ function ConnectorLine({
           <button
             type="button"
             className="admin-btn primary"
-            title={C.approveTip}
+            data-tip={C.approveTip}
             onClick={() => void act(() => api.approveConnector(connector.id), C.approveFailed)}
           >
             {C.approve}
@@ -178,7 +179,7 @@ function ConnectorLine({
           <ConfirmButton
             confirmLabel={C.rejectConfirm}
             onConfirm={() => void act(() => api.rejectConnector(connector.id), C.rejectFailed)}
-            title={C.rejectTip}
+            tip={C.rejectTip}
           >
             {C.reject}
           </ConfirmButton>
@@ -188,7 +189,7 @@ function ConnectorLine({
           <ConfirmButton
             confirmLabel={C.revokeConfirm}
             onConfirm={() => void act(() => api.revokeConnector(connector.id), C.revokeFailed)}
-            title={C.revokeTip}
+            tip={C.revokeTip}
           >
             {pending ? C.cancelOwn : C.revoke}
           </ConfirmButton>

@@ -721,7 +721,7 @@ export default function ChatView({ pageId, readOnly, pages, onPagesChanged, getE
                   className="chat-send is-queue"
                   onClick={() => send()}
                   disabled={attach.uploading}
-                  title={COPY_QUEUE}
+                  data-tip={COPY_QUEUE}
                   aria-label={COPY_QUEUE}
                 >
                   <Icon name="clock" size={16} />

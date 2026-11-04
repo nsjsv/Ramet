@@ -309,7 +309,9 @@ function buildSelectionMenu(
     for (const item of group) {
       const btn = document.createElement('button')
       btn.type = 'button'
-      btn.title = item.title
+      // 按钮上只有 B / I / </> 这类符号或图标，名字给读屏
+      btn.dataset.tip = item.title
+      btn.setAttribute('aria-label', item.title)
       if (item.cls) btn.className = item.cls
       item.render(btn)
       btn.addEventListener('mousedown', (e) => e.preventDefault())
