@@ -28,6 +28,7 @@ import { ChipBar } from './chip-bar'
 import { ModeHint } from './mode-hint'
 import { draftIdOf, sendLast } from './doc-send'
 import { encodeOpts, messageConfigOf, userMessageSchema, type MessageConfig } from './message-blocks'
+import { sentBy } from './task-notice'
 
 export interface ChipPatch {
   agent?: string
@@ -46,7 +47,7 @@ const repaired = new Set<string>()
  *  而界面显示的是回落后的值，显示的和实际会跑的不是同一个。收敛后两者一致，
  *  且用户能在菜单里正常改成别的 agent（原来那个失效 id 是选项里删不掉的幽灵）。
  *  幂等，且不在渲染中派发（微任务里做，PM 的 update 循环内禁止 dispatch）。 */
-function repairStaleAgent(view: EditorView, blockId: string, stale: string, fallback: string): void {
+function repairStaleAgent(pageId: string, view: EditorView, blockId: string, stale: string, fallback: string): void {
   const key = `${blockId}|${stale}`
   if (repaired.has(key)) return
   repaired.add(key)
@@ -60,7 +61,7 @@ function repairStaleAgent(view: EditorView, blockId: string, stale: string, fall
     writeMsgConfig(view, p, { agent: fallback, clearOpts: true })
     // 失效来源已被修掉，把由它引起的「准备 agent ... 失败」清掉，
     // 否则页面修好了、错误条还挂着一条用户无从处理的旧提示
-    setAgentRunError(null)
+    setAgentRunError(pageId, null)
   })
 }
 
@@ -115,6 +116,9 @@ function applyMessageDom(dom: HTMLElement, node: PMNode): void {
   dom.setAttribute('data-agent', attrText(node, 'agent'))
   dom.setAttribute('data-cwd', attrText(node, 'cwd'))
   dom.setAttribute('data-opts', attrText(node, 'opts'))
+  // 任务通知（message-blocks.ts 的 notice）：样式与用户消息分开；外来的事件通知里引用的是别人写的内容，另有样式
+  dom.classList.toggle('is-notice', attrText(node, 'notice') !== '')
+  dom.classList.toggle('is-external', attrText(node, 'notice') === 'event' && attrText(node, 'external') === '1')
 }
 
 /** 调用配置（agent/cwd/opts）不是正文。默认视图把 attrs 算进 sameMarkup，
@@ -162,13 +166,15 @@ interface MessageHeadProps {
   blank: boolean
   /** 正文里 @ 了 agent：显式 @ 点名不受本页的工具锁定，锁定的工具都不在线也能发 */
   mentions: boolean
+  /** 定时器 / 别的规则以主人身份发出的（message-blocks.ts 的 timer / rule）：署名前带「定时」/「自动化」，不然看着像主人此刻亲手发的 */
+  sent: 'timer' | 'rule' | null
 }
 
 const QUEUED_LABEL = '排队中 · 取消'
 const QUEUED_TIP = '这一轮结束后继续发给 agent；点一下取消排队'
 
 /** 署名行的文档宿主：attrs → props，props 的改动 → attrs */
-function MessageHead({ pageId, view, blockId, cfg, blank, mentions }: MessageHeadProps) {
+function MessageHead({ pageId, view, blockId, cfg, blank, mentions, sent }: MessageHeadProps) {
   // 目录按本页锁定的工具过滤：锁定的工具没有在线的时，列表为空、不去修 attrs（修成 '' 会丢掉用户的选择）
   const { agents, loaded, lock } = usePageAgents(pageId)
   // 解析规则与别处同一所有者（pageAgent）：消息 attrs 指定且仍在目录里才用它，否则依次回落本页的来源、
@@ -181,8 +187,9 @@ function MessageHead({ pageId, view, blockId, cfg, blank, mentions }: MessageHea
   const queued = queue.items.find((q) => q.kind === 'continue' && q.userId === selfId())
 
   useEffect(() => {
-    // 目录还没到手时不能判失效（pickAgent([]) = ''，会把好好的值清掉）
-    if (loaded && agents.length > 0 && cfg.agent && cfg.agent !== agent) repairStaleAgent(view, blockId, cfg.agent, agent)
+    // 目录还没到手时不能判失效（pickAgent([]) = ''，会把好好的值清掉）；这一页的目录要等 SSE 首帧（ready）才定下来：
+    // 锁定的工具、是不是 Genet 页（Genet 页的目录是 Genet，assistant/identity.ts）都在首帧里，之前按全局目录判会把 Genet 当成失效值改掉
+    if (ready && loaded && agents.length > 0 && cfg.agent && cfg.agent !== agent) repairStaleAgent(pageId, view, blockId, cfg.agent, agent)
     // 这条消息指定的 agent 也要问过 —— 页面默认不等于消息指定的那个。回落到本页来源的要等它到了再问
     if (ready || agent === cfg.agent) askAgent(pageId, agent)
   }, [pageId, view, blockId, loaded, agents, cfg.agent, agent, ready])
@@ -194,6 +201,12 @@ function MessageHead({ pageId, view, blockId, cfg, blank, mentions }: MessageHea
 
   return (
     <>
+      {sent && (
+        <span className="msg-timer" data-tip={(sent === 'timer' ? COPY.ai.timers : COPY.ai.automations).sentTip}>
+          <Icon name={sent === 'timer' ? 'clock' : 'bolt'} size={12} />
+          {(sent === 'timer' ? COPY.ai.timers : COPY.ai.automations).sentTag}
+        </span>
+      )}
       <span className="msg-who">{label ? COPY.msg.youTo(label) : COPY.msg.you}</span>
       <ChipBar
         pageId={pageId}
@@ -276,7 +289,8 @@ export function messageChipsView(pageId: string, acts: ((node: PMNode) => HTMLEl
         const decos: Decoration[] = []
         const draftId = draftIdOf(state.doc)
         state.doc.forEach((node, offset) => {
-          if (node.type.name !== 'user_message') return
+          // 任务通知不是谁发的消息，没有署名行 / 配置 chip
+          if (node.type.name !== 'user_message' || node.attrs.notice) return
           // 挂在块内开头（offset 是块前的顶层缝，widget 会变成块的兄弟，跟消息脱钩）
           const start = offset + 1
           const id = typeof node.attrs.id === 'string' ? node.attrs.id : ''
@@ -301,7 +315,17 @@ export function messageChipsView(pageId: string, acts: ((node: PMNode) => HTMLEl
                   const current = p == null ? null : view.state.doc.nodeAt(p)
                   const cfg = current && current.type.name === 'user_message' ? messageConfigOf(current) : messageConfigOf(node)
                   const msg = current ?? node
-                  root.render(<MessageHead pageId={pageId} view={view} blockId={blockId} cfg={cfg} blank={isBlank(msg)} mentions={hasAgentMention(msg)} />)
+                  root.render(
+                    <MessageHead
+                      pageId={pageId}
+                      view={view}
+                      blockId={blockId}
+                      cfg={cfg}
+                      blank={isBlank(msg)}
+                      mentions={hasAgentMention(msg)}
+                      sent={sentBy(msg)}
+                    />,
+                  )
                 }
                 render()
                 if (id) chipRefreshers.set(id, render)

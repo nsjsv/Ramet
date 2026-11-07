@@ -280,53 +280,6 @@
   background: color-mix(in srgb, var(--ink) 6%, var(--surface));
 }
 
-/* 输入卡的图片附件（editor/composer-attach.tsx）：输入框上方一排缩略图，上传中半透明 */
-.chat-attach {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 2px 2px 6px;
-}
-
-.chat-attach-item {
-  position: relative;
-  width: 56px;
-  height: 56px;
-  overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: var(--r-sm);
-  background: var(--bg-sunk);
-}
-
-.chat-attach-item img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.chat-attach-item.is-uploading img {
-  opacity: 0.45;
-}
-
-.chat-attach-item.is-failed {
-  border-color: var(--danger);
-}
-
-.chat-attach-x {
-  position: absolute;
-  top: 2px;
-  right: 2px;
-  display: grid;
-  place-items: center;
-  width: 18px;
-  height: 18px;
-  border: 0;
-  border-radius: 50%;
-  background: rgba(0, 0, 0, 0.55);
-  color: #fff;
-  cursor: pointer;
-}
-
 /* 上下文圆环（editor/context-ring.tsx）：发送钮左边；≥80% 琥珀、≥95% 红 */
 .ctx-box {
   position: relative;
@@ -705,12 +658,13 @@
 
 /* 气泡正文是文档节点序列化出来的 DOM：标题 / 列表 / 代码块 / 引用 / 行内 marks 按真实结构渲染
    （agent 回复的 markdown 在服务端被落成这些节点，见 server agents/markdown.ts）。首尾外边距都抹掉，块级 margin 顶着边看起来内容偏心。
-   AI 回复的正文与文档模式同一套排版（字号、标题、段距）；下面的紧凑排版只给用户气泡。 */
-.chat-root .chat-bubble > :first-child {
+   AI 回复的正文与文档模式同一套排版（字号、标题、段距）；下面的紧凑排版只给用户气泡。
+   选择器多带一层 .chat-msg：用户气泡的紧凑排版是「三类 + 元素」，同级会压过这里，末段的下外距留在气泡里，文字上下不居中。 */
+.chat-root .chat-msg .chat-bubble > :first-child {
   margin-top: 0;
 }
 
-.chat-root .chat-bubble > :last-child {
+.chat-root .chat-msg .chat-bubble > :last-child {
   margin-bottom: 0;
 }
 
@@ -875,7 +829,8 @@
   view-transition-name: topbar;
 }
 
-:root[data-view-morph] .chat-dock {
+/* 只认这次切换的那一页里的输入区（view-morph.ts 的 SCOPE_ATTR）：右下角 Genet 浮窗里也有一个，同名两份整次变形作废 */
+:root[data-view-morph] [data-view-morph-scope] .chat-dock {
   view-transition-name: chat-dock;
 }
 

@@ -249,6 +249,8 @@ export function pagesRoutes(
   notifyBoards?: () => void,
   /** 改父子关系时在父页正文补 / 摘子页面块（page-entry.ts）；缺省 = 不维护入口（只有不走这类写的测试才缺省） */
   write?: DocWriter,
+  /** 建了一页（父页是合集时就是新增了一行，交给自动化；不等它） */
+  created?: (parentId: string | null, pageIds: readonly string[], userId: string) => void,
 ) {
   // 该子应用只有 /api/pages 一族路由,鉴权统一挂全量,未登录一律 401
   const app = new Hono<AuthEnv>()
@@ -346,6 +348,7 @@ export function pagesRoutes(
       }
     }
     notify?.()
+    created?.(parentId, [id], user.id)
     return c.json(toApiPage((await pool.query<PageRow>(SELECT_API_PAGE, [id])).rows[0]!), 201)
   })
 

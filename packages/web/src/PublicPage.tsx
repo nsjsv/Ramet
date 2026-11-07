@@ -15,12 +15,14 @@ import { collectionInlineSchema, collectionLinkSchema } from './editor/collectio
 import { pageRefSchema } from './editor/page-ref'
 import { agentMentionSchema } from './editor/agent-mention'
 import { userMentionSchema } from './editor/user-mention'
-import { mentionUpgrade } from './editor/mention-upgrade'
+import { fileMentionSchema } from './editor/file-mention'
+import { mentionDisplay } from './editor/mention-upgrade'
 import { pageMentionSchema } from './editor/page-mention'
 import { blockIdSchemas, commonmarkPreset, focusBlockById } from './editor/block-id'
 import { focusTextAnchor, textFlash, textParam } from './editor/text-anchor'
 import { commentHighlights } from './comments/comment-anchor'
 import CommentsHost from './comments/CommentsHost'
+import CommentMargin from './comments/CommentMargin'
 import PageDiscussion from './comments/PageDiscussion'
 import type { CommentCtx } from './comments/CommentThread'
 import { runStepSchema } from './editor/run-step'
@@ -39,6 +41,8 @@ import { mathBlockSchema, mathInlineSchema } from './editor/math'
 import { calloutSchema, calloutView } from './editor/callout'
 import { toggleSchema, toggleView } from './editor/toggle'
 import { tocRefresh, tocSchema, tocView } from './editor/toc'
+import { buttonBlockSchema } from './editor/button-block'
+import { aiGenSchema } from './editor/ai-gen'
 import { columnSchema, columnsSchema } from './editor/columns'
 import { embedSchema } from './editor/embed'
 import { bookmarkSchema, bookmarkView } from './editor/bookmark'
@@ -89,6 +93,7 @@ export default function PublicPage() {
   const id = matchPath('/p/:id', location.pathname)?.params.id ?? null
   const navigate = useNavigate()
   const hostRef = useRef<HTMLDivElement>(null)
+  const mainRef = useRef<HTMLElement>(null)
   const [status, setStatus] = useState<LoadStatus>('loading')
   const [title, setTitle] = useState('')
   // 页面图标：树的根节点即本页（图标是页面元数据，正文快照里没有）
@@ -236,7 +241,8 @@ export default function PublicPage() {
           .use(pageMentionSchema) // @ 页面引用 chip（行内原子）：同 page_ref，未注册会解析失败
           .use(agentMentionSchema) // @ agent 点名 chip（行内原子）：编辑端文档可能含它，未注册会解析失败
           .use(userMentionSchema) // @ 成员 chip（行内原子）：同上，未注册会解析失败
-          .use(mentionUpgrade)
+          .use(fileMentionSchema) // 文件引用 chip（行内原子）：同上，未注册会解析失败
+          .use(mentionDisplay) // 只读：远端来的老记号也画成 chip（不写回）
           .use(codeBlockView) // 代码块外壳（与 Editor 同表；只读：语言不可改，复制 / 图可用）
           .use(activeBlock)
           .use(codeHighlight)
@@ -247,6 +253,8 @@ export default function PublicPage() {
           .use(tocSchema)
           .use(tocView)
           .use(tocRefresh)
+          .use(buttonBlockSchema) // 按钮（与 Editor 同表）：公开页上只画点不了的按钮
+          .use(aiGenSchema) // AI 块（与 Editor 同表）：公开页上只画提示词与内容
           .use(columnsSchema)
           .use(columnSchema)
           .use(embedSchema)
@@ -343,7 +351,11 @@ export default function PublicPage() {
         )}
       </header>
       {!missing && <PageCover cover={cover} readOnly />}
-      <main className={'public-main' + (fullWidth ? ' full-width' : '') + (cover && !missing ? ' has-cover' : '')}>
+      {/* 右侧评论栏：贴画面右缘、随正文滚，紧挨正文列之前 */}
+      {!missing && kind === 'doc' && commentKinds.inline && id && (
+        <CommentMargin pageId={id} getColumn={() => mainRef.current} getView={getView} ctx={commentCtx} />
+      )}
+      <main ref={mainRef} className={'public-main' + (fullWidth ? ' full-width' : '') + (cover && !missing ? ' has-cover' : '')}>
         {missing ? (
           <div className="public-missing">
             <p className="public-missing-text">{COPY.pub.missing}</p>

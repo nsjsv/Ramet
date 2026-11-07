@@ -342,6 +342,22 @@ export function parseCfg(type: PropType, raw: unknown): PropCfg {
     const expr = own(record, 'expr')
     return { expr: typeof expr === 'string' ? expr : '' }
   }
+  if (type === 'ai') {
+    const prompt = own(record, 'prompt')
+    const rules = own(record, 'rules')
+    return {
+      prompt: typeof prompt === 'string' ? prompt.slice(0, 2000) : '',
+      ...(Array.isArray(rules) ? { rules: rules.filter((r): r is string => typeof r === 'string' && /^[0-9a-f-]{36}$/.test(r)).slice(0, 4) } : {}),
+    }
+  }
+  if (type === 'button') {
+    const label = own(record, 'label')
+    const rule = own(record, 'rule')
+    return {
+      label: typeof label === 'string' ? label.slice(0, 40) : '',
+      ...(typeof rule === 'string' && /^[0-9a-f-]{36}$/.test(rule) ? { rule } : {}),
+    }
+  }
   return {}
 }
 
@@ -355,9 +371,9 @@ export function isReverseRelation(prop: Pick<CollectionProp, 'type' | 'cfg'>): b
   return prop.type === 'relation' && typeof prop.cfg.mirror === 'string'
 }
 
-const COMPUTED_TYPES: ReadonlySet<PropType> = new Set(['created_time', 'edited_time', 'created_by', 'edited_by', 'unique_id', 'rollup', 'formula'])
+const COMPUTED_TYPES: ReadonlySet<PropType> = new Set(['created_time', 'edited_time', 'created_by', 'edited_by', 'unique_id', 'rollup', 'formula', 'button'])
 
-/** 值不在行文档里的属性：系统生成的（行元数据）、汇总、公式、反向关联。行文档 props 不写它们，不进更新流水、不随行搬走。
+/** 值不在行文档里的属性：系统生成的（行元数据）、汇总、公式、按钮、反向关联。行文档 props 不写它们，不进更新流水、不随行搬走。
  *  反向关联虽不存值，却能经 REST 改（服务端换算成源集合各行正向关联的增删），编辑入口要单独放行 */
 export function isComputedProp(prop: Pick<CollectionProp, 'type' | 'cfg'>): boolean {
   return COMPUTED_TYPES.has(prop.type) || isReverseRelation(prop)

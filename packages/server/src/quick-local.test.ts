@@ -1,4 +1,4 @@
-/* ---------- 随手 AI 的本地通道：中心侧的授权矩阵 + 全链路 ----------
+/* ---------- ⌘J 的本地通道：中心侧的授权矩阵 + 全链路 ----------
  * 没有 agent 授权的人，无论怎么调用（含设置里留着旧的 localAgent），都用不了别人的机器，被拒的人机器一侧一个帧都收不到。
  *   1) 响应：机器主人 / 有 agent 授权的人 200 流；看得到机器但没授权的（只授权 machine、空间 owner、全局 admin、成员、
  *      待确认 / 过期 / 收回、viewer）403；不在这台机器所在空间的人 409（机器对他不存在）；
@@ -79,7 +79,7 @@ function parseSse(text: string): Sse[] {
 
 type QuickResult = { status: number; json: any; events: Sse[] }
 
-/** 发一次随手 AI 调用并读完整个响应 */
+/** 发一次 ⌘J 调用并读完整个响应 */
 async function quick(cookie: string, body: Record<string, unknown> = { kind: 'rewrite', instruction: '改简洁', text: '一段话' }): Promise<QuickResult> {
   const res = await postJson('/api/quick', cookie, body)
   const sse = res.headers.get('content-type')?.includes('text/event-stream') ?? false
@@ -230,7 +230,7 @@ test('机器那边报错：流里给 error 事件（HTTP 仍 200），带人话�
   // 脚本化机器回一个 err，模拟 connector 的受限会话拒绝运行
   const original = w.m.send
   w.m.send = (msg) => {
-    if (msg.t === 'res' && msg.quick) original({ t: 'err', rid: msg.rid, message: '这个 agent 当前处于「跳过全部确认」，没能切到安全模式，随手 AI 拒绝运行' })
+    if (msg.t === 'res' && msg.quick) original({ t: 'err', rid: msg.rid, message: '这个 agent 当前处于「跳过全部确认」，没能切到安全模式，⌘J 拒绝运行' })
     else original(msg)
   }
   const res = await quick(w.cookie.mowner)
@@ -301,7 +301,7 @@ test('每人同时一个：上一次没结束再发 409 quick busy；客户端�
   await waitFor(async () => (await quick(w.cookie.mowner)).status === 200)
 })
 
-test('收回即断：授权收回的当场，他在飞的本地随手 AI 被取消（机器收到 quick-cancel，流里给 revoked），之后 403', async () => {
+test('收回即断：授权收回的当场，他在飞的本地 ⌘J 被取消（机器收到 quick-cancel，流里给 revoked），之后 403', async () => {
   const w = await world()
   // 主人在网页发起，再在机器上用确认码确认
   const res = await fetch(`${base}/api/machines/${w.m.id}/grants`, {
@@ -374,6 +374,6 @@ test('真 connector 全链路：主人与 agent 授权的人在受限会话里�
   expect(second.status).toBe(200)
   expect(second.events).toEqual([{ event: 'error', data: { code: 'forbidden', message: expect.stringContaining('不允许你使用') } }])
   expect(connectorLogs(real).some((l) => l.startsWith('拒绝 quick'))).toBe(true)
-  // 随手 AI 的会话不出现在中心看得到的地方，用后不留痕
+  // ⌘J 的会话不出现在中心看得到的地方，用后不留痕
   expect(connectorLogs(real).filter((l) => l.startsWith('quick agent=')).length).toBe(2)
 })

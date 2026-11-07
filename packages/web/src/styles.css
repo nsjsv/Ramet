@@ -30,9 +30,11 @@
 @import './styles/public.css';
 @import './styles/chat.css';
 @import './styles/chip-bar.css';
+@import './styles/attach.css';
 @import './styles/run.css';
 @import './styles/run-strip.css';
 @import './styles/hud.css';
+@import './styles/assistant.css';
 @import './styles/palette.css';
 @import './styles/plan.css';
 @import './styles/team.css';
@@ -52,6 +54,8 @@
 @import './styles/inbox.css';
 @import './styles/comments.css';
 @import './styles/memory.css';
+@import './styles/ai.css';
+@import './styles/automation.css';
 @import './styles/notes.css';
 @import './styles/quick.css';
 @import './styles/project.css';

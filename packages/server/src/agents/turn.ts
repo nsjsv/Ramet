@@ -15,6 +15,7 @@ import { extractTitle, insertSnapshot, loadDocFromDb } from '../collab.js'
 import { NO_NAMES, deltaPrompt, resolveNames } from './catch-up.js'
 import { toolOf } from '@ramet/shared/reply-stats'
 import { ReplyWriter, lastUserMessage, lastUserMessageImages, lockedTool, redoTarget, serializeDoc } from './doc.js'
+import { canLeadTeam, NO_TEAM_LEAD } from './assistant-agent.js'
 import { resolvePromptEnv, withMemory } from './prompt-env.js'
 import { ReplyNotFoundError, type ManagerHost, type ResolvedAgent } from './manager-types.js'
 import { openBotAsUser, openBotDoc, type Bot } from './open-bot.js'
@@ -92,7 +93,7 @@ export async function runTurn(
   // 块引用的原块内容、各回复的过程摘要、补发内容的署名先读好（跨页、按发起人判权限，要 await）；之后视图边界与提示词同步算完，中途不再让出
   const [env, names] = await Promise.all([
     resolvePromptEnv(host.pool, user, fragment, pageId, profile, (name) => host.getLiveDoc(name)),
-    !redo && own?.seen ? resolveNames(host.pool, fragment, (id) => host.agentLabel(id)) : NO_NAMES,
+    !redo && own?.seen ? resolveNames(host.pool, fragment, host.agentNames) : NO_NAMES,
   ])
   // 这一轮的视图：追加 = 整页；重新生成 = 目标回复之前的全部内容（旧回答和它之后的东西都不给 agent 看）
   let viewEnd = fragment.length
@@ -138,6 +139,8 @@ export async function runTurn(
   let prompted = false
   let endTeam: (() => void) | undefined
   try {
+    // 这一轮是不是带队（计划轮 / 执行轮）到这里已经定了，组长能不能带队只在这里判：不能就在这块回复上报出来，不出计划、不跑组员
+    if (run.team && !canLeadTeam(agent)) throw new Error(NO_TEAM_LEAD)
     // 带队:计划轮拼「出计划」说明;执行轮先由中心把组员按依赖跑完(此时还没有组长会话,适配器可能已被闲置回收,所以跑完再要一次),
     // 再把各组员的结果作为附录拼在提示词后面。组员阶段里本轮被停止 / 关停 → 直接收尾,不建组长会话
     let teamNote = ''

@@ -1,7 +1,7 @@
 /* ---------- 收件箱 REST（登录用户；聚合与可见性规则见 inbox.ts）----------
  * GET  /api/inbox               → { items }：只含当前用户自己的条目（审批 / 机器接入 / 使用申请 / 首次使用 / 做完待看 / 在跑）
  * POST /api/inbox/seen {pageId} 打开了这个对话页（做完待你看据此消掉）。页面对我不可读 404，不写行
- * POST /api/inbox/dismiss {key} 点知道了。key 形如 first_use:<授权 id>，只认收件箱里本来就给我的那类：格式不对 400，不是我的 404
+ * POST /api/inbox/dismiss {key} 点知道了。key 形如 first_use:<授权 id> / timer_failed:<触发记录 id>，只认收件箱里本来就给我的那类：格式不对 400，不是我的 404
  * 收件箱只是视图，不带来新权限：条目上的按钮调的是已有接口（permission / connectors approve|reject），判定在那些接口上。
  * 每条路由自带 requireAuth（路径限定），挂载顺序无影响。 */
 

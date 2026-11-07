@@ -18,6 +18,7 @@ import { personOf, subscribePeople } from '../../people'
 import { agentLabel } from '../../default-agent'
 import { formatDate, formatStamp, hrefOf } from '../prop-meta'
 import { FileItem } from './file-item'
+import { ButtonCell } from './ButtonCell'
 import { FormulaCell } from './FormulaCell'
 import { RelationCell } from './RelationCell'
 import { RollupCell } from './RollupCell'
@@ -157,6 +158,8 @@ export function CellView({ prop, row, spaceId }: Props) {
       return <RollupCell prop={prop} row={row} spaceId={spaceId} />
     case 'formula':
       return <FormulaCell prop={prop} row={row} />
+    case 'button':
+      return <ButtonCell prop={prop} row={row} />
     default:
       return typeof value === 'string' ? <span className="cl-text">{value}</span> : null
   }

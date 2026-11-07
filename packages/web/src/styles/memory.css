@@ -6,12 +6,6 @@
   padding: 48px 32px 96px;
 }
 
-.memory-title {
-  font-size: 24px;
-  font-weight: 700;
-  margin: 0 0 4px;
-}
-
 .memory-sub {
   color: var(--ink-3);
   font-size: var(--t-sm);

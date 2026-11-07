@@ -36,6 +36,8 @@ export const TYPE_ORDER: readonly PropType[] = [
   'relation',
   'rollup',
   'formula',
+  'ai',
+  'button',
 ]
 
 export const TYPE_ICON: Record<PropType, IconName> = {
@@ -59,6 +61,8 @@ export const TYPE_ICON: Record<PropType, IconName> = {
   relation: 'relation',
   rollup: 'rollup',
   formula: 'sigma',
+  button: 'bolt',
+  ai: 'sparkle',
 }
 
 /** 「名称」列的图标 */

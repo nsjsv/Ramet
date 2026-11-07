@@ -6,7 +6,8 @@ import { expect, test } from 'vitest'
 import * as Y from 'yjs'
 import { parseBlocks } from '@ramet/shared/markdown-blocks'
 import { materialize } from './markdown.js'
-import { serializeDoc } from './doc.js'
+import { ReplyWriter, serializeDoc } from './doc.js'
+import { encodeStats } from '@ramet/shared/reply-stats'
 
 const TABLE = '| a | b |\n| --- | :--: |\n| 1 | 2 |\n| 3 | 4 |'
 
@@ -116,4 +117,49 @@ test('materialize：写进回复块时，回复的直接子块（段落 / 列表
   const doc = toDoc('段落\n\n- 一')
   const reply = doc.getXmlFragment('prosemirror').get(0) as Y.XmlElement
   expect(idShape(reply)).toEqual(['paragraph:id', 'bullet_list:id', 'list_item:id', 'paragraph:-'])
+})
+
+/* ---------- 页面提及：`[@名字](page:<页 id>)` 落成 page_mention 原子（@ramet/shared/markdown-blocks 的 pageMentionOf） ---------- */
+
+const PAGE = '0b6c2d7e-1f3a-4c5b-9d8e-7a6b5c4d3e2f'
+
+/** 第一段的行内内容 */
+const inlinesOf = (markdown: string) => parseBlocks(markdown).blocks[0]?.inlines ?? []
+
+test('页面提及的链接形态：文字恰为 @名字、只有这一个 page: 链接 → page_mention{pageId,title}', () => {
+  expect(inlinesOf(`看 [@周报](page:${PAGE}) 吧`)).toEqual([
+    { text: '看 ', marks: [] },
+    { atom: 'page_mention', attrs: { pageId: PAGE, title: '周报' } },
+    { text: ' 吧', marks: [] },
+  ])
+  // id 统一小写（同导入）；标题里转义过的 markdown 记号原样回来；写入方在 == 之间垫的零宽空格去掉
+  expect(inlinesOf(`[@\\*\\*粗\\*\\* \\[x\\] a=\u200b=b](page:${PAGE.toUpperCase()})`)).toEqual([
+    { atom: 'page_mention', attrs: { pageId: PAGE, title: '**粗** [x] a==b' } },
+  ])
+})
+
+test('页面提及的链接形态：别的写法照旧是链接', () => {
+  const linkOnly = (markdown: string) => inlinesOf(markdown).every((i) => !('atom' in i))
+  expect(linkOnly(`[周报](page:${PAGE})`)).toBe(true) // 不是 @ 开头
+  expect(linkOnly(`[@](page:${PAGE})`)).toBe(true) // 只有 @
+  expect(linkOnly(`[@周报](page:${PAGE}#blk-1)`)).toBe(true) // 块引用
+  expect(linkOnly('[@周报](page:not-a-page-id)')).toBe(true)
+  expect(linkOnly(`[@周报](https://x.com/${PAGE})`)).toBe(true)
+  expect(linkOnly(`[@**周报**](page:${PAGE})`)).toBe(true) // 链接里还有别的格式
+  expect(linkOnly(`**[@周报](page:${PAGE})**`)).toBe(true) // 链接外面有格式
+})
+
+test('agent 回复收尾：任务链接在 Yjs 里是 page_mention 元素（不是带 link 的文字）', () => {
+  const doc = new Y.Doc()
+  const writer = new ReplyWriter(doc, 'ramet:assistant')
+  writer.finalize(`派好了：[@修 bug](page:${PAGE})`, encodeStats({ o: 'end' }), null)
+  const reply = doc.getXmlFragment('prosemirror').get(0) as Y.XmlElement
+  const para = reply.get(0) as Y.XmlElement
+  const parts = para.toArray()
+  const chip = parts.find((n): n is Y.XmlElement => n instanceof Y.XmlElement)
+  expect(chip?.nodeName).toBe('page_mention')
+  expect(chip?.getAttribute('pageId')).toBe(PAGE)
+  expect(chip?.getAttribute('title')).toBe('修 bug')
+  const texts = parts.filter((n): n is Y.XmlText => n instanceof Y.XmlText)
+  expect(texts.map((t) => t.toDelta())).toEqual([[{ insert: '派好了：' }]])
 })

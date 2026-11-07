@@ -219,7 +219,7 @@ async function projectRead(rootIn: string, pathIn: string, opts: ProjectOptions)
 
 const sha256 = (data: Uint8Array): string => createHash('sha256').update(data).digest('hex')
 
-// ---------- 写文件（随手 AI 在代码查看器里收下改写）----------
+// ---------- 写文件（⌘J 在代码查看器里收下改写）----------
 // 写是这个模块里唯一会改磁盘的操作（中心已按 machine 范围 + 页面可写判过，connector 又按 actor 判过），所以尽量窄：
 // 只改已存在的普通 UTF-8 文本文件，不建新文件、不删、不改 .git 里面的东西，读写都带 1MB 上限；
 // 基于用户读到的那一版（baseHash），读到之后被别人（或 agent）改过就拒绝，宁可让用户重新打开也不覆盖别人的改动。

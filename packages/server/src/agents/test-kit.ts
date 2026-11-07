@@ -3,13 +3,14 @@
  * 各测试文件 import 它即各自起服(vitest 按文件隔离模块实例);钩子在 import 时注册到导入它的文件。
  */
 import { afterAll, afterEach, beforeEach, expect } from 'vitest'
-import { randomUUID } from 'node:crypto'
+import { randomBytes, randomUUID } from 'node:crypto'
 import * as Y from 'yjs'
 import { WebSocket } from 'ws'
 import { HocuspocusProvider, HocuspocusProviderWebsocket } from '@hocuspocus/provider'
 import { fileURLToPath } from 'node:url'
 import { getPool, initDb, closePool } from '../db.js'
 import { startServer } from '../index.js'
+import { createSafeFetch, isForbiddenAddress, systemResolve } from '../endpoint-guard.js'
 import { hashPassword } from '../auth.js'
 import { serializeDoc } from './doc.js'
 import { decodeStats } from '@ramet/shared/reply-stats'
@@ -26,6 +27,7 @@ import { readConnectorConfig, writeConnectorConfig } from '../connector/access.j
 import { approveConnector, type ConnectorStatus } from './connectors.js'
 import type { MachineScope } from './machine-access.js'
 import { CONNECTOR_PAIR_PATH, type ConnectorAgentInfo, type PairReply } from './protocol.js'
+import type { PiStream } from '../pi-models.js'
 
 if (!process.env.DATABASE_URL) {
   throw new Error('需要 DATABASE_URL 指向测试库,例如 postgres://postgres:postgres@localhost:5432/ramet_test')
@@ -58,10 +60,34 @@ function defaultTestAgents(): unknown[] {
   ]
 }
 
+/** Genet 的假模型：测试把剧本放进 script（缺省没有 = 这一轮报错）。主密钥是本文件的随机值，存连接时用同一把加密 */
+export const assistantModel: { script: PiStream | null } = { script: null }
+export const assistantSecret = randomBytes(32)
+const assistantStream: PiStream = (conn, model, context, req) => {
+  if (!assistantModel.script) throw new Error('测试没有给 Genet 设假模型')
+  return assistantModel.script(conn, model, context, req)
+}
+
+/** 触发器（定时器）的时钟：at = 固定在这一刻（毫秒），null = 真实时间。每个用例开始时回到真实时间 */
+export const triggerClock: { at: number | null } = { at: null }
+
+/** 向外 webhook 的出站 fetch：同生产的防护版，只是 *.hook.test 解析到本机、且放行本机地址（测试在本机起接收端）；
+ *  IP 字面量的内网地址（127.0.0.1、10.x）照样在形状检查那一步被拒 */
+export const webhookFetch = createSafeFetch({
+  allowHttp: true,
+  resolve: async (host) => (host.endsWith('hook.test') ? [{ address: '127.0.0.1', family: 4 }] : systemResolve(host)),
+  forbidden: (address) => address !== '127.0.0.1' && isForbiddenAddress(address),
+})
+
 export const pool = getPool()
 await initDb(pool)
 // 端口预览也一起起（随机端口）：预览的测试要用；不测预览的文件多开一个空闲监听，无碍
-export const s = await startServer(pool, 0, { preview: { port: 0, ticketTtlMs: 2500, revalidateMs: 0 } })
+export const s = await startServer(pool, 0, {
+  preview: { port: 0, ticketTtlMs: 2500, revalidateMs: 0 },
+  // 不拉公开模型目录（测试不碰外网）：Genet 按内置规则给档位；目录本身在 model-catalog.test.ts、驱动里的用法在 driver.test.ts
+  assistant: { stream: assistantStream, secretKey: assistantSecret, catalog: null },
+  triggers: { now: () => new Date(triggerClock.at ?? Date.now()), fetch: webhookFetch },
+})
 export const base = `http://127.0.0.1:${s.port}`
 export const previewBase = `http://127.0.0.1:${s.previewPort}`
 export const previewPort = (): number => s.previewPort!
@@ -70,6 +96,8 @@ export const previewPort = (): number => s.previewPort!
 // beforeEach 兜底:别的文件 afterAll 遗留的行 + 本文件被跳过/中断的首个用例
 beforeEach(async () => {
   await truncateAll(pool)
+  assistantModel.script = null
+  triggerClock.at = null
 })
 afterEach(async () => {
   await truncateAll(pool)
@@ -138,9 +166,10 @@ export async function setupPage(): Promise<{ cookie: string; pageId: string }> {
 
 // ---------- 协同客户端(带 cookie 的 provider) ----------
 
-export async function connectDoc(pageId: string, cookie: string): Promise<HocuspocusProvider> {
+/** port 缺省连本文件起的服务；「重启」类测试另起一份服务时传它的端口 */
+export async function connectDoc(pageId: string, cookie: string, port = s.port): Promise<HocuspocusProvider> {
   const wsProvider = new HocuspocusProviderWebsocket({
-    url: `ws://127.0.0.1:${s.port}/collab`,
+    url: `ws://127.0.0.1:${port}/collab`,
     WebSocketPolyfill: class extends WebSocket {
       constructor(url: string) {
         super(url, undefined, { headers: { cookie } })

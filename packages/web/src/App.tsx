@@ -20,9 +20,11 @@ import { applyPageSync, bindPageSync, createPageSyncer, loadPagesCache, writePag
 import { isTouchEditor } from './editor/block-touch'
 import ProjectDock, { preloadProjectPanel } from './project/ProjectDock'
 import HudLayer from './hud/HudLayer'
+import AssistantDock from './assistant/AssistantDock'
 import CommandPalette, { preloadPalette } from './palette/CommandPalette'
 import { recentRunPages } from './project/agent-commands'
-import { markPageSeen, setOpenPage, startInboxSync } from './inbox/inbox-store'
+import { markPageSeen, openPage, startInboxSync } from './inbox/inbox-store'
+import { reportTimeZone } from './ai/timer-api'
 
 /* 非首屏页面按需加载（新页面默认也走这里），进了对应路由才下载。占位一律 null：这些页面本来就是先空着、取到数据再画，
  * 不另加转圈。chunk 拉取失败（部署后旧标签页）由 main.tsx 的 vite:preloadError 刷新恢复 */
@@ -31,10 +33,9 @@ const ChangePassword = lazy(() => import('./ChangePassword'))
 const Admin = lazy(() => import('./Admin'))
 const Join = lazy(() => import('./Join'))
 const ConnectMachine = lazy(() => import('./ConnectMachine'))
-const SkillLibrary = lazy(() => import('./SkillLibrary'))
+const AiHub = lazy(() => import('./ai/AiHub'))
 const PublicPage = lazy(() => import('./PublicPage'))
 const InboxPage = lazy(() => import('./inbox/InboxPage'))
-const MemoryPanel = lazy(() => import('./memory/MemoryPanel'))
 const Lazy = ({ children }: { children: ReactNode }) => <Suspense fallback={null}>{children}</Suspense>
 
 /* 未登录打开 /join/:token（邀请）或 /connect/:code（机器接入确认）时，落地页在登录后的 Routes 里不可达，
@@ -252,6 +253,8 @@ function Shell({ user }: { user: User }) {
   useEffect(() => startFavoritesSync(), [])
   // 收件箱：外壳挂载拉一次，之后跟着 control:global 的 'inbox' 信号重拉（不另开连接）；退出 / 换账号时拆掉并清空
   useEffect(() => startInboxSync(), [user.id])
+  // 时区：定时器按用户的墙上时间算，服务端只能从浏览器知道（变了才报）
+  useEffect(() => reportTimeZone(user.id), [user.id])
   // 登录几秒后、浏览器空闲时预取命令面板与项目面板的本体（平时按需加载）：第一次 ⌘K / 打开项目面板不用等下载
   useEffect(() => {
     let idle = 0
@@ -554,9 +557,9 @@ function Shell({ user }: { user: User }) {
   useEffect(() => {
     const m = location.pathname.match(/^\/page\/([\w-]+)$/)
     const id = m ? m[1]! : null
-    setOpenPage(id)
-    if (id) markPageSeen(id)
-    return () => setOpenPage(null)
+    if (!id) return
+    markPageSeen(id)
+    return openPage(id)
   }, [location.pathname])
 
   // 切空间（仅用户手动切换：prev 非 null 且变化）时自动打开目标空间上次打开的页；
@@ -642,11 +645,13 @@ function Shell({ user }: { user: User }) {
             }
           />
           <Route path="/inbox" element={<Lazy><InboxPage /></Lazy>} />
-          <Route path="/memory" element={<Lazy><MemoryPanel space={spaces?.find((s) => s.id === selectedSpaceId) ?? null} /></Lazy>} />
+          {/* AI 页：Genet / 任务 / 定时 / Skill / 记忆五个分页（ai/AiHub.tsx）；/skills、/memory 的书签与外面的链接落到对应分页 */}
           <Route
-            path="/skills"
-            element={<Lazy><SkillLibrary space={spaces?.find((s) => s.id === selectedSpaceId) ?? null} pages={pages} onChanged={refresh} /></Lazy>}
+            path="/ai/*"
+            element={<Lazy><AiHub space={spaces?.find((s) => s.id === selectedSpaceId) ?? null} spaces={spaces} pages={pages} username={user.username} onChanged={refresh} /></Lazy>}
           />
+          <Route path="/skills" element={<Navigate to="/ai/skills" replace />} />
+          <Route path="/memory" element={<Navigate to="/ai/memory" replace />} />
           <Route
             path="/page/:id"
             element={
@@ -667,6 +672,8 @@ function Shell({ user }: { user: User }) {
       <CommandPalette pages={pages ?? []} spaceId={selectedSpaceId} canWritePage={canWritePage} onCreated={refresh} />
       {/* 项目面板（⌘E）：agent 所在机器的工作区（文件 / 改动），只在页面的 agent 是自己能用的机器时出现 */}
       <ProjectDock canWrite={canWritePage} runsOf={(pageId) => recentRunPages(pages, pageId)} />
+      {/* 右下角的 Genet（assistant/）：入口 + 浮窗，浮窗里是 Genet 页的完整对话 */}
+      <AssistantDock pages={pages} username={user.username} onPagesChanged={refresh} />
     </div>
   )
 }

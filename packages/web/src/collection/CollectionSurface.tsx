@@ -107,7 +107,7 @@ export default function CollectionSurface({ handle, readOnly, spaceId, onOpenRow
             readOnly={readOnly}
             manage={manageViews}
           />
-          <Toolbar doc={handle.doc} schema={schema} view={view} readOnly={readOnly} spaceId={spaceId} />
+          <Toolbar cid={handle.id} doc={handle.doc} schema={schema} view={view} readOnly={readOnly} spaceId={spaceId} />
           {!outerSlot && <div ref={setOwnSlot} className="cl-bulk-slot" />}
         </div>
         {error && (

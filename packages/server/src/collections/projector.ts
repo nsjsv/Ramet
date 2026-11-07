@@ -11,12 +11,14 @@
 //   · afterStoreDocument：正文索引（content_text）已落库；集合的行「正文有没有字」变了就发一条整行增量（has_body，
 //     表格据此决定画不画通用文档图标）。正文不是属性，不写副本
 // 同一行的校准 / 去抖到点 / flushRow 排在同一条链上依次执行：上一次写进副本的值是下一次 prev 的基准。
+// onRowChanged（自动化「属性改了」，triggers/sources/collection.ts）：发增量的同一时刻交出 { 合集, 改后的行, prev, 是谁改的 }；
+//   认不出是谁改的（加载时的校准补写、没有归属的内部写入）不交。调用方自己转后台，这里不等。
 // REST 写值要「响应前副本已落库」：flushRow 跳过去抖当场写，并等它写完。
 
 import type { Extension } from '@hocuspocus/server'
 import type { Pool } from 'pg'
 import type * as Y from 'yjs'
-import type { RowUpdate } from '@ramet/shared/collection-model'
+import type { CollectionRow, RowUpdate } from '@ramet/shared/collection-model'
 import { PAGE_DOC_NAME } from '../collab.js'
 import { editorOf, type Editor } from '../edit-marks.js'
 import { RowsDeltas, type BatchEnrich, type DeltaSink } from './delta.js'
@@ -60,8 +62,11 @@ export type Projector = {
 
 const errText = (rowId: string): string => `[collections] 行属性副本写入失败(page:${rowId}):`
 
+/** 一行在活集合里的属性改动（谁改的认得出才有） */
+export type RowChange = { collectionId: string; row: CollectionRow; prev: Record<string, unknown>; editor: Editor }
+
 /** enrich：批次发出前补计算值、往依赖的集合扇出（fanout.ts）；不给就原样发 */
-export function createProjector(pool: Pool, sink: DeltaSink, enrich?: BatchEnrich): Projector {
+export function createProjector(pool: Pool, sink: DeltaSink, enrich?: BatchEnrich, onRowChanged?: (change: RowChange) => void): Projector {
   const trackers = new Map<string, Tracker>()
   const inflight = new Set<Promise<void>>()
   const deltas = new RowsDeltas(sink, undefined, enrich)
@@ -102,6 +107,13 @@ export function createProjector(pool: Pool, sink: DeltaSink, enrich?: BatchEnric
     if (!found) return
     const row = editor ? { ...found.row, edited_by: editor.userId, edited_agent: editor.actor === 'agent' ? editor.agent : null } : found.row
     deltas.push(found.collectionId, { row, prev })
+    if (editor && onRowChanged) {
+      try {
+        onRowChanged({ collectionId: found.collectionId, row, prev, editor })
+      } catch (err) {
+        console.error(errText(t.rowId), err)
+      }
+    }
   }
 
   /** 加载时校准：副本与文档不一致就按文档重写；集合的行还没有副本就补一行空的 */

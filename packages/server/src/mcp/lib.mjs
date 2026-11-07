@@ -32,6 +32,12 @@ export const reply = (text, isError = false) => ({
   ...(isError ? { isError: true } : {}),
 })
 
+/** 外来事件之后 Genet 动手前弹的审批被拒了（中心回 { rejected: true }，见 routes/ramet-consent.ts）：告诉模型没做 */
+export const declined = (r) => (r.json?.rejected ? reply(`用户没同意，这一步没有执行。${r.json.message ? `（${r.json.message}）` : ''}`) : null)
+
+/** 中心报错：HTTP 失败，或先发头保活之后写在 JSON 里的 error（那时状态恒为 200） */
+export const broken = (r) => !r.ok || !r.json || typeof r.json.error === 'string'
+
 /** 中心 4xx/5xx 的错误文案：带上中心给的原因 */
 export const failure = (what, r) => reply(`${what}：${r.json?.error ?? r.json?.message ?? (r.raw || r.status)}`, true)
 

@@ -1,0 +1,401 @@
+/* ---------- 右下角的 Genet：入口按钮 + 浮窗（assistant/AssistantDock.tsx）----------
+ * 层级 42：压过项目面板(40)与右上角工作台(30)，仍在控件菜单(45)、设置弹窗(50)、灯箱(60) 之下——
+ * 浮窗里点「去添加模型连接」打开的设置弹窗要盖在它上面。--assistant-right 由组件给（项目面板开着时挪到它左边） */
+
+.assistant-fab {
+  position: fixed;
+  right: var(--assistant-right, 20px);
+  bottom: 20px;
+  z-index: 42;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
+  color: var(--ink);
+  cursor: pointer;
+  transition: transform var(--d-1) var(--ease-out), box-shadow var(--d-1);
+}
+
+.assistant-fab:hover {
+  transform: translateY(-1px);
+  background: color-mix(in srgb, var(--ink) 4%, var(--surface));
+}
+
+.assistant-window {
+  position: fixed;
+  right: var(--assistant-right, 20px);
+  bottom: 20px;
+  z-index: 42;
+  display: flex;
+  flex-direction: column;
+  width: 420px;
+  height: 640px;
+  max-width: calc(100vw - 40px);
+  max-height: calc(100dvh - 40px);
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--bg);
+  box-shadow: var(--shadow-2);
+  color: var(--ink);
+  outline: none;
+  animation: assistant-in var(--d-2) var(--ease-out) both;
+  transform-origin: bottom right;
+}
+
+@keyframes assistant-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.97);
+  }
+}
+
+.assistant-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  padding: 8px 8px 8px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.assistant-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  font-size: var(--t-md);
+  font-weight: 600;
+}
+
+/* 头部「正在看的这一页」：消息默认关于它（AssistantDock 的 focus），淡色一行，长了截断；前面的眼睛点掉就不带 */
+.assistant-focus {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  font-size: var(--t-xs);
+  font-weight: 400;
+  color: var(--ink-3);
+}
+
+/* 眼睛：带不带这一页；点掉后标题淡下去、划掉 */
+.assistant-focus-eye {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+
+.assistant-focus-eye:hover {
+  background: var(--press);
+  color: var(--ink);
+}
+
+.assistant-focus-text {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  transition: opacity var(--d-1);
+}
+
+.assistant-focus.is-off .assistant-focus-text {
+  opacity: 0.5;
+  text-decoration: line-through;
+}
+
+.assistant-head-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+
+.assistant-head-btn:hover:not(:disabled) {
+  background: var(--press);
+  color: var(--ink);
+}
+
+.assistant-head-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* 浮窗自己的滚动口（chat-follow.ts 认 data-chat-scroller）：输入卡在 .chat-dock 里 sticky 钉在它的底部 */
+.assistant-scroll {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 14px;
+}
+
+.assistant-scroll > .chat-page {
+  flex: 1 0 auto;
+}
+
+.assistant-scroll .chat-dock {
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
+}
+
+.assistant-scroll .chat-empty {
+  margin-top: 12vh;
+}
+
+.assistant-status {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  margin: auto;
+  padding: 24px;
+  color: var(--ink-3);
+  font-size: var(--t-sm);
+  text-align: center;
+}
+
+/* 没有模型连接时的引导条：浮窗顶部 */
+.assistant-guide {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 0 0;
+  padding: 8px 10px 8px 12px;
+  border-radius: var(--r-md);
+  background: var(--warn-tint);
+  color: var(--ink);
+  font-size: var(--t-sm);
+}
+
+.assistant-guide > span {
+  flex: 1;
+  min-width: 0;
+}
+
+.assistant-guide-btn {
+  flex: none;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: var(--t-sm);
+  cursor: pointer;
+}
+
+.assistant-guide-btn:hover {
+  background: color-mix(in srgb, var(--ink) 6%, var(--surface));
+}
+
+/* 任务页链接后面的状态标（assistant/task-status.ts 插在气泡里） */
+.task-mark {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0 7px;
+  border-radius: var(--r-pill);
+  background: var(--bg-sunk);
+  color: var(--ink-2);
+  font-size: 11.5px;
+  line-height: 18px;
+  vertical-align: 1px;
+  white-space: nowrap;
+}
+
+.task-mark[data-status='running'] {
+  background: var(--live-tint);
+  color: var(--live);
+}
+
+.task-mark[data-status='approval'] {
+  background: var(--warn-tint);
+  color: var(--warn);
+}
+
+.task-mark[data-status='done'] {
+  background: color-mix(in srgb, var(--ok) 14%, transparent);
+  color: var(--ok);
+}
+
+.task-mark[data-status='failed'] {
+  background: var(--danger-tint);
+  color: var(--danger);
+}
+
+/* 任务通知 / 定时通知（editor/task-notice.ts）：任务做完、定时器到点时 Ramet 写进对话的那条，不是谁说的话——靠左的一张细边卡片，
+ * 抬头一行（结局图标 + 任务链接 + agent + 用时；定时的是时钟 + 名字 + 时间表），下面是任务最后的回复 / 指令原文，超过几行折叠成渐隐 */
+.chat-msg.chat-notice {
+  display: block;
+}
+
+.notice-card {
+  max-width: min(100%, 640px);
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  font-size: var(--t-sm);
+  line-height: 1.6;
+  color: var(--ink-2);
+}
+
+.notice-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--ink-2);
+}
+
+.notice-head > p {
+  margin: 0;
+  min-width: 0;
+}
+
+.notice-icon {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--ok) 14%, transparent);
+  color: var(--ok);
+  transform: translateY(3px);
+}
+
+.notice-card.is-failed .notice-icon {
+  background: var(--danger-tint);
+  color: var(--danger);
+}
+
+/* 定时通知（定时器到点）/ 事件通知（别的规则）：不是结局，用强调色的时钟 / 闪电 */
+.notice-card.is-timer .notice-icon,
+.notice-card.is-event .notice-icon {
+  background: var(--accent-tint);
+  color: var(--accent);
+}
+
+/* 外来的事件通知（触发者不是你）：抬头带「外来」小标，引用里是别人写的内容，画成警示色的边框 —— 只当资料 */
+.notice-tag {
+  flex: none;
+  padding: 0 6px;
+  border-radius: var(--r-pill);
+  background: var(--warn-tint);
+  color: var(--warn);
+  font-size: var(--t-xs);
+  line-height: 18px;
+}
+
+.notice-card.is-external .notice-body blockquote,
+.editor-root .ProseMirror > .user-message.is-external blockquote {
+  margin-left: 0;
+  margin-right: 0;
+  padding: 4px 10px;
+  border-left: 2px dashed var(--warn);
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  background: color-mix(in srgb, var(--warn-tint) 60%, transparent);
+  color: var(--ink-2);
+}
+
+.notice-body {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  overflow-wrap: anywhere;
+  color: var(--ink);
+}
+
+.notice-body > :first-child {
+  margin-top: 0;
+}
+
+.notice-body > :last-child {
+  margin-bottom: 0;
+}
+
+.notice-body.is-folded {
+  max-height: 7.5em;
+  overflow: hidden;
+  mask-image: linear-gradient(to bottom, #000 55%, transparent);
+}
+
+.notice-fold {
+  margin-top: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink-3);
+  font: inherit;
+  font-size: var(--t-xs);
+  cursor: pointer;
+}
+
+.notice-fold:hover {
+  color: var(--ink);
+}
+
+/* 目标页上定时器 / 规则发出的用户消息：对话模式是气泡顶上一个小标（task-notice.ts 的 autoTag），
+ * 文档模式是署名行「你 → agent」前面的一段（message-chips.tsx） */
+.msg-head .msg-timer {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.chat-timer-tag {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: fit-content;
+  margin-bottom: 4px;
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+  line-height: 18px;
+  user-select: none;
+}
+
+/* 文档模式：任务通知的色条用中性灰，与用户消息（--you 色条）分开 */
+.editor-root .ProseMirror > .user-message.is-notice,
+.public-body .ProseMirror > .user-message.is-notice {
+  box-shadow: inset 2px 0 0 var(--line-strong);
+  color: var(--ink-2);
+}
+
+/* 窄屏：浮窗铺满整屏；入口抬高，不压在对话页输入卡的发送钮上 */
+@media (max-width: 768px) {
+  .assistant-window {
+    inset: 0;
+    width: auto;
+    height: auto;
+    max-width: none;
+    max-height: none;
+    border: 0;
+    border-radius: 0;
+    padding-top: env(safe-area-inset-top);
+  }
+
+  .assistant-fab {
+    right: 16px;
+    bottom: calc(96px + env(safe-area-inset-bottom));
+  }
+}

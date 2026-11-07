@@ -17,6 +17,7 @@ import { Icon } from '../icons'
 import { agentOptionsFor, subscribeAgentOptions, usePageAgents } from './agent-bar'
 import { defaultModeValue, modeText } from './agent-mode'
 import { agentBadge } from './ai-block'
+import { capsOf } from '../assistant/identity'
 import { ChipMenu } from './chip-menu'
 import { WorkspacePanel } from './workspace-panel'
 
@@ -72,7 +73,7 @@ function optionTitle(option: ConfigOption): string {
   return option.name
 }
 
-export function ChipBar({ pageId, agent, cwd, opts, size = 'card', onAgent, onCwd, onOpt, onMode, tools }: ChipBarProps) {
+export function ChipBar({ pageId, agent, cwd, opts, size = 'card', onAgent, onCwd, onOpt, onMode, tools: toolsProp }: ChipBarProps) {
   // 来源只列这一页能用的：锁定了工具（第一块回复用的）就只剩它在各台机器上的 agent
   const { agents, loaded, lock } = usePageAgents(pageId)
   const options = useSyncExternalStore(subscribeAgentOptions, () => agentOptionsFor(pageId, agent))
@@ -89,6 +90,9 @@ export function ChipBar({ pageId, agent, cwd, opts, size = 'card', onAgent, onCw
   }
 
   const info = agents.find((a) => a.id === agent)
+  // 对这个 agent 没意义的控件不摆（中心里的 Genet 没有工作区、不分工具档位，assistant/identity.ts）
+  const caps = capsOf(info)
+  const tools = caps.toolProfile ? toolsProp : undefined
   const posture = info?.posture
   const unrestricted = posture?.unrestricted ?? []
   const generative = options
@@ -128,7 +132,7 @@ export function ChipBar({ pageId, agent, cwd, opts, size = 'card', onAgent, onCw
         <AgentBadgeView badge={agentBadge(agent)} className="chip-mark" />
         <span className="chip-text">{info?.label ?? agent}</span>
       </Chip>
-      {agent && (
+      {agent && caps.workspace && (
         <Chip id={CWD} open={open} anchors={anchors} onToggle={toggle} tip={COPY.cwd.chipTitle(cwd)}>
           <Icon name="folder" size={14} />
           <span className="chip-path">{cwd ? baseName(cwd) : COPY.cwd.defaultDir}</span>
@@ -162,7 +166,7 @@ export function ChipBar({ pageId, agent, cwd, opts, size = 'card', onAgent, onCw
       {open === AGENT && openAnchor && (
         <AgentMenu anchor={openAnchor} agents={agents} current={agent} onPick={(id) => { close(); onAgent(id) }} onClose={close} />
       )}
-      {open === CWD && openAnchor && agent && (
+      {open === CWD && openAnchor && agent && caps.workspace && (
         <ChipMenu anchor={openAnchor} onClose={close} label={COPY.cwd.title} className="ws" focusItem={false}>
           <WorkspacePanel pageId={pageId} agent={agent} cwd={cwd} onApply={onCwd} onClose={close} />
         </ChipMenu>

@@ -254,6 +254,28 @@
   text-align: center;
 }
 
+/* 只有新消息时的小点：不带数字，与数字角标同一个位置、同一个颜色 */
+.side-nav-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  margin: 0 5px 0 auto;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+/* 条目里的小标（定时器失败后自动暂停了） */
+.inbox-tag {
+  display: inline-block;
+  padding: 0 6px;
+  border-radius: var(--r-pill);
+  background: var(--warn-tint);
+  color: var(--warn);
+  font-size: 11px;
+  line-height: 17px;
+  white-space: nowrap;
+}
+
 @media (max-width: 768px) {
   .inbox-page {
     padding: 56px 16px 96px;

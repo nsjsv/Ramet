@@ -6,23 +6,27 @@
   padding: 48px 32px 96px;
 }
 
+/* 说明在左、新建 / 导入在右（标题是 AI 页的分页栏） */
 .skill-title-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-}
-
-.skill-title {
-  font-size: 24px;
-  font-weight: 700;
-  margin: 0 0 4px;
+  margin-bottom: 16px;
 }
 
 .skill-sub {
   color: var(--ink-3);
   font-size: var(--t-sm);
   margin: 0 0 16px;
+}
+
+.skill-title-row .skill-sub {
+  margin: 0;
+}
+
+.skill-title-row .skill-actions {
+  flex: none;
 }
 
 .skill-actions,

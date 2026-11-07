@@ -7,7 +7,20 @@ import { withTransaction } from '../db.js'
 
 /** null = 作者已注销（外键置空） */
 export type CommentAuthor = { id: string; name: string } | null
-export type Comment = { id: string; author: CommentAuthor; body: string; createdAt: string; editedAt: string | null; deleted: boolean }
+/** 评论里 @Genet 的处理状态（comments/genet-call.ts）。回了（answered）不出：回复就在串里。
+ *  waiting 给能看这个串的人都看（知道有回复要来）；没成的结局（done = 看过了但没回在这里、failed）与原因只给叫的人 */
+export type GenetCall = { state: 'waiting' | 'done' | 'failed'; reason: string }
+/** via = 'genet'：Genet 以作者的名义代发的（作者批过原文，或作者在串里叫了它），界面上标「Genet 代发」；本人写的没有这个键 */
+export type Comment = {
+  id: string
+  author: CommentAuthor
+  body: string
+  createdAt: string
+  editedAt: string | null
+  deleted: boolean
+  via?: 'genet'
+  call?: GenetCall
+}
 /** from / to = base64 编码的 Y.RelativePosition；blockId + text + n 是相对位置解析不了时的文字兜底 */
 export type Anchor = { from: string; to: string; blockId: string; text: string; n: number }
 export type ThreadKind = 'inline' | 'page'
@@ -65,9 +78,22 @@ export function mentionIds(body: string): string[] {
   return [...new Set([...body.matchAll(MENTION_RE)].map((m) => m[2]!))]
 }
 
+// 叫 Genet 的记号（评论框里的 Genet chip，口径同输入框的 agent_mention）。只认 Genet：别的 agent 在评论里叫不动
+const GENET_RE = /@\[([^\n]*?)\]\(agent:ramet:assistant\)/g
+
+/** 这条评论叫了 Genet 没有 */
+export function callsGenet(body: string): boolean {
+  return [...body.matchAll(GENET_RE)].length > 0
+}
+
+/** 去掉叫 Genet 的记号：剩下的就是给它的要求 */
+export function withoutGenet(body: string): string {
+  return body.replace(GENET_RE, ' ').replace(/[ \t]+/g, ' ').trim()
+}
+
 /** 记号降成纯文字 `@名字`：公开页与收件箱摘要用，user id 不往外给 */
 export function plainMentions(body: string): string {
-  return body.replace(MENTION_RE, (_all, name: string) => `@${name}`)
+  return body.replace(MENTION_RE, (_all, name: string) => `@${name}`).replace(GENET_RE, (_all, name: string) => `@${name}`)
 }
 
 /** 只留这个空间的成员：@ 一个外人既不能通知到他，也不该在库里记下他的 id */
@@ -101,6 +127,10 @@ type CommentRow = {
   created_at: Date
   edited_at: Date | null
   deleted_at: Date | null
+  via: string | null
+  call_state?: string | null
+  call_reason?: string | null
+  call_at?: Date | null
 }
 
 /** 串所属的那种评论在页面上开着（t = comment_threads、p = pages 的别名）。关掉的那种：列表、公开页、收件箱都不出，写入 403 */
@@ -114,17 +144,32 @@ const SELECT_THREADS = `SELECT t.id, t.kind, t.anchor, t.created_at, t.resolved_
   LEFT JOIN comment_reads r ON r.thread_id = t.id AND r.user_id = $2
   WHERE t.page_id = $1 AND ${KIND_ENABLED} AND ($3::text IS NULL OR t.id = $3) AND (NOT $4 OR t.resolved_at IS NULL)
   ORDER BY t.created_at, t.id`
-const SELECT_COMMENTS = `SELECT c.id, c.thread_id, c.author_id, u.username, c.body, c.created_at, c.edited_at, c.deleted_at
+const SELECT_COMMENTS = `SELECT c.id, c.thread_id, c.author_id, u.username, c.body, c.created_at, c.edited_at, c.deleted_at, c.via,
+    g.state AS call_state, g.reason AS call_reason, g.created_at AS call_at
   FROM comments c
   JOIN comment_threads t ON t.id = c.thread_id
   JOIN pages p ON p.id = t.page_id
   LEFT JOIN users u ON u.id = c.author_id
+  LEFT JOIN comment_genet_calls g ON g.comment_id = c.id
   WHERE t.page_id = $1 AND ${KIND_ENABLED} AND ($2::text IS NULL OR t.id = $2) AND (NOT $3 OR t.resolved_at IS NULL)
   ORDER BY c.created_at, c.id`
 
 const author = (id: string | null, name: string | null): CommentAuthor => (id && name !== null ? { id, name } : null)
 
-function toComment(r: CommentRow): Comment {
+/** 叫了 Genet 却这么久还没结果：Genet 那一轮没能收尾（服务重启之类），不再显示「正在处理」 */
+export const CALL_STALE_MS = 30 * 60_000
+
+/** viewer = 读的人（公开页 null：不出状态） */
+function callOf(r: CommentRow, viewer: string | null): GenetCall | undefined {
+  if (viewer === null || !r.call_state || r.call_state === 'answered' || r.deleted_at) return undefined
+  const stale = r.call_state === 'waiting' && !!r.call_at && Date.now() - r.call_at.getTime() > CALL_STALE_MS
+  if (r.call_state === 'waiting' && !stale) return { state: 'waiting', reason: '' }
+  if (viewer !== r.author_id) return undefined
+  return stale ? { state: 'failed', reason: '等了太久没有结果' } : { state: r.call_state === 'done' ? 'done' : 'failed', reason: r.call_reason ?? '' }
+}
+
+function toComment(r: CommentRow, viewer: string | null = null): Comment {
+  const call = callOf(r, viewer)
   return {
     id: r.id,
     author: author(r.author_id, r.username),
@@ -132,6 +177,8 @@ function toComment(r: CommentRow): Comment {
     createdAt: r.created_at.toISOString(),
     editedAt: iso(r.edited_at),
     deleted: r.deleted_at !== null,
+    ...(r.via === 'genet' ? { via: 'genet' as const } : {}),
+    ...(call ? { call } : {}),
   }
 }
 
@@ -148,7 +195,7 @@ async function loadThreads(
   const byThread = new Map<string, Comment[]>()
   for (const r of comments.rows) {
     const list = byThread.get(r.thread_id) ?? []
-    list.push(toComment(r))
+    list.push(toComment(r, opts.userId))
     byThread.set(r.thread_id, list)
   }
   return threads.rows.map((t) => ({
@@ -189,7 +236,7 @@ export async function publicThreads(pool: Pool, pageId: string): Promise<PublicT
 
 const UPSERT_READ = `INSERT INTO comment_reads (user_id, thread_id, read_at) VALUES ($1, $2, now())
   ON CONFLICT (user_id, thread_id) DO UPDATE SET read_at = now()`
-const INSERT_COMMENT = 'INSERT INTO comments (id, thread_id, author_id, body, mentions) VALUES ($1, $2, $3, $4, $5)'
+const INSERT_COMMENT = 'INSERT INTO comments (id, thread_id, author_id, body, mentions, via) VALUES ($1, $2, $3, $4, $5, $6)'
 
 /** 新开一个串（连同首条评论）。发言人自己算已读 */
 export async function createThread(
@@ -206,24 +253,24 @@ export async function createThread(
       input.userId,
     ])
     const mentions = await memberMentions(client, input.spaceId, input.body)
-    await client.query(INSERT_COMMENT, [randomUUID(), threadId, input.userId, input.body, mentions])
+    await client.query(INSERT_COMMENT, [randomUUID(), threadId, input.userId, input.body, mentions, null])
     await client.query(UPSERT_READ, [input.userId, threadId])
     return (await getThread(client, input.pageId, threadId, input.userId))!
   })
 }
 
-/** 回复。发言人自己算已读（自己的话不该再出现在自己的收件箱） */
+/** 回复。发言人自己算已读（自己的话不该再出现在自己的收件箱）。via = 'genet'：Genet 代发（作者批过原文） */
 export async function addReply(
   pool: Pool,
-  input: { pageId: string; spaceId: string; threadId: string; userId: string; body: string },
+  input: { pageId: string; spaceId: string; threadId: string; userId: string; body: string; via?: 'genet' },
 ): Promise<Comment> {
   return withTransaction(pool, async (client) => {
     const id = randomUUID()
     const mentions = await memberMentions(client, input.spaceId, input.body)
-    await client.query(INSERT_COMMENT, [id, input.threadId, input.userId, input.body, mentions])
+    await client.query(INSERT_COMMENT, [id, input.threadId, input.userId, input.body, mentions, input.via ?? null])
     await client.query(UPSERT_READ, [input.userId, input.threadId])
     const { rows } = await client.query<CommentRow>(
-      `SELECT c.id, c.thread_id, c.author_id, u.username, c.body, c.created_at, c.edited_at, c.deleted_at
+      `SELECT c.id, c.thread_id, c.author_id, u.username, c.body, c.created_at, c.edited_at, c.deleted_at, c.via
        FROM comments c LEFT JOIN users u ON u.id = c.author_id WHERE c.id = $1`,
       [id],
     )
@@ -252,7 +299,7 @@ export async function editComment(pool: Pool, commentId: string, spaceId: string
   const mentions = await memberMentions(pool, spaceId, body)
   const { rows } = await pool.query<CommentRow>(
     `WITH up AS (UPDATE comments SET body = $2, mentions = $3, edited_at = now() WHERE id = $1 AND deleted_at IS NULL RETURNING *)
-     SELECT up.id, up.thread_id, up.author_id, u.username, up.body, up.created_at, up.edited_at, up.deleted_at
+     SELECT up.id, up.thread_id, up.author_id, u.username, up.body, up.created_at, up.edited_at, up.deleted_at, up.via
      FROM up LEFT JOIN users u ON u.id = up.author_id`,
     [commentId, body, mentions],
   )

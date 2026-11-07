@@ -5,6 +5,7 @@ import { Avatar } from './Avatar'
 import { COPY } from './copy'
 import { refreshAgents, setDefaultAgent, useAgents, useDefaultAgent } from './default-agent'
 import { agentBadge } from './editor/ai-block'
+import { setAttachLayout, useAttachLayout, type AttachLayout } from './editor/attach-layout'
 import { setEditMode, useEditMode, type EditMode } from './editor/edit-mode'
 import { keyCaps, MARKDOWN_RULES, SHORTCUT_GROUPS } from './editor/shortcuts'
 import { uploadFile } from './editor/media'
@@ -172,10 +173,11 @@ function PasswordCard() {
   )
 }
 
-/** 编辑器偏好：编辑方式（与顶栏 ⋮ 菜单同一状态）+ 新页面默认打开方式 */
+/** 编辑器偏好：编辑方式（与顶栏 ⋮ 菜单同一状态）+ 对话附件摆法 + 新页面默认打开方式 */
 export function EditorPane() {
   const mode = useEditMode()
   const chatDefault = useDefaultViewMode()
+  const attachLayout = useAttachLayout()
   const C = COPY.editMode
   return (
     <Card title="编辑">
@@ -188,6 +190,17 @@ export function EditorPane() {
             { value: 'source', label: C.source },
           ]}
           onChange={setEditMode}
+        />
+      </Row>
+      <Row label="对话附件" desc="对话里的图片、文件、块引用：行内 = 就在文字里（小图，悬停看大图）；托盘 = 文字里只留占位符，附件排在输入框 / 气泡上方">
+        <Segmented<AttachLayout>
+          label="对话附件"
+          value={attachLayout}
+          options={[
+            { value: 'inline', label: '行内' },
+            { value: 'tray', label: '托盘' },
+          ]}
+          onChange={setAttachLayout}
         />
       </Row>
       <Row label="新页面默认打开方式" desc="页面自己切换过模式后，按它自己的记忆，不再跟随这里">

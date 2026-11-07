@@ -64,7 +64,7 @@ export type ConnectorOptions = {
   loadPty?: () => Promise<PtyModule | null>
   /** 测试注入：终端的上限 / 巡检（缺省用生产值） */
   ptyLimits?: Pick<PtyDeps, 'maxPerActor' | 'idleMs' | 'tickMs' | 'replayBytes'>
-  /** 测试注入：随手 AI 本地通道的超时（缺省 60 秒） */
+  /** 测试注入：⌘J 本地通道的超时（缺省 60 秒） */
   quickTimeoutMs?: number
 }
 
@@ -211,7 +211,7 @@ export async function runConnector(options: ConnectorOptions): Promise<void> {
    *  否则 shutdown 杀掉 agent 进程后连接 1s 又连回来，中心看着一切正常，实际它持有的会话全没了。 */
   let stopping = false
 
-  // 随手 AI 本地通道：受限会话里跑一次 agent（临时空目录、不给工具、读写 / 终端 / 审批全拒、60 秒），见 quick.ts
+  // ⌘J 本地通道：受限会话里跑一次 agent（临时空目录、不给工具、读写 / 终端 / 审批全拒、60 秒），见 quick.ts
   const quick = new QuickRunner({
     adapter: (agentId) => ensureAdapter(agentId),
     send: sendCurrent,
@@ -245,7 +245,7 @@ export async function runConnector(options: ConnectorOptions): Promise<void> {
     // 同时让"忙→闲"真正开始计时：busy 期间回收器只会续期，事件（含审批结束）到来时在这里重新起算
     adapter.on((ev) => {
       idle.arm(agentId)
-      // 随手 AI 的受限会话是用完即弃的，不对中心露面（中心没有页面对应它）
+      // ⌘J 的受限会话是用完即弃的，不对中心露面（中心没有页面对应它）
       if (isSessionEvent(ev) && ev.sessionId && !adapter.isRestricted(ev.sessionId)) {
         sendCurrent({ t: 'session', agent: agentId, sessionId: ev.sessionId, ev })
       }
@@ -425,7 +425,7 @@ export async function runConnector(options: ConnectorOptions): Promise<void> {
           )
           break
         case 'quick':
-          // 随手 AI 本地通道（已过第二道闸：agent 范围）。受限会话里跑一次，文本增量 quick-delta，结束 res / err
+          // ⌘J 本地通道（已过第二道闸：agent 范围）。受限会话里跑一次，文本增量 quick-delta，结束 res / err
           quick.start(msg)
           break
         case 'quick-cancel':
@@ -484,7 +484,7 @@ export async function runConnector(options: ConnectorOptions): Promise<void> {
           log(`授权已收回 userId=${msg.userId}（本机名单删除 ${removed} 条）`)
           pty?.closeActor(msg.userId) // 他在这台机器上开的终端当场关掉
           preview.closeActor(msg.userId) // 他共享的预览当场撤掉
-          quick.cancelActor(msg.userId) // 他在飞的随手 AI 当场中止
+          quick.cancelActor(msg.userId) // 他在飞的 ⌘J 当场中止
           for (const [runId, actor] of promptActors) {
             const running = actor === msg.userId ? flight.running(runId) : undefined
             if (running) adapters.get(running.agent)?.cancel(running.sessionId)

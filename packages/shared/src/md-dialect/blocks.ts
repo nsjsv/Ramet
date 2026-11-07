@@ -7,6 +7,8 @@
 //   目录    段落正文恰为 `[TOC]`（大小写不敏感）或 `[[_TOC_]]`
 //   嵌入    独立一块的 `<iframe src>` / `<video src>` / `<audio src>`（只认 http(s) 与站内 /api/files/ 地址）
 //   书签    独占一段的 `<a href="…" data-bookmark>…</a>`（只认 http(s)；别的 markdown 渲染器里就是一个普通链接）
+//   按钮    独占一段的 `<button data-rule="<规则 id>">名字</button>`（规则 id 可空 = 还没设置；别处渲染成一个点不了的按钮）
+//   AI 块   `<!-- ai prompt="…" rule="…" -->` … `<!-- /ai -->`（html 注释，别处看不见、内容照常显示；可以嵌套）
 
 import { parseMdast } from './extensions.js'
 import { textOf, type Md } from './types.js'
@@ -20,6 +22,8 @@ export const COLUMN = 'rametColumn'
 export const TOC = 'rametToc'
 export const EMBED = 'rametEmbed'
 export const BOOKMARK = 'rametBookmark'
+export const BUTTON = 'rametButton'
+export const AI_GEN = 'rametAiGen'
 
 const emptyParagraph = (): Md => ({ type: 'paragraph', children: [] })
 
@@ -210,4 +214,49 @@ const bookmark: BlockRule = (siblings, i) => {
   return { node: { type: BOOKMARK, url }, consumed: 1 }
 }
 
-export const BLOCK_RULES: BlockRule[] = [callout, details, columns, toc, embed, bookmark]
+const BUTTON_OPEN_RE = /^<button\b([^>]*)>$/i
+const RULE_ID_RE = /^[0-9a-f-]{36}$/
+
+// 段落 = [开标签 <button … data-rule="…">, 名字（可以是几段行内节点）, </button>]
+const button: BlockRule = (siblings, i) => {
+  const node = siblings[i]!
+  const kids = node.type === 'paragraph' ? (node.children ?? []) : []
+  const open = htmlValue(kids[0])
+  const close = htmlValue(kids[kids.length - 1])
+  if (kids.length < 2 || open === null || close === null || !/^<\/button\s*>$/i.test(close)) return null
+  const m = BUTTON_OPEN_RE.exec(open)
+  if (!m || !/\sdata-rule\b/i.test(` ${m[1] ?? ''}`)) return null
+  const rule = attr(m[1] ?? '', 'data-rule')
+  const label = kids.slice(1, -1).map(plainText).join('').replace(/\s+/g, ' ').trim()
+  return { node: { type: BUTTON, rule: RULE_ID_RE.test(rule) ? rule : '', label }, consumed: 1 }
+}
+
+const AI_OPEN_RE = /^<!--\s*ai\b([\s\S]*?)-->$/i
+const AI_CLOSE_RE = /^<!--\s*\/ai\s*-->$/i
+
+const aiGen: BlockRule = (siblings, i) => {
+  const html = htmlValue(siblings[i])
+  const m = html !== null ? AI_OPEN_RE.exec(html) : null
+  if (!m) return null
+  let depth = 0
+  const children: Md[] = []
+  for (let k = i + 1; k < siblings.length; k++) {
+    const node = siblings[k]!
+    const value = htmlValue(node)
+    if (value !== null && AI_OPEN_RE.test(value)) depth += 1
+    else if (value !== null && AI_CLOSE_RE.test(value)) {
+      if (depth === 0) {
+        const rule = attr(m[1] ?? '', 'rule')
+        return {
+          node: { type: AI_GEN, prompt: attr(m[1] ?? '', 'prompt'), rule: RULE_ID_RE.test(rule) ? rule : '', children: children.length ? children : [emptyParagraph()] },
+          consumed: k - i + 1,
+        }
+      }
+      depth -= 1
+    }
+    children.push(node)
+  }
+  return null
+}
+
+export const BLOCK_RULES: BlockRule[] = [callout, details, columns, toc, embed, bookmark, button, aiGen]

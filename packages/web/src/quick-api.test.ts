@@ -98,7 +98,7 @@ test('设置 30 秒内复用；forget 之后重取', async () => {
 
 test('quickReadiness：没连接 / 本地通道 = 不能用并说明原因；配好了 = 可用；取设置失败不拦', async () => {
   vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(settingsOf({})), { status: 200 })))
-  expect(await quickReadiness()).toMatchObject({ ok: false, message: expect.stringContaining('还没有配置模型连接') })
+  expect(await quickReadiness()).toMatchObject({ ok: false, message: expect.stringContaining('还没有添加模型供应商') })
   forgetAiSettings()
   vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(settingsOf({ channel: 'local', activeConnectionId: 'c1' })), { status: 200 })))
   expect(await quickReadiness()).toMatchObject({ ok: false, message: expect.stringContaining('本地') })

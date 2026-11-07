@@ -11,6 +11,7 @@ import { forgetFailReason, rememberFailReason } from './fail-reason'
 import { encodeOpts, messageConfigOf, type MessageConfig } from './message-blocks'
 import { upgradeMentions } from './mention-upgrade'
 import { selfId } from '../people'
+import { isAssistantPage, pageCatalog } from '../assistant/identity'
 
 // ---------- agent 交互层 ----------
 // SSE（GET /api/pages/:id/agent-events）推 status / permission / permission_resolved / commands / config 等事件；
@@ -172,6 +173,7 @@ function openAgentEvents(pageId: string): AgentEventStore {
         toolCall?: unknown
         view?: unknown
         form?: unknown
+        only?: string
         list?: AgentCommand[]
         agentId?: string
         profile?: string
@@ -244,7 +246,7 @@ function openAgentEvents(pageId: string): AgentEventStore {
         case 'queue_dropped': {
           // 排着的消息派发时被丢掉（排的人失权 / agent 不在了）：只告诉排的人自己
           const mine = agentStateFor(pageId).queue.items.find((q) => q.id === raw.id)
-          if (mine?.userId === selfId() && typeof raw.reason === 'string') setAgentRunError(`排着的消息没发出去：${raw.reason}`)
+          if (mine?.userId === selfId() && typeof raw.reason === 'string') setAgentRunError(pageId, `排着的消息没发出去：${raw.reason}`)
           break
         }
         case 'cwd':
@@ -289,13 +291,15 @@ function openAgentEvents(pageId: string): AgentEventStore {
           // 不带（预备会话 / 配置失败，没有块可挂）才进页面顶部的运行错误条。
           if (!ev.message) break
           if (ev.replyId) rememberFailReason(ev.replyId, ev.message)
-          else setAgentRunError(ev.message)
+          else setAgentRunError(pageId, ev.message)
           break
         case 'permission': {
           // 身份是 agentId + requestId（requestId 只在单个 agent 进程内唯一）；回放会重发已有的，
           // 按这对键去重
           const { agentId, requestId } = ev
           if (!agentId || !requestId) break
+          // 只给某个人的（规则替主人开跑之前问他）：别人的页面上不画，点了服务端也不认
+          if (ev.only && ev.only !== selfId()) break
           update((s) =>
             s.permissions.some((p) => p.agentId === agentId && p.requestId === requestId)
               ? s
@@ -321,6 +325,8 @@ function openAgentEvents(pageId: string): AgentEventStore {
           // 移除审批的唯一信号（有人答、停止、会话被换、进程退出、connector 断了）
           const { agentId, requestId } = ev
           if (!agentId || !requestId) break
+          // 只给某个人的（规则替主人开跑之前问他）：别人的页面上不画，点了服务端也不认
+          if (ev.only && ev.only !== selfId()) break
           update((s) =>
             s.permissions.some((p) => p.agentId === agentId && p.requestId === requestId)
               ? { ...s, permissions: s.permissions.filter((p) => !(p.agentId === agentId && p.requestId === requestId)) }
@@ -387,47 +393,54 @@ export function useAgentEvents(pageId: string | undefined): AgentState {
   return state
 }
 
-/** 运行错误条：聊天模式输入卡上方与文档模式标题下方共用同一份 runError，
+/** 运行错误条：聊天模式输入卡上方与文档模式标题下方共用这一页的那份 runError，
  *  否则文档模式里 continue / prepare 失败就是点了没反应。 */
-export function RunErrorBar() {
-  const runError = useAgentRunError()
+export function RunErrorBar({ pageId }: { pageId: string }) {
+  const runError = useAgentRunError(pageId)
   if (!runError) return null
   return <div className="chat-run-error">{runError}</div>
 }
 
 // 运行错误单源（continue 被服务端拒：404 无此页 / 400 未配置该 agent / 409 忙）。
 // 静默 catch 会让点了没反应变成玄学：聊天输入、控制条、斜杠命令三条路径都往这里报。
+// 按页面分存：同一时刻可能有两个对话在场（当前页 + 别处嵌着的另一页），一页的失败不能显示在另一页上。
 
-let runError: string | null = null
+const runErrors = new Map<string, string>()
 const runErrorListeners = new Set<() => void>()
 
-export function setAgentRunError(message: string | null): void {
-  runError = message
+function subscribeRunErrors(cb: () => void): () => void {
+  runErrorListeners.add(cb)
+  return () => {
+    runErrorListeners.delete(cb)
+  }
+}
+
+/** message 为空（null / 空串）= 清掉这页的错误 */
+export function setAgentRunError(pageId: string, message: string | null): void {
+  if (message) runErrors.set(pageId, message)
+  else runErrors.delete(pageId)
   runErrorListeners.forEach((l) => l())
 }
 
-export function useAgentRunError(): string | null {
-  const [value, setValue] = useState(runError)
-  useEffect(() => {
-    const listener = () => setValue(runError)
-    runErrorListeners.add(listener)
-    return () => {
-      runErrorListeners.delete(listener)
-    }
-  }, [])
-  return value
+/** 这页当前的运行错误（没有 = null）：非 React 消费方与测试读 */
+export function agentRunErrorOf(pageId: string): string | null {
+  return runErrors.get(pageId) ?? null
+}
+
+export function useAgentRunError(pageId: string): string | null {
+  return useSyncExternalStore(subscribeRunErrors, () => agentRunErrorOf(pageId))
 }
 
 /** 触发一次生成；失败原因写到运行错误单源（不吞） */
 export function runAgent(pageId: string, agent: string): void {
   // 锁定的工具一台都不在线时照样交给服务端：消息里显式 @ 了别的 agent 就照常跑（@ 不受锁定），没有 @ 服务端回「现在没有可用的 …」
   if (!agent && !agentStateFor(pageId).lock) {
-    setAgentRunError('没有可用的 agent：还没连 connector（设置 → 连接器），或别人接入的机器还没授权给你（设置 → 机器）')
+    setAgentRunError(pageId, '没有可用的 agent：还没连 connector（设置 → 连接器），或别人接入的机器还没授权给你（设置 → 机器）')
     return
   }
-  setAgentRunError(null)
+  setAgentRunError(pageId, null)
   void api.continuePage(pageId, agent).catch((err: unknown) => {
-    setAgentRunError(err instanceof Error ? `启动失败：${err.message}` : '启动失败')
+    setAgentRunError(pageId, err instanceof Error ? `启动失败：${err.message}` : '启动失败')
   })
 }
 
@@ -442,9 +455,14 @@ export function continueRest(pageId: string): void {
 // 只取仍在目录里的（被撤销的 connector 等失效 id 跳过）。输入卡、文档发送、斜杠命令、消息 chip 都走这里。
 // 目录先按本页锁定的工具过滤：锁定的工具一台在线的都没有时解析成 ''，不回落到别的工具。
 
-/** 这一页能选的 agent（目录按本页锁定的工具过滤）：非 React 消费方用（文档 @ 候选） */
+/** 这一页能选的 agent：这一页的目录（Genet 页只有 Genet，assistant/identity.ts）按锁定的工具过滤。下面各个口径都经它 */
+export function catalogForPage(agents: readonly AgentInfo[], pageId: string, s: Pick<AgentState, 'choice' | 'lock'>): readonly AgentInfo[] {
+  return agentsForPage(pageCatalog(agents, isAssistantPage(pageId, s)), s.lock)
+}
+
+/** 这一页能选的 agent：非 React 消费方用（发送 / 斜杠命令） */
 export function pageAgents(pageId: string): readonly AgentInfo[] {
-  return agentsForPage(agentList(), agentStateFor(pageId).lock)
+  return catalogForPage(agentList(), pageId, agentStateFor(pageId))
 }
 
 /** 非 React 消费方用（发送 / 斜杠命令 / 重新回复） */
@@ -452,7 +470,7 @@ export function pageAgent(pageId: string, preferred = ''): string {
   return pickAgent(pageAgents(pageId), preferred, agentStateFor(pageId).choice ?? '', getDefaultAgent())
 }
 
-/** React 侧的 pageAgents：目录与锁定任一变化都重算。loaded 同 useAgents（拉过目录没有），lock 给空列表时的提示用 */
+/** React 侧的 pageAgents：目录、记住的来源与锁定任一变化都重算。loaded 同 useAgents（拉过目录没有），lock 给空列表时的提示用 */
 export function usePageAgents(pageId: string | undefined): { agents: readonly AgentInfo[]; loaded: boolean; lock: string } {
   const { agents, loaded } = useAgents()
   const subscribe = useCallback(
@@ -460,7 +478,8 @@ export function usePageAgents(pageId: string | undefined): { agents: readonly Ag
     [pageId],
   )
   const lock = useSyncExternalStore(subscribe, () => (pageId ? agentStateFor(pageId).lock : ''))
-  const filtered = useMemo(() => agentsForPage(agents, lock), [agents, lock])
+  const choice = useSyncExternalStore(subscribe, () => (pageId ? agentStateFor(pageId).choice : null))
+  const filtered = useMemo(() => (pageId ? catalogForPage(agents, pageId, { choice, lock }) : agentsForPage(agents, lock)), [agents, pageId, choice, lock])
   return { agents: filtered, loaded, lock }
 }
 
@@ -482,7 +501,7 @@ export function setPageChoice(pageId: string, agentId: string): void {
   if (!agentId || agentStateFor(pageId).choice === agentId) return
   sseStores.get(pageId)?.update((s) => ({ ...s, choice: agentId }))
   void api.setAgentChoice(pageId, agentId).catch((err: unknown) => {
-    setAgentRunError(err instanceof Error ? `记住来源失败：${err.message}` : '记住来源失败')
+    setAgentRunError(pageId, err instanceof Error ? `记住来源失败：${err.message}` : '记住来源失败')
   })
 }
 
@@ -494,16 +513,16 @@ export function setPageTools(pageId: string, profile: ToolProfile): void {
   store?.update((s) => ({ ...s, tools: profile }))
   void api.setAgentTools(pageId, profile).catch((err: unknown) => {
     store?.update((s) => (s.tools === profile ? { ...s, tools: before } : s))
-    setAgentRunError(err instanceof Error ? `${COPY.tools.failed}：${err.message}` : COPY.tools.failed)
+    setAgentRunError(pageId, err instanceof Error ? `${COPY.tools.failed}：${err.message}` : COPY.tools.failed)
   })
 }
 
 /** 重新生成（不是最后一块的失败回复的「重试」也是它）：对一块已有的回复从头再跑一轮，块 id 不变。
  *  409（页面忙）/ 400（agent 不可用）等失败原因写到运行错误单源，不吞 */
 export function regenerateReply(pageId: string, replyId: string): void {
-  setAgentRunError(null)
+  setAgentRunError(pageId, null)
   void api.regenerate(pageId, replyId).catch((err: unknown) => {
-    setAgentRunError(err instanceof Error ? `${COPY.run.regenerateFailed}：${err.message}` : COPY.run.regenerateFailed)
+    setAgentRunError(pageId, err instanceof Error ? `${COPY.run.regenerateFailed}：${err.message}` : COPY.run.regenerateFailed)
   })
 }
 
@@ -512,10 +531,10 @@ export function regenerateReply(pageId: string, replyId: string): void {
  *  orRegenerate：服务端判定不能续（点之前后面来了新消息、出计划前就断了的带队轮，前端看不出来）时改为从头重新生成——
  *  失败块的「重试」本来就是这两种之一；停止块的「继续」不传，不能替用户把已有的回答换掉 */
 export function resumeReply(pageId: string, replyId: string, orRegenerate = false): void {
-  setAgentRunError(null)
+  setAgentRunError(pageId, null)
   void api.resume(pageId, replyId).catch((err: unknown) => {
     if (orRegenerate && err instanceof ApiError && err.code === 'not-resumable') return regenerateReply(pageId, replyId)
-    setAgentRunError(err instanceof Error ? `${COPY.run.resumeFailed}：${err.message}` : COPY.run.resumeFailed)
+    setAgentRunError(pageId, err instanceof Error ? `${COPY.run.resumeFailed}：${err.message}` : COPY.run.resumeFailed)
   })
 }
 
@@ -575,12 +594,12 @@ function lastMessageConfig(doc: EditorView['state']['doc']): MessageConfig {
  *  聊天框对外给的是记号文字 `@[标题](page:<id>)` / `@[名字](agent:<id>)`（框里画的是 chip），这里在同一次
  *  事务里把记号升成 page_mention chip（与打开页 migrate pass / 源码模式同一逆路径），
  *  所以气泡和文档里画的都是 chip，不是那串语法。 */
-/** images 是附件图片的地址（`/api/files/<id>`）：消息末尾一段图片，与文档模式在消息里粘贴的图同一形状（发送时作为图片块给模型，见 server turn.ts） */
-export function appendUserMessage(view: EditorView, text: string, agent?: string, images: readonly string[] = []): void {
+/** 输入框里的图片 / 文件引用也是记号（`@[图片](image:<id>)` / `@[文件名](file:<路径>)`），同样在这次事务里升成节点：
+ *  图片落在文字里的原位，与文档模式在消息里粘贴的图同一形状（发送时按出现顺序作为图片块给模型，见 server doc.ts） */
+/** ctx = 发送时用户正在看的页面（Genet 浮窗，见 message-blocks.ts 的 user_message.ctx） */
+export function appendUserMessage(view: EditorView, text: string, agent?: string, ctx?: string): void {
   const { schema } = view.state
   const para = (t: string) => schema.nodes.paragraph!.create(null, t ? schema.text(t) : null)
-  const image = schema.nodes.image
-  const pics = image && images.length > 0 ? [schema.nodes.paragraph!.create(null, images.map((src) => image.create({ src, alt: '', title: '' })))] : []
   const inherited = lastMessageConfig(view.state.doc)
   // 指定了另一个来源：旧来源的模型 / 思考 / 权限模式 id 对新来源没有意义，不继承；目录在同一台机器上才可能沿用，也一并不继承
   // （上一条没指定来源说明用的是页面默认，没有旧来源可言，其余配置照常继承）
@@ -589,8 +608,8 @@ export function appendUserMessage(view: EditorView, text: string, agent?: string
     cfg = inherited.agent ? { agent, cwd: '', opts: {} } : { ...inherited, agent }
   }
   const msg = schema.nodes.user_message!.create(
-    { agent: cfg.agent, cwd: cfg.cwd, opts: encodeOpts(cfg.opts), author: selfId() },
-    [...(text || !pics.length ? text.split('\n').map(para) : []), ...pics],
+    { agent: cfg.agent, cwd: cfg.cwd, opts: encodeOpts(cfg.opts), author: selfId(), ctx: ctx ?? '' },
+    text.split('\n').map(para),
   )
   const tr = view.state.tr.insert(view.state.doc.content.size, msg)
   upgradeMentions(tr)
@@ -604,37 +623,43 @@ export function sendAgentMessage(view: EditorView, pageId: string, text: string,
 }
 
 // ---------- 审批卡的宿主登记 ----------
-// 运行中的审批卡画在运行条里（run-strip.ts），属于那条运行。只要有运行条在承接审批，底部弹条就不再画；
+// 运行中的审批卡画在运行条里（run-strip.ts），属于那条运行。只要这一页有运行条在承接审批，这一页的底部弹条就不再画；
 // 没有（源码模式、后台审批比一轮活得久、运行条宿主没建成）时底部弹条兜底，保证一直等不会变成没人看得见。
-// 运行条在运行未结束期间登记、结束或销毁时注销；弹条据此显隐（模块级计数 + 订阅）。
+// 运行条在运行未结束期间登记、结束或销毁时注销；弹条据此显隐（按页面计数 + 订阅）。
+// 按页面计：别处嵌着的另一页的运行条不能让这一页的兜底弹条消失（那样这一页的审批就没人看得见了）。
 
-let approvalHosts = 0
+const approvalHosts = new Map<string, number>()
 const approvalHostListeners = new Set<() => void>()
 
-/** 登记一个承接审批的运行条；返回注销函数（幂等） */
-export function registerApprovalHost(): () => void {
-  approvalHosts++
+function subscribeApprovalHosts(cb: () => void): () => void {
+  approvalHostListeners.add(cb)
+  return () => {
+    approvalHostListeners.delete(cb)
+  }
+}
+
+/** 给这一页登记一个承接审批的运行条；返回注销函数（幂等） */
+export function registerApprovalHost(pageId: string): () => void {
+  approvalHosts.set(pageId, (approvalHosts.get(pageId) ?? 0) + 1)
   approvalHostListeners.forEach((l) => l())
   let done = false
   return () => {
     if (done) return
     done = true
-    approvalHosts--
+    const left = (approvalHosts.get(pageId) ?? 1) - 1
+    if (left > 0) approvalHosts.set(pageId, left)
+    else approvalHosts.delete(pageId)
     approvalHostListeners.forEach((l) => l())
   }
 }
 
-function useApprovalHosted(): boolean {
-  const [hosted, setHosted] = useState(approvalHosts > 0)
-  useEffect(() => {
-    const listener = () => setHosted(approvalHosts > 0)
-    approvalHostListeners.add(listener)
-    listener()
-    return () => {
-      approvalHostListeners.delete(listener)
-    }
-  }, [])
-  return hosted
+/** 这一页有没有运行条在承接审批 */
+export function approvalHosted(pageId: string): boolean {
+  return (approvalHosts.get(pageId) ?? 0) > 0
+}
+
+function useApprovalHosted(pageId: string): boolean {
+  return useSyncExternalStore(subscribeApprovalHosts, () => approvalHosted(pageId))
 }
 
 // ---------- 审批弹条（兜底；多条排队，只展示队首） ----------
@@ -646,7 +671,7 @@ function AskBar({ pageId, req }: { pageId: string; req: PermissionReq & { form: 
   useEffect(() => {
     const node = host.current
     if (!node) return
-    node.replaceChildren(mountAsk(pageId, { agentId, requestId, form }, setAgentRunError).el)
+    node.replaceChildren(mountAsk(pageId, { agentId, requestId, form }, (message) => setAgentRunError(pageId, message)).el)
     return () => node.replaceChildren()
   }, [pageId, agentId, requestId, form])
   return (
@@ -681,7 +706,7 @@ function PermissionBar({ req, onAnswer }: { req: PermissionReq; onAnswer: (optio
 // 文档模式是纯编辑视图。审批弹条不受模式限制：请求可能由别的协作者 / 别的模式发起，权限不能没人能批。
 
 export function AgentPanel({ pageId, state }: { pageId: string; state: AgentState }) {
-  const hosted = useApprovalHosted()
+  const hosted = useApprovalHosted(pageId)
   // 队列就是待批审批本身：答完不本地摘除，等 permission_resolved（唯一移除信号）
   const current = state.permissions[0]
   if (!current || hosted) return null
@@ -701,7 +726,7 @@ export function AgentPanel({ pageId, state }: { pageId: string; state: AgentStat
           void api.respondPermission(pageId, current.agentId, current.requestId, optionId).catch((err: unknown) => {
             // 404 是审批已经结束（resolved 事件会摘掉它），静默；403 / 409 要给用户理由
             if (err instanceof ApiError && err.status === 404) return
-            setAgentRunError(err instanceof Error ? err.message : '审批失败')
+            setAgentRunError(pageId, err instanceof Error ? err.message : '审批失败')
           })
         }}
       />

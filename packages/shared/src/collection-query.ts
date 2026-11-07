@@ -181,6 +181,7 @@ function conditionTest(cond: Condition, prop: CollectionProp, ctx: QueryCtx): Ro
   const value = conditionValue(prop, op, cond.value)
   if (opNeedsValue(op) && value === undefined) return null
   switch (prop.type) {
+    case 'ai':
     case 'text':
     case 'url':
     case 'email':
@@ -237,6 +238,8 @@ function conditionTest(cond: Condition, prop: CollectionProp, ctx: QueryCtx): Ro
     }
     case 'formula':
       return formulaTest(prop, op, value, ctx)
+    case 'button':
+      return null
   }
 }
 
@@ -359,6 +362,7 @@ const dayNumber = (day: string): number => Number(day.slice(0, 4) + day.slice(5,
 function sortPart(prop: CollectionProp, dir: 1 | -1, ctx: QueryCtx): Part | null {
   const get = (row: CollectionRow): PropValue | undefined => rowValue(row, prop)
   switch (prop.type) {
+    case 'ai':
     case 'text':
     case 'url':
     case 'email':
@@ -426,6 +430,8 @@ function sortPart(prop: CollectionProp, dir: 1 | -1, ctx: QueryCtx): Part | null
     }
     case 'formula':
       return formulaSortPart(prop, dir, get)
+    case 'button':
+      return null
   }
 }
 

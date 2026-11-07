@@ -8,7 +8,6 @@ import type { PageTool } from '../../page-read.js'
 import type {
   AgentAdapter,
   AgentCommand,
-  AgentConfig,
   AgentEvent,
   AskContent,
   ConfigOption,
@@ -44,14 +43,15 @@ export abstract class DriverBase implements AgentAdapter {
   /** sessionId → 原生斜杠命令。不论有没有监听者都缓存：命令在会话建立后才推，那时监听者（轮次 / 中心镜像）
    *  往往还没绑上，之后的 bind 用 sessionState() 补齐 */
   protected readonly sessionCommands = new Map<string, AgentCommand[]>()
-  /** 随手 AI 的受限会话：agent 要读文件 / 写文件 / 开终端一律拒绝，审批自动拒绝（不进 pending、不发事件）。
+  /** ⌘J 的受限会话：agent 要读文件 / 写文件 / 开终端一律拒绝，审批自动拒绝（不进 pending、不发事件）。
    *  会话级事件也不对外：knownSessions 不含它们，connector 的常驻监听据 isRestricted 跳过 */
   protected readonly restricted = new Set<string>()
 
   /** 会话文件端口（换机器搬会话用，connector/session-files.ts）：只有原生驱动有；没有 = 这家不支持搬，上层退回新建会话 + 全文重放 */
   readonly sessionPort?: SessionPort
 
-  constructor(protected readonly cfg: AgentConfig) {
+  // 配置归子类：原生驱动各带自己的 AgentConfig，中心自己的 Genet（drivers/assistant）没有，这里的规则都不读它
+  constructor() {
     this.emitter.setMaxListeners(0)
   }
 
@@ -88,7 +88,7 @@ export abstract class DriverBase implements AgentAdapter {
 
   abstract ready(): Promise<void>
   abstract newSession(cwd: string, tools?: PageTool[]): Promise<{ sessionId: string; configOptions: ConfigOption[] }>
-  /** 随手 AI 的受限会话（connector/quick.ts 用）：不给任何工具，之后的读写 / 终端 / 审批都被拒绝。
+  /** ⌘J 的受限会话（connector/quick.ts 用）：不给任何工具，之后的读写 / 终端 / 审批都被拒绝。
    *  受限标记必须在会话建立的同一个同步段里加进 restricted，agent 在 prompt 之前不会发这些请求 */
   abstract newRestrictedSession(cwd: string): Promise<{ sessionId: string; configOptions: ConfigOption[] }>
   abstract loadSession(sessionId: string, cwd: string, tools?: PageTool[]): Promise<{ configOptions: ConfigOption[] }>
@@ -138,7 +138,7 @@ export abstract class DriverBase implements AgentAdapter {
   knownSessions(): string[] {
     const ids = new Set([...this.sessionConfigs.keys(), ...this.sessionCommands.keys()])
     for (const p of this.pending.values()) if (p.event.sessionId) ids.add(p.event.sessionId)
-    return [...ids].filter((id) => !this.restricted.has(id)) // 随手 AI 的受限会话不对中心露面
+    return [...ids].filter((id) => !this.restricted.has(id)) // ⌘J 的受限会话不对中心露面
   }
 
   isRestricted(sessionId: string): boolean {

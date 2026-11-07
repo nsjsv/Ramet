@@ -1,15 +1,15 @@
-/* ---------- 随手 AI：设置 / 连接 / 单次调用的集成测试 ----------
+/* ---------- ⌘J：设置 / 连接 / 单次调用的集成测试 ----------
  * 真实 Postgres + 真实 HTTP 服务；模型调用与 DNS 解析是注入的假实现，不打任何真实模型。
  * 重点：key 加密落库且永不出现在响应 / 日志里；地址校验（保存时与每次请求时）；错误映射；限速；客户端断开即中止。 */
 import { randomBytes, randomUUID } from 'node:crypto'
 import http from 'node:http'
-import Anthropic from '@anthropic-ai/sdk'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { hashPassword } from './auth.js'
 import { closePool, getPool, initDb } from './db.js'
 import { decryptSecret } from './secret-box.js'
 import { startServer } from './index.js'
-import { QUICK_SYSTEM_PROMPT, type ModelChunk, type ModelRequest, type QuickModelCall } from './quick.js'
+import { ModelListError, QUICK_SYSTEM_PROMPT, UpstreamFailure, UpstreamHttpError } from './quick.js'
+import type { ModelChunk, ModelInfo, ModelListTarget, ModelRequest, QuickModelCall } from './quick.js'
 import { INSTRUCTION_MAX, RATE_MAX, TEXT_MAX } from './routes/quick.js'
 import type { Resolver } from './endpoint-guard.js'
 import { truncateAll } from './test-helpers.js'
@@ -30,6 +30,12 @@ const fakeCall: QuickModelCall = (req, signal) => {
   seen.push(req)
   return impl(req, signal)
 }
+let listImpl: (target: ModelListTarget) => Promise<ModelInfo[]> = async () => []
+const listed: ModelListTarget[] = []
+const fakeList = (target: ModelListTarget) => {
+  listed.push(target)
+  return listImpl(target)
+}
 const dnsMap: Record<string, string[]> = {}
 const fakeResolve: Resolver = async (host) => (dnsMap[host] ?? ['93.184.216.34']).map((address) => ({ address, family: address.includes(':') ? 6 : 4 }))
 
@@ -45,8 +51,8 @@ let bareBase = ''
 
 beforeAll(async () => {
   await initDb(pool)
-  site = await startServer(pool, 0, { quick: { call: fakeCall, secretKey, resolve: fakeResolve } })
-  bare = await startServer(pool, 0, { quick: { call: fakeCall, secretKey: null, resolve: fakeResolve } })
+  site = await startServer(pool, 0, { quick: { call: fakeCall, listModels: fakeList, secretKey, resolve: fakeResolve } })
+  bare = await startServer(pool, 0, { quick: { call: fakeCall, listModels: fakeList, secretKey: null, resolve: fakeResolve } })
   base = `http://127.0.0.1:${site.port}`
   bareBase = `http://127.0.0.1:${bare.port}`
 })
@@ -58,8 +64,10 @@ afterAll(async () => {
 beforeEach(async () => {
   await truncateAll(pool)
   seen.length = 0
+  listed.length = 0
   for (const k of Object.keys(dnsMap)) delete dnsMap[k]
   impl = () => script(...say('ok'))
+  listImpl = async () => [{ id: 'claude-opus-5-5', name: 'Claude Opus 5.5' }]
 })
 afterEach(async () => {
   await truncateAll(pool)
@@ -114,6 +122,14 @@ async function quick(cookie: string, body: unknown, host: string = base): Promis
 const ANTHROPIC = { name: '官方', protocol: 'anthropic', model: 'claude-sonnet-5-5', apiKey: KEY }
 const OPENAI = { name: 'DeepSeek', protocol: 'openai', baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-chat', apiKey: 'sk-deepseek-9999' }
 
+/** 上游把收到的 key 写进了报错：JSON 体里整个回显、纯文本体里回显到正好被截断（前 300 字）切在 key 中间 */
+function echoedKey(key: string): Array<() => unknown> {
+  return [
+    () => new UpstreamFailure({ status: 400, body: JSON.stringify({ type: 'error', error: { type: 'invalid_request_error', message: `invalid x-api-key: ${key} (gateway)` } }) }, ''),
+    () => new UpstreamHttpError(400, `${'x'.repeat(290)}${key}`),
+  ]
+}
+
 async function addConnection(cookie: string, body: Record<string, unknown> = ANTHROPIC): Promise<any> {
   const r = await call(cookie, 'POST', '/api/me/ai-connections', body)
   expect(r.status).toBe(201)
@@ -129,6 +145,7 @@ describe('认证', () => {
       ['PATCH', '/api/me/ai-connections/x'],
       ['DELETE', '/api/me/ai-connections/x'],
       ['POST', '/api/me/ai-connections/test'],
+      ['POST', '/api/me/ai-connections/models'],
       ['POST', '/api/quick'],
     ] as const) {
       expect((await call(null, method, path, {})).status).toBe(401)
@@ -171,8 +188,9 @@ describe('设置与连接', () => {
     texts.push((await call(u.cookie, 'GET', '/api/me/ai-settings')).text)
     texts.push((await call(u.cookie, 'PATCH', `/api/me/ai-connections/${c.id}`, { name: '改名' })).text)
     texts.push((await call(u.cookie, 'POST', '/api/me/ai-connections/test', { id: c.id })).text)
+    texts.push((await call(u.cookie, 'POST', '/api/me/ai-connections/models', { id: c.id })).text)
     texts.push((await quick(u.cookie, { kind: 'rewrite', instruction: 'x', text: 'y' })).text)
-    impl = () => { throw new Anthropic.AuthenticationError(401, { type: 'error', error: { type: 'authentication_error', message: `invalid x-api-key ${KEY}` } }, 'bad', new Headers()) }
+    impl = () => { throw new UpstreamFailure({ status: 401, body: JSON.stringify({ type: 'error', error: { type: 'authentication_error', message: `invalid x-api-key ${KEY}` } }) }, '') }
     texts.push((await quick(u.cookie, { kind: 'rewrite', instruction: 'x', text: 'y' })).text)
     texts.push((await call(u.cookie, 'POST', '/api/me/ai-connections', { ...ANTHROPIC, model: 'nope' })).text)
     for (const t of texts) expect(t).not.toContain(KEY)
@@ -188,11 +206,10 @@ describe('设置与连接', () => {
       [{ ...ANTHROPIC, name: 'x'.repeat(41) }, /名称太长/],
       [{ ...OPENAI, baseUrl: '' }, /必须填写地址/],
       [{ ...OPENAI, baseUrl: undefined }, /必须填写地址/],
-      [{ ...OPENAI, model: '' }, /模型名必填/],
+      [{ ...OPENAI, model: '' }, /请选择模型/],
+      [{ ...ANTHROPIC, model: undefined }, /请选择模型/],
       [{ ...OPENAI, model: 'm'.repeat(101) }, /太长/],
       [{ ...OPENAI, model: 'a\nb' }, /控制字符/],
-      [{ ...ANTHROPIC, model: 'claude-3-opus' }, /官方地址只支持/],
-      [{ ...ANTHROPIC, model: 'claude-opus-5-5-20260101' }, /官方地址只支持/],
       [{ ...ANTHROPIC, apiKey: '' }, /长度/],
       [{ ...ANTHROPIC, apiKey: 'short' }, /长度/],
       [{ ...ANTHROPIC, apiKey: 'sk-ant bad key 1234' }, /空格/],
@@ -243,10 +260,11 @@ describe('设置与连接', () => {
     expect(await mk({ ...ANTHROPIC, baseUrl: 'https://api.anthropic.com/', model: 'claude-haiku-5-5' })).toBeNull()
   })
 
-  it('自定义地址 / 自定义协议下模型名自由填', async () => {
+  it('模型名不限于固定几个：官方地址、自定义地址都收模型列表里的任意 id', async () => {
     const u = await newUser()
     const c = await addConnection(u.cookie, { ...ANTHROPIC, baseUrl: 'https://gw.example.com/anthropic', model: 'glm-4.6' })
     expect(c).toMatchObject({ baseUrl: 'https://gw.example.com/anthropic', model: 'glm-4.6' })
+    expect(await addConnection(u.cookie, { ...ANTHROPIC, model: 'claude-fable-5-1' })).toMatchObject({ baseUrl: null, model: 'claude-fable-5-1' })
   })
 
   it('最多 10 套', async () => {
@@ -292,7 +310,7 @@ describe('设置与连接', () => {
 
     expect((await call(u.cookie, 'PATCH', `/api/me/ai-connections/${c.id}`, { protocol: 'openai' })).status).toBe(400)
     expect((await call(u.cookie, 'PATCH', `/api/me/ai-connections/${c.id}`, { apiKey: '' })).status).toBe(400)
-    expect((await call(u.cookie, 'PATCH', `/api/me/ai-connections/${c.id}`, { model: 'bogus' })).status).toBe(400)
+    expect((await call(u.cookie, 'PATCH', `/api/me/ai-connections/${c.id}`, { model: '' })).status).toBe(400)
     expect((await call(other.cookie, 'PATCH', `/api/me/ai-connections/${c.id}`, { name: 'hack' })).status).toBe(404)
     expect((await call(other.cookie, 'DELETE', `/api/me/ai-connections/${c.id}`)).status).toBe(404)
     expect((await call(u.cookie, 'PATCH', `/api/me/ai-connections/${randomUUID()}`, { name: 'x' })).status).toBe(404)
@@ -587,13 +605,14 @@ describe('POST /api/quick：流式输出与错误映射', () => {
     const u = await newUser()
     await addConnection(u.cookie)
     const body = { kind: 'rewrite', instruction: '润色', text: '一段话' }
-    const anth = (status: number, type: string) => Anthropic.APIError.generate(status, { type: 'error', error: { type, message: 'm' } }, 'm', new Headers())
+    const anth = (status: number, type: string) => new UpstreamFailure({ status, body: JSON.stringify({ type: 'error', error: { type, message: 'm' } }) }, '')
+    const unreachable = () => new UpstreamFailure({ thrown: Object.assign(new Error('connect'), { code: 'ECONNREFUSED' }) }, '')
 
     const cases: Array<[() => unknown, string]> = [
       [() => anth(401, 'authentication_error'), 'auth'],
       [() => anth(429, 'rate_limit_error'), 'rate_limit'],
       [() => anth(500, 'api_error'), 'api'],
-      [() => new Anthropic.APIConnectionError({}), 'connection'],
+      [unreachable, 'connection'],
     ]
     for (const [make, code] of cases) {
       impl = () => { throw make() }
@@ -612,10 +631,22 @@ describe('POST /api/quick：流式输出与错误映射', () => {
     await addConnection(u.cookie)
     impl = async function* () {
       yield { type: 'delta', text: '前半' }
-      throw new Anthropic.APIConnectionError({})
+      throw new UpstreamFailure({ thrown: Object.assign(new Error('connect'), { code: 'ECONNREFUSED' }) }, '')
     }
     const r = await quick(u.cookie, { kind: 'rewrite', instruction: '润色', text: '一段话' })
     expect(r.events.map((e) => e.event)).toEqual(['delta', 'error'])
+  })
+
+  it('上游报错原文回显了 key（含截断在 key 中间）：error 事件里的原因没有 key，状态码与原文其余部分照常给', async () => {
+    const u = await newUser()
+    await addConnection(u.cookie)
+    for (const make of echoedKey(KEY)) {
+      impl = () => { throw make() }
+      const r = await quick(u.cookie, { kind: 'rewrite', instruction: '润色', text: '一段话' })
+      expect(r.events[0]).toMatchObject({ event: 'error', data: { code: 'api' } })
+      expect(r.events[0]!.data.message).toContain('（400）')
+      expect(r.text).not.toContain(KEY.slice(0, 10))
+    }
   })
 
   it('未知错误：用户只看到通用文案，日志里只有错误类名，没有 key / 正文 / 错误详情', async () => {
@@ -714,16 +745,31 @@ describe('POST /api/me/ai-connections/test', () => {
   it('失败回 200 {ok:false, code, message}：认证失败 / 拒绝 / 连不上', async () => {
     const u = await newUser()
     const c = await addConnection(u.cookie)
-    impl = () => { throw Anthropic.APIError.generate(401, { type: 'error', error: { type: 'authentication_error', message: 'm' } }, 'm', new Headers()) }
+    impl = () => { throw new UpstreamFailure({ status: 401, body: '{"type":"error","error":{"type":"authentication_error","message":"m"}}' }, '') }
     let r = await call(u.cookie, 'POST', '/api/me/ai-connections/test', { id: c.id })
     expect(r.status).toBe(200)
     expect(r.json).toMatchObject({ ok: false, code: 'auth' })
     impl = () => script({ type: 'stop', reason: 'refusal' })
     r = await call(u.cookie, 'POST', '/api/me/ai-connections/test', { id: c.id })
     expect(r.json).toMatchObject({ ok: false, code: 'refusal' })
-    impl = () => { throw new Anthropic.APIConnectionError({}) }
+    impl = () => { throw new UpstreamFailure({ thrown: Object.assign(new Error('connect'), { code: 'ECONNREFUSED' }) }, '') }
     r = await call(u.cookie, 'POST', '/api/me/ai-connections/test', { id: c.id })
     expect(r.json).toMatchObject({ ok: false, code: 'connection' })
+  })
+
+  it('上游报错原文回显了 key：已保存的连接与还没保存的表单，回的原因里都没有 key', async () => {
+    const u = await newUser()
+    const c = await addConnection(u.cookie)
+    const form = 'fake-form-key-only-in-test-5678'
+    for (const [body, key] of [[{ id: c.id }, KEY], [{ protocol: 'anthropic', model: 'claude-haiku-5-5', apiKey: form }, form]] as const) {
+      for (const make of echoedKey(key)) {
+        impl = () => { throw make() }
+        const r = await call(u.cookie, 'POST', '/api/me/ai-connections/test', body)
+        expect(r.json).toMatchObject({ ok: false, code: 'api' })
+        expect(r.json.message).toContain('（400）')
+        expect(r.text).not.toContain(key.slice(0, 10))
+      }
+    }
   })
 
   it('输入 / 地址不合法 → 400，不会去调模型；别人的连接 404', async () => {
@@ -746,5 +792,82 @@ describe('POST /api/me/ai-connections/test', () => {
     for (let i = 0; i < RATE_MAX; i++) expect((await call(u.cookie, 'POST', '/api/me/ai-connections/test', { protocol: 'anthropic', model: 'claude-haiku-5-5', apiKey: KEY })).status).toBe(200)
     expect((await call(u.cookie, 'POST', '/api/me/ai-connections/test', { protocol: 'anthropic', model: 'claude-haiku-5-5', apiKey: KEY })).status).toBe(429)
     expect((await quick(u.cookie, { kind: 'draft', instruction: 'x' })).status).toBe(429)
+  })
+})
+
+describe('POST /api/me/ai-connections/models', () => {
+  const models = (cookie: string, body: unknown) => call(cookie, 'POST', '/api/me/ai-connections/models', body)
+
+  it('还没保存的表单：带 protocol + 地址 + apiKey 去拉；不落库', async () => {
+    const u = await newUser()
+    listImpl = async () => [{ id: 'deepseek-chat', name: 'deepseek-chat' }, { id: 'deepseek-reasoner', name: 'DeepSeek Reasoner' }]
+    const r = await models(u.cookie, { protocol: 'openai', baseUrl: 'https://api.deepseek.com/v1/chat/completions', apiKey: 'sk-deepseek-9999' })
+    expect(r.status).toBe(200)
+    expect(r.json).toEqual({ ok: true, models: [{ id: 'deepseek-chat', name: 'deepseek-chat' }, { id: 'deepseek-reasoner', name: 'DeepSeek Reasoner' }] })
+    // 地址先规范化再交给拉取层
+    expect(listed[0]).toEqual({ protocol: 'openai', baseUrl: 'https://api.deepseek.com/v1', apiKey: 'sk-deepseek-9999' })
+    expect(r.text).not.toContain('sk-deepseek-9999')
+    expect((await call(u.cookie, 'GET', '/api/me/ai-settings')).json.connections).toHaveLength(0)
+  })
+
+  it('已保存的：用库里的 key；表单里改了地址 / 重填了 key 以表单为准', async () => {
+    const u = await newUser()
+    const c = await addConnection(u.cookie, OPENAI)
+    await models(u.cookie, { id: c.id })
+    expect(listed[0]).toEqual({ protocol: 'openai', baseUrl: 'https://api.deepseek.com/v1', apiKey: 'sk-deepseek-9999' })
+    await models(u.cookie, { id: c.id, baseUrl: 'https://gw.example.com/v1', apiKey: 'sk-new-key-0000' })
+    expect(listed[1]).toEqual({ protocol: 'openai', baseUrl: 'https://gw.example.com/v1', apiKey: 'sk-new-key-0000' })
+    expect((await call(u.cookie, 'GET', '/api/me/ai-settings')).json.connections[0]).toMatchObject({ baseUrl: 'https://api.deepseek.com/v1', keyLast4: '9999' })
+  })
+
+  it('官方 Anthropic：不填地址也能拉', async () => {
+    const u = await newUser()
+    const r = await models(u.cookie, { protocol: 'anthropic', apiKey: KEY })
+    expect(r.json).toEqual({ ok: true, models: [{ id: 'claude-opus-5-5', name: 'Claude Opus 5.5' }] })
+    expect(listed[0]).toEqual({ protocol: 'anthropic', baseUrl: null, apiKey: KEY })
+  })
+
+  it('存不下的模型名（太长 / 带控制字符）不给选；一个都不剩 → ok:false empty', async () => {
+    const u = await newUser()
+    listImpl = async () => [{ id: 'ok-model', name: 'ok-model' }, { id: 'm'.repeat(101), name: 'long' }, { id: 'a\nb', name: 'ctrl' }]
+    expect((await models(u.cookie, { protocol: 'anthropic', apiKey: KEY })).json).toEqual({ ok: true, models: [{ id: 'ok-model', name: 'ok-model' }] })
+    listImpl = async () => []
+    expect((await models(u.cookie, { protocol: 'anthropic', apiKey: KEY })).json).toMatchObject({ ok: false, code: 'empty' })
+  })
+
+  it('失败回 200 {ok:false, code, message}：认证失败、列表格式不对；上游回显的 key 被抹掉', async () => {
+    const u = await newUser()
+    listImpl = () => Promise.reject(new UpstreamHttpError(401, 'unauthorized'))
+    expect((await models(u.cookie, { protocol: 'anthropic', apiKey: KEY })).json).toMatchObject({ ok: false, code: 'auth' })
+    listImpl = () => Promise.reject(new ModelListError('模型列表的格式不对（不是 JSON），检查地址是否正确'))
+    expect((await models(u.cookie, { protocol: 'anthropic', apiKey: KEY })).json).toMatchObject({ ok: false, code: 'api', message: expect.stringContaining('不是 JSON') })
+    for (const make of echoedKey(KEY)) {
+      listImpl = () => Promise.reject(make())
+      const r = await models(u.cookie, { protocol: 'anthropic', apiKey: KEY })
+      expect(r.json).toMatchObject({ ok: false, code: 'api' })
+      expect(r.text).not.toContain(KEY.slice(0, 10))
+    }
+  })
+
+  it('输入 / 地址不合法 → 400，不会去拉；别人的 404；不需要 model', async () => {
+    const u = await newUser()
+    const other = await newUser()
+    const c = await addConnection(u.cookie)
+    expect((await models(u.cookie, { protocol: 'openai', baseUrl: 'http://api.example.com/v1', apiKey: 'sk-12345678' })).status).toBe(400)
+    expect((await models(u.cookie, { protocol: 'openai', baseUrl: 'https://169.254.169.254/v1', apiKey: 'sk-12345678' })).status).toBe(400)
+    expect((await models(u.cookie, { protocol: 'openai', apiKey: 'sk-12345678' })).status).toBe(400) // openai 没地址
+    expect((await models(u.cookie, { protocol: 'anthropic' })).status).toBe(400) // 没 key
+    expect((await models(u.cookie, { protocol: 'gemini', apiKey: KEY })).status).toBe(400)
+    expect((await models(u.cookie, { id: c.id, baseUrl: 'https://10.0.0.1' })).status).toBe(400)
+    expect((await models(other.cookie, { id: c.id })).status).toBe(404)
+    expect(listed).toHaveLength(0)
+  })
+
+  it('和调用、连接测试共用限速', async () => {
+    const u = await newUser()
+    await addConnection(u.cookie)
+    for (let i = 0; i < RATE_MAX; i++) expect((await models(u.cookie, { protocol: 'anthropic', apiKey: KEY })).status).toBe(200)
+    expect((await models(u.cookie, { protocol: 'anthropic', apiKey: KEY })).status).toBe(429)
+    expect((await call(u.cookie, 'POST', '/api/me/ai-connections/test', { protocol: 'anthropic', model: 'claude-haiku-5-5', apiKey: KEY })).status).toBe(429)
   })
 })

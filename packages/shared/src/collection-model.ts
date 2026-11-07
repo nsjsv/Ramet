@@ -133,6 +133,8 @@ export const PROP_TYPES = [
   'relation',
   'rollup',
   'formula',
+  'button',
+  'ai',
 ] as const
 export type PropType = (typeof PROP_TYPES)[number]
 
@@ -229,6 +231,10 @@ export const FILTER_OPS: Record<PropType, readonly FilterOp[]> = {
   // 汇总、公式按输出类型取（filterOps），这里是列表输出 / 公式有误时的那一组
   rollup: PRESENCE_OPS,
   formula: PRESENCE_OPS,
+  // 按钮没有值：不能拿来筛选（筛选菜单的属性列表跳过它）
+  button: [],
+  // AI 属性的值就是一段文字
+  ai: TEXT_OPS,
 }
 
 const FORMULA_OPS: Record<FormulaType, readonly FilterOp[]> = {
@@ -251,7 +257,7 @@ export function filterOps(prop: CollectionProp): readonly FilterOp[] {
 /** 这个属性能不能拿来排序：关联不排（一格多行，没有有意义的先后），列表输出的汇总、公式同理，有误的公式也不排。
  *  解析视图时排不了的排序丢掉 */
 export function sortable(prop: CollectionProp): boolean {
-  if (prop.type === 'relation') return false
+  if (prop.type === 'relation' || prop.type === 'button') return false
   if (prop.type === 'formula') return !!prop.output && prop.output !== 'list'
   return prop.type !== 'rollup' || rollupOutput(prop.cfg.fn) !== 'list'
 }
@@ -307,6 +313,14 @@ export type PropCfg = {
   fn?: RollupFn
   /** 公式：表达式的存储形（属性引用写成 [@<属性 id>]，见 collection-formula/） */
   expr?: string
+  /** 按钮：按钮上的字 */
+  label?: string
+  /** 按钮：点了跑哪条「点按钮」规则（挂在这个集合上）；没有 = 还没设置 */
+  rule?: string
+  /** AI 属性：要 AI 按每一行填什么 */
+  prompt?: string
+  /** AI 属性：自动更新的规则（新增了一行 / 属性改了，挂在这个集合上）；没有 = 不自动 */
+  rules?: string[]
 }
 
 /** 关联 / 汇总属性指向哪里：服务端随窗口给（它知道对方集合在不在、在不在同一个空间），前端据此显示「已失效」与汇总的样子 */
@@ -614,6 +628,7 @@ function parseConditions(raw: unknown, lookup: PropLookup): Condition[] {
 export function conditionValue(prop: CollectionProp, op: FilterOp, raw: unknown): string | number | undefined {
   if (!opNeedsValue(op)) return undefined
   switch (prop.type) {
+    case 'ai':
     case 'text':
     case 'url':
     case 'email':
@@ -722,6 +737,7 @@ function stringList(raw: unknown): string[] | undefined {
  *  行元数据类（创建 / 编辑时间、创建者、最后编辑者、自动编号）不存储，这里恒为 undefined，从行取值用 rowValue */
 export function readValue(prop: CollectionProp, raw: unknown): PropValue | undefined {
   switch (prop.type) {
+    case 'ai':
     case 'text':
     case 'url':
     case 'email':
@@ -759,6 +775,7 @@ export function readValue(prop: CollectionProp, raw: unknown): PropValue | undef
     case 'unique_id':
     case 'rollup':
     case 'formula':
+    case 'button':
       return undefined
   }
 }
@@ -850,6 +867,7 @@ function listResult(raw: unknown, check: (id: string) => boolean, what: string, 
 export function validateValue(prop: CollectionProp, value: unknown, ctx: ValidateCtx = {}): ValidateResult {
   if (value === null) return ok(null)
   switch (prop.type) {
+    case 'ai':
     case 'text':
       if (typeof value !== 'string') return bad('要填文本')
       if (value === '') return ok(null)
@@ -902,5 +920,7 @@ export function validateValue(prop: CollectionProp, value: unknown, ctx: Validat
     case 'rollup':
     case 'formula':
       return bad('这个属性自动生成，不能改')
+    case 'button':
+      return bad('按钮属性没有值')
   }
 }

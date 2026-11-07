@@ -164,7 +164,7 @@ export function relativeToRoot(root: string, absolute: string): string | null {
 
 /** 本页 agent 改过的文件：相对 root 的路径 → { agent（catalog id）, at（那一轮过程页的时间，毫秒）}。靠工具步骤的位置信息识别，
  *  agent 经命令行（sed -i、重定向）改的文件认不出来；用户后来又改过同一个文件也仍归 agent（尽力而为；
- *  随手 AI 落盘的由 project-write.ts 的 quick_writes 按时间盖过它） */
+ *  ⌘J 落盘的由 project-write.ts 的 quick_writes 按时间盖过它） */
 export async function touchedByAgents(pool: Pool, pageId: string, root: string): Promise<Map<string, { agent: string; at: number }>> {
   const { rows } = await pool.query<{ agent: string | null; path: string; at: number }>(SELECT_TOUCHED, [pageId, ...TOUCH_PATHS])
   const out = new Map<string, { agent: string; at: number }>()

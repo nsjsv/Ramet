@@ -14,12 +14,12 @@ import type { Pool } from 'pg'
 import type * as Y from 'yjs'
 import { parseBlocks } from '@ramet/shared/markdown-blocks'
 import { requireAuth, type AuthEnv } from '../auth.js'
-import { collectSubtreeIds, copyPageTree, resolveDocs } from '../clone.js'
 import { writeDocState } from '../collab.js'
 import { withTransaction } from '../db.js'
 import { storeFile, type StoredFile } from '../file-store.js'
 import { ASSET_TOKEN, assetKind, finishBlocks, LinkIndex, MD_RE, planPages, rewriteMarkdown, type ImportFile } from '../import-md.js'
 import { newPageDoc } from '../agents/markdown.js'
+import { instantiatePage } from '../page-create.js'
 import { readZip, safePath, ZipError } from '../zip-read.js'
 import { INSERT, pageRole, parentOk, roleInSpace, SELECT, SET_TITLE } from './pages.js'
 
@@ -144,14 +144,7 @@ export function importRoutes(
     if (role === 'viewer') return c.json({ error: 'forbidden' }, 403)
     const parentId = typeof body.parent_id === 'string' && body.parent_id ? body.parent_id : null
     if (!(await parentOk(pool, user, parentId, spaceId))) return c.json({ error: 'parent not found' }, 400)
-    const docs = await resolveDocs(pool, getLiveDoc, await collectSubtreeIds(pool, [sourceId]))
-    const base = Number((await pool.query<{ max: number }>(MAX_POSITION, [parentId, spaceId])).rows[0]?.max ?? -1) + 1
-    const newId = await withTransaction(pool, async (client) => {
-      const { newRootIds } = await copyPageTree(client, [sourceId], spaceId, user.id, docs)
-      const id = newRootIds[0]
-      if (id) await client.query('UPDATE pages SET parent_id = $1, position = $2 WHERE id = $3', [parentId, base, id])
-      return id
-    })
+    const newId = await instantiatePage(pool, getLiveDoc, user, sourceId, spaceId, parentId)
     if (!newId) return c.json({ error: 'page not found' }, 404)
     notify?.()
     return c.json({ id: newId }, 201)

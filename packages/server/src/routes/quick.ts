@@ -1,4 +1,4 @@
-// ---------- 随手 AI：设置 + 连接 + 单次调用（SSE）----------
+// ---------- ⌘J：设置 + 连接 + 单次调用（SSE）----------
 // GET    /api/me/ai-settings                 → {channel, activeConnectionId, localAgent, secretConfigured, connections:[{id,name,protocol,baseUrl,model,keyLast4}]}
 // PUT    /api/me/ai-settings {channel?, activeConnectionId?, localAgent?}   改通道 / 选当前连接（activeConnectionId:null = 不选）/ 选本地通道用的 agent
 //        （localAgent = 目录里的 catalog id c:<connectorId>:<agentId>，必须是你现在能用的；null = 不选；不能用 400）
@@ -7,6 +7,9 @@
 // DELETE /api/me/ai-connections/:id
 // POST   /api/me/ai-connections/test {id?, protocol?, baseUrl?, model?, apiKey?}
 //                                            → 200 {ok:true, reply} | {ok:false, code, message}；输入/地址不合法 400
+// POST   /api/me/ai-connections/models {id?, protocol?, baseUrl?, apiKey?}
+//                                            → 200 {ok:true, models:[{id,name}]} | {ok:false, code, message}；输入/地址不合法 400
+// GET    /api/me/model-spec?protocol&baseUrl&model → {catalog, match:{exact,context?,output?}|null, thinking:[{value,name}]}  模型在公开目录里的规格 + Genet 会给的思考档
 // POST   /api/quick {kind:'rewrite'|'draft'|'composer'|'code'|'command', instruction, text?, before?, after?, file?, shell?, cwd?, output?}
 //                                            → SSE: event delta {text} … done {stopReason} | error {code, message}
 //        开流前的失败走普通 JSON 状态码：400 参数 / 地址不安全；409 没配连接（no connection）、key 解不开（key unreadable）、
@@ -28,34 +31,44 @@ import {
   KeyUnreadableError,
   checkEndpoint,
   countConnections,
+  isUsableModelId,
   deleteConnection,
   getConnection,
   getSettings,
   activeConnection,
   insertConnection,
   listConnections,
+  normalizeBaseUrl,
   openConnection,
   parseDraft,
+  parseProtocol,
   saveSettings,
   toView,
   updateConnection,
   validateApiKey,
+  validateModel,
   type Channel,
   type DraftInput,
 } from '../ai-connections.js'
+import { thinkingLevels } from '../agents/drivers/assistant/options.js'
 import type { Resolver } from '../endpoint-guard.js'
+import { defaultModelCatalog, findModel, type ModelCatalog } from '../model-catalog.js'
+import { createModelCaller } from '../pi-models.js'
 import {
   LocalQuickError,
   QUICK_SYSTEM_PROMPT,
   buildUserMessage,
-  createModelCaller,
+  createModelLister,
   describeModelError,
   logSafeError,
   type ModelChunk,
   type ModelConnection,
+  type ModelListTarget,
+  type Protocol,
   type QuickInput,
   type QuickKind,
   type QuickModelCall,
+  type QuickModelList,
 } from '../quick.js'
 import { isSelectableLocalAgent, prepareLocalQuick, type LocalQuickHost } from '../quick-local.js'
 import { FailureLimiter } from '../rate-limit.js'
@@ -64,10 +77,14 @@ import { loadSecretKeyFromEnv } from '../secret-box.js'
 export type QuickDeps = {
   /** 模型调用（测试注入假的；缺省按协议走真实服务） */
   call?: QuickModelCall
+  /** 拉模型列表（测试注入假的；缺省按协议请求真实服务） */
+  listModels?: QuickModelList
   /** 主密钥：undefined = 读 RAMET_SECRET_KEY；null = 明确没配（测试用） */
   secretKey?: Buffer | null
   /** DNS 解析（测试注入）；缺省系统解析 */
   resolve?: Resolver
+  /** 公开模型目录（设置页显示模型规格）：undefined = 进程共用的那一份；null = 不用 */
+  catalog?: ModelCatalog | null
 }
 
 export const INSTRUCTION_MAX = 500
@@ -95,6 +112,8 @@ const LOCAL_NOTE = '这是一次单次文本任务：只输出结果正文，不
 // ---------- 参数解析 ----------
 
 type Body = Record<string, unknown>
+/** 测试连接 / 拉模型列表的入参：已保存的带 id，没保存的带 protocol + apiKey */
+type ProbeBody = { id?: unknown; protocol?: unknown; baseUrl?: unknown; apiKey?: unknown }
 
 function asBody(raw: unknown): Body {
   return typeof raw === 'object' && raw !== null && !Array.isArray(raw) ? (raw as Body) : {}
@@ -183,11 +202,13 @@ function localFailure(c: Context<AuthEnv>, err: unknown): Response {
 export function quickRoutes(pool: Pool, deps: QuickDeps = {}, local?: LocalQuickHost) {
   const secretKey = deps.secretKey === undefined ? loadSecretKeyFromEnv() : deps.secretKey
   const call = deps.call ?? createModelCaller({ resolve: deps.resolve })
+  const listModels = deps.listModels ?? createModelLister({ resolve: deps.resolve })
   const limiter = new FailureLimiter(RATE_MAX, RATE_WINDOW_MS)
   const app = new Hono<AuthEnv>()
   // 路径限定的认证：这个子应用挂在注册序靠后的位置，不用 '*'（会顺带拦住别的子应用）
   const auth = requireAuth(pool)
-  for (const path of ['/api/quick', '/api/me/ai-settings', '/api/me/ai-connections', '/api/me/ai-connections/*']) app.use(path, auth)
+  for (const path of ['/api/quick', '/api/me/ai-settings', '/api/me/ai-connections', '/api/me/ai-connections/*', '/api/me/model-spec']) app.use(path, auth)
+  const catalog = deps.catalog === undefined ? defaultModelCatalog() : deps.catalog
 
   /** 占一个调用名额；返回要等的毫秒数（0 = 放行）。滑动窗口：复用失败限速器的计数 */
   function takeSlot(userId: string): number {
@@ -198,6 +219,22 @@ export function quickRoutes(pool: Pool, deps: QuickDeps = {}, local?: LocalQuick
   }
 
   const bad = (message: string) => ({ error: 'bad request', message })
+  const rateLimited = (c: Context<AuthEnv>, wait: number) =>
+    c.json({ error: 'rate limited', message: '请求太频繁，稍后再试' }, 429, { 'retry-after': String(Math.ceil(wait / 1000)) })
+
+  /** 测试连接 / 拉模型列表要连哪：已保存的带 id（key 用库里的；表单里改过的地址、重填的 key 覆盖，不落库），
+   *  没保存的带 protocol + apiKey。id 不是自己的 → null；输入不合法抛 InputError，key 解不开抛 KeyUnreadableError */
+  async function formTarget(userId: string, body: ProbeBody): Promise<{ target: ModelListTarget; savedModel: string | null } | null> {
+    if (typeof body.id === 'string') {
+      const row = await getConnection(pool, userId, body.id)
+      if (!row) return null
+      const baseUrl = normalizeBaseUrl(body.baseUrl !== undefined ? body.baseUrl : row.base_url, row.protocol)
+      const apiKey = body.apiKey !== undefined ? validateApiKey(body.apiKey) : openConnection(row, secretKey).apiKey
+      return { target: { protocol: row.protocol, baseUrl, apiKey }, savedModel: row.model }
+    }
+    const protocol = parseProtocol(body.protocol)
+    return { target: { protocol, baseUrl: normalizeBaseUrl(body.baseUrl, protocol), apiKey: validateApiKey(body.apiKey) }, savedModel: null }
+  }
 
   async function settingsView(userId: string) {
     const [settings, rows] = await Promise.all([getSettings(pool, userId), listConnections(pool, userId)])
@@ -212,6 +249,27 @@ export function quickRoutes(pool: Pool, deps: QuickDeps = {}, local?: LocalQuick
 
   app.get('/api/me/ai-settings', async (c) => c.json(await settingsView(c.get('user').id)))
 
+  // 设置页模型框下面那一行：这个模型在公开模型目录里的上下文 / 输出上限，以及 Genet 会给的思考档位（与输入框旁的 chip 同一份判定）。
+  // 表单还没保存也能问，所以收的是协议 / 地址 / 模型名，不是连接 id
+  app.get('/api/me/model-spec', async (c) => {
+    let conn: { protocol: Protocol; baseUrl: string | null; model: string }
+    try {
+      const protocol = parseProtocol(c.req.query('protocol'))
+      conn = { protocol, baseUrl: normalizeBaseUrl(c.req.query('baseUrl') ?? '', protocol), model: validateModel(c.req.query('model')) }
+    } catch (err) {
+      if (err instanceof InputError) return c.json(bad(err.message), 400)
+      throw err
+    }
+    const index = catalog ? await catalog.get() : null
+    const match = index ? findModel(index, conn) : null
+    const spec = match?.spec
+    return c.json({
+      catalog: index !== null,
+      match: match ? { exact: match.exact, ...(spec?.context ? { context: spec.context } : {}), ...(spec?.output ? { output: spec.output } : {}) } : null,
+      thinking: thinkingLevels({ protocol: conn.protocol, base_url: conn.baseUrl, model: conn.model }, match),
+    })
+  })
+
   app.put('/api/me/ai-settings', async (c) => {
     const user = c.get('user')
     const body = asBody(await c.req.json().catch(() => null))
@@ -224,7 +282,7 @@ export function quickRoutes(pool: Pool, deps: QuickDeps = {}, local?: LocalQuick
       if (body.activeConnectionId === null) patch.activeConnectionId = null
       else if (typeof body.activeConnectionId === 'string' && (await getConnection(pool, user.id, body.activeConnectionId))) {
         patch.activeConnectionId = body.activeConnectionId
-      } else return c.json(bad('没有这套连接'), 400)
+      } else return c.json(bad('没有这个供应商'), 400)
     }
     if (body.localAgent !== undefined) {
       if (body.localAgent === null) patch.localAgent = null
@@ -245,7 +303,7 @@ export function quickRoutes(pool: Pool, deps: QuickDeps = {}, local?: LocalQuick
       const apiKey = validateApiKey(body.apiKey)
       await checkEndpoint(draft.baseUrl, deps.resolve)
       if (!secretKey) return c.json({ error: 'secret not configured', message: '服务器没有配置 RAMET_SECRET_KEY，暂时不能保存 API key' }, 503)
-      if ((await countConnections(pool, user.id)) >= CONNECTION_LIMIT) throw new InputError(`最多保存 ${CONNECTION_LIMIT} 套连接，先删掉不用的`)
+      if ((await countConnections(pool, user.id)) >= CONNECTION_LIMIT) throw new InputError(`最多保存 ${CONNECTION_LIMIT} 个供应商，先删掉不用的`)
       const row = await insertConnection(pool, user.id, draft, apiKey, secretKey)
       return c.json(toView(row), 201)
     } catch (err) {
@@ -287,20 +345,12 @@ export function quickRoutes(pool: Pool, deps: QuickDeps = {}, local?: LocalQuick
   // 也可以测已保存的（带 id，key 用库里的；表单里改过的字段覆盖）
   app.post('/api/me/ai-connections/test', async (c) => {
     const user = c.get('user')
-    const body = asBody(await c.req.json().catch(() => null)) as DraftInput & { id?: unknown; apiKey?: unknown }
+    const body = asBody(await c.req.json().catch(() => null)) as ProbeBody & { model?: unknown }
     let conn: ModelConnection
     try {
-      if (typeof body.id === 'string') {
-        const row = await getConnection(pool, user.id, body.id)
-        if (!row) return c.json({ error: 'connection not found' }, 404)
-        const draft = parseDraft({ ...body, name: undefined }, { name: row.name, protocol: row.protocol, baseUrl: row.base_url, model: row.model })
-        // 表单里重填了 key 就用新的（不碰库里的）；没填才解密已保存的
-        const apiKey = body.apiKey !== undefined ? validateApiKey(body.apiKey) : openConnection(row, secretKey).apiKey
-        conn = { protocol: draft.protocol, baseUrl: draft.baseUrl, model: draft.model, apiKey }
-      } else {
-        const draft = parseDraft({ ...body, name: body.name ?? 'test' })
-        conn = { protocol: draft.protocol, baseUrl: draft.baseUrl, model: draft.model, apiKey: validateApiKey(body.apiKey) }
-      }
+      const form = await formTarget(user.id, body)
+      if (!form) return c.json({ error: 'connection not found' }, 404)
+      conn = { ...form.target, model: validateModel(body.model !== undefined ? body.model : form.savedModel) }
       await checkEndpoint(conn.baseUrl, deps.resolve)
     } catch (err) {
       if (err instanceof InputError) return c.json(bad(err.message), 400)
@@ -308,7 +358,7 @@ export function quickRoutes(pool: Pool, deps: QuickDeps = {}, local?: LocalQuick
       throw err
     }
     const wait = takeSlot(user.id)
-    if (wait > 0) return c.json({ error: 'rate limited', message: '请求太频繁，稍后再试' }, 429, { 'retry-after': String(Math.ceil(wait / 1000)) })
+    if (wait > 0) return rateLimited(c, wait)
 
     const signal = AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(TEST_TIMEOUT_MS)])
     let reply = ''
@@ -319,8 +369,38 @@ export function quickRoutes(pool: Pool, deps: QuickDeps = {}, local?: LocalQuick
       }
       return c.json({ ok: true, reply: reply.trim() })
     } catch (err) {
-      const info = signal.aborted && !c.req.raw.signal.aborted ? { code: 'connection', message: '连接测试超时' } : describeModelError(err)
+      const info = signal.aborted && !c.req.raw.signal.aborted ? { code: 'connection', message: '连接测试超时' } : describeModelError(err, conn.apiKey)
       if (info.code === 'unknown') console.error('[quick] 连接测试失败:', logSafeError(err))
+      return c.json({ ok: false, code: info.code, message: info.message })
+    }
+  })
+
+  // 拉模型列表：模型不让手填，只能从这里拿到的列表里选。入参同测试连接（不要 model）；和调用共用限速
+  app.post('/api/me/ai-connections/models', async (c) => {
+    const user = c.get('user')
+    const body = asBody(await c.req.json().catch(() => null)) as ProbeBody
+    let target: ModelListTarget
+    try {
+      const form = await formTarget(user.id, body)
+      if (!form) return c.json({ error: 'connection not found' }, 404)
+      target = form.target
+      await checkEndpoint(target.baseUrl, deps.resolve)
+    } catch (err) {
+      if (err instanceof InputError) return c.json(bad(err.message), 400)
+      if (err instanceof KeyUnreadableError) return c.json({ error: 'key unreadable', message: err.message }, 409)
+      throw err
+    }
+    const wait = takeSlot(user.id)
+    if (wait > 0) return rateLimited(c, wait)
+
+    const signal = AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(TEST_TIMEOUT_MS)])
+    try {
+      const models = (await listModels(target, signal)).filter((m) => isUsableModelId(m.id))
+      if (models.length === 0) return c.json({ ok: false, code: 'empty', message: '这个服务没有返回可用的模型' })
+      return c.json({ ok: true, models })
+    } catch (err) {
+      const info = signal.aborted && !c.req.raw.signal.aborted ? { code: 'connection', message: '获取模型列表超时' } : describeModelError(err, target.apiKey)
+      if (info.code === 'unknown') console.error('[quick] 获取模型列表失败:', logSafeError(err))
       return c.json({ ok: false, code: info.code, message: info.message })
     }
   })
@@ -338,11 +418,13 @@ export function quickRoutes(pool: Pool, deps: QuickDeps = {}, local?: LocalQuick
 
     const settings = await getSettings(pool, user.id)
     let open: (signal: AbortSignal) => AsyncIterable<ModelChunk>
+    // 这次请求用的 key：错误文案里出现的要抹掉（describeModelError）；本地通道不用 key
+    let apiKey: string | null = null
     if (settings.channel === 'local') {
       // 本地通道：经 connector 在用户自己的机器上用 agent 跑一次（受限会话）。能不能用只看机器授权（assertCanUse），与 key 无关
       if (!local) return c.json({ error: 'local agent unavailable', message: '服务器没有启用本地通道' }, 409)
       const wait = takeSlot(user.id)
-      if (wait > 0) return c.json({ error: 'rate limited', message: '请求太频繁，稍后再试' }, 429, { 'retry-after': String(Math.ceil(wait / 1000)) })
+      if (wait > 0) return rateLimited(c, wait)
       try {
         open = await prepareLocalQuick(local, pool, user, settings.localAgent, `${QUICK_SYSTEM_PROMPT}\n\n${LOCAL_NOTE}\n\n${buildUserMessage(input)}`, input.kind)
       } catch (err) {
@@ -350,7 +432,7 @@ export function quickRoutes(pool: Pool, deps: QuickDeps = {}, local?: LocalQuick
       }
     } else {
       const row = await activeConnection(pool, user.id)
-      if (!row) return c.json({ error: 'no connection', message: '还没有配置模型连接，请先到设置 → 随手 AI 里添加' }, 409)
+      if (!row) return c.json({ error: 'no connection', message: '还没有添加模型供应商，请先到设置 → Genet 里添加' }, 409)
       let conn: ModelConnection
       try {
         conn = openConnection(row, secretKey)
@@ -359,7 +441,7 @@ export function quickRoutes(pool: Pool, deps: QuickDeps = {}, local?: LocalQuick
         throw err
       }
       const wait = takeSlot(user.id)
-      if (wait > 0) return c.json({ error: 'rate limited', message: '请求太频繁，稍后再试' }, 429, { 'retry-after': String(Math.ceil(wait / 1000)) })
+      if (wait > 0) return rateLimited(c, wait)
       // 每次请求再校验一遍地址（保存时通过不等于现在还安全：域名可能已经改解析）。连接阶段还有第二道（endpoint-guard 的 lookup）
       try {
         await checkEndpoint(conn.baseUrl, deps.resolve)
@@ -367,6 +449,7 @@ export function quickRoutes(pool: Pool, deps: QuickDeps = {}, local?: LocalQuick
         if (err instanceof InputError) return c.json({ error: 'unsafe endpoint', message: err.message }, 400)
         throw err
       }
+      apiKey = conn.apiKey
       const req = { ...conn, system: QUICK_SYSTEM_PROMPT, user: buildUserMessage(input) }
       open = (signal) => call(req, signal)
     }
@@ -406,7 +489,7 @@ export function quickRoutes(pool: Pool, deps: QuickDeps = {}, local?: LocalQuick
       } catch (err) {
         if (clientGone) return
         // 墙钟超时：signal 被 AbortSignal.timeout 中止，而不是客户端走了
-        const info = signal.aborted ? { code: 'timeout', message: '模型响应超时' } : describeModelError(err)
+        const info = signal.aborted ? { code: 'timeout', message: '模型响应超时' } : describeModelError(err, apiKey)
         if (info.code === 'unknown') console.error('[quick] 调用失败:', logSafeError(err))
         await send('error', info)
       } finally {

@@ -1,7 +1,7 @@
 // ---------- 页面级 agent 会话的落库（pages.agent_session）----------
 // sessions / configs / workspaces（以及页面级的 choice / tools）是 agent_session 这一列 jsonb 里平级的键。这里只有 SQL 与
 // 读写函数，只依赖 pool：不碰 manager 的内存状态、不广播。turn.ts / session-config.ts / manager.ts 共用。
-import type { Pool } from 'pg'
+import type { Pool, PoolClient } from 'pg'
 import { toolOf } from '@ramet/shared/reply-stats'
 import type { ResolvedAgent, SavedSession } from './manager-types.js'
 import { toolProfileOf, type ToolProfile } from './tool-profile.js'
@@ -46,7 +46,8 @@ export async function loadChoice(pool: Pool, pageId: string): Promise<string> {
   return rows[0]?.choice ?? ''
 }
 
-export async function saveChoice(pool: Pool, pageId: string, agentId: string): Promise<void> {
+/** db 可以是事务里的连接（建 Genet 页时与建页同一个事务） */
+export async function saveChoice(pool: Pool | PoolClient, pageId: string, agentId: string): Promise<void> {
   await pool.query(SET_CHOICE, [pageId, agentId])
 }
 
@@ -76,12 +77,14 @@ async function loadWorkspace(pool: Pool, pageId: string, agentId: string): Promi
 }
 
 /** 生效工作区（唯一解析入口）：用户指定，其次执行端默认（connector 上报的本机目录 / 中心进程 cwd）。
- *  只看 agent 的 id 与执行端默认目录，所以项目面板（没有 ResolvedAgent，只有 machine 凭据）也走这里 */
+ *  只看 agent 的 id 与执行端默认目录，所以项目面板（没有 ResolvedAgent，只有 machine 凭据）也走这里。
+ *  Genet 不在任何机器上跑，没有工作区：恒为空（会话复用比较 cwd，空串在每一轮都一样） */
 export async function effectiveCwd(
   pool: Pool,
   pageId: string,
-  agent: Pick<ResolvedAgent, 'id'> & { remote?: { defaultCwd: string } },
+  agent: Pick<ResolvedAgent, 'id' | 'assistant'> & { remote?: { defaultCwd: string } },
 ): Promise<string> {
+  if (agent.assistant) return ''
   const override = await loadWorkspace(pool, pageId, agent.id)
   return override ?? agent.remote?.defaultCwd ?? process.cwd()
 }

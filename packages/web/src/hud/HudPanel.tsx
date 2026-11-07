@@ -93,7 +93,7 @@ export function HudPanel({
   }
   const stop = (): void => {
     void api.stopPage(pageId).catch((err: unknown) => {
-      setAgentRunError(err instanceof Error ? `${COPY.run.stopFailed}：${err.message}` : COPY.run.stopFailed)
+      setAgentRunError(pageId, err instanceof Error ? `${COPY.run.stopFailed}：${err.message}` : COPY.run.stopFailed)
     })
   }
 

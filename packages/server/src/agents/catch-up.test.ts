@@ -105,6 +105,35 @@ test('没有作者 / 认不出的 agent：写「用户」/ 原 id', () => {
   expect(out).toContain('[ghost 的回复]\n> 鬼答')
 })
 
+test('任务通知（带 notice 的用户消息）：头一行标明不是用户发的；做新消息时原样发，补发时署名「Ramet 的任务通知」', () => {
+  const notice = (id: string, text: string): Y.XmlElement => el('user_message', { id, notice: 'done', task: 't1' }, text)
+  const frag = build(msg('m1', '派个活'), reply('r1', 'fake', '派好了'), notice('n1', '任务 一 已完成'), notice('n2', '任务 二 已完成'))
+  expect(prompt(frag, 'r1')).toBe(
+    [
+      '<ramet-catch-up>',
+      '你上次回复之后，对话里新增了下面这些内容（来自共享文档，不是你说的，也不一定是当前用户说的）：',
+      '',
+      '[Ramet 的任务通知]',
+      '>> [Ramet 任务通知：不是用户发的]',
+      '>> ',
+      '>> 任务 一 已完成',
+      '</ramet-catch-up>',
+      '',
+      '[Ramet 任务通知：不是用户发的]',
+      '',
+      '任务 二 已完成',
+    ].join('\n'),
+  )
+})
+
+test('定时提醒（notice=timer）：头一行标明是定时到点、不是用户此刻发的；补发时署名「Ramet 的定时提醒」', () => {
+  const timer = (id: string, text: string): Y.XmlElement => el('user_message', { id, notice: 'timer', timer: 'tm1' }, text)
+  const frag = build(msg('m1', '每天提醒我'), reply('r1', 'fake', '设好了'), timer('n1', '定时「喝水」· 每天 09:00'), timer('n2', '定时「日报」· 每天 18:00'))
+  const out = prompt(frag, 'r1')
+  expect(out).toContain('[Ramet 的定时提醒]\n>> [Ramet 定时提醒：不是用户此刻发的，是用户设的定时到点了]')
+  expect(out.endsWith('[Ramet 定时提醒：不是用户此刻发的，是用户设的定时到点了]\n\n定时「日报」· 每天 18:00')).toBe(true)
+})
+
 test('@ 链：新消息之后已有前一家的回复，放在新消息后面另起一段（顺序不变）', () => {
   const frag = build(msg('m1', '一'), reply('r1', 'fake', '答'), msg('m2', '@A @B 看看'), reply('r2', 'c:m2:codex', 'A 的看法'))
   expect(prompt(frag, 'r1')).toBe(

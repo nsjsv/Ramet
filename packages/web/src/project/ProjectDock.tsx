@@ -10,7 +10,7 @@ const ProjectPanel = lazy(loadPanel)
 export const preloadProjectPanel = (): void => void loadPanel().catch(() => {})
 
 /* ---------- 项目面板：挂在 App 外壳右侧的可开合面板（⌘E）----------
- * 浏览 agent 所在机器上的工作区：本轮、文件、改动、终端、预览。文件 / 改动只读（唯一的写是查看器里选中几行 ⌘J 随手 AI 改写，
+ * 浏览 agent 所在机器上的工作区：本轮、文件、改动、终端、预览。文件 / 改动只读（唯一的写是查看器里选中几行 ⌘J ⌘J 改写，
  * 要页面可写）；机器在用户自己那里，中心只转发。
  * 出现条件：当前页面选中的 agent 是 connector 上的 agent，且我对这台机器有 machine 授权（接入人或被授权）。
  * 依据是 /api/agents 目录里服务端算好的标记，不为试探去请求项目接口。面板没开 / 没有可用的机器时什么都不渲染、不请求。

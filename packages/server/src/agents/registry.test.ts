@@ -139,3 +139,12 @@ test('显式配置：每项必须写四家之一的 driver；没写 / 写 acp / 
   writeFileSync(join(cwd, 'agents.json'), JSON.stringify([{ id: 'fromfile', command: 'echo' }]))
   expect(() => loadAgents(cwd)).toThrow(/agents\.json.*driver 必须是/)
 })
+
+test('显式配置：ramet: 开头的 id 留给中心自己的 agent（Genet ramet:assistant），配置里用了当场报错', () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'ramet-cwd-'))
+  process.env.RAMET_AGENTS = JSON.stringify([{ id: 'ramet:assistant', command: 'claude', driver: 'claude' }])
+  expect(() => loadAgents(cwd)).toThrow(/ramet: 开头的 id 留给 Ramet 自己/)
+  process.env.RAMET_AGENTS = JSON.stringify([{ id: 'my-ramet:claude', command: 'claude', driver: 'claude' }])
+  expect(loadAgents(cwd).agents.map((a) => a.id)).toEqual(['my-ramet:claude'])
+  delete process.env.RAMET_AGENTS
+})

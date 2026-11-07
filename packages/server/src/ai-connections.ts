@@ -1,13 +1,14 @@
-// ---------- 随手 AI：用户的模型连接（校验 + 存取）----------
+// ---------- ⌘J：用户的模型连接（校验 + 存取）----------
 // 一个用户可存多套连接，选一套当当前连接。表结构见 db.ts 的 user_ai_connections / user_ai_settings。
 // 这里管两件事：输入怎么校验与规范化（含 SSRF 校验入口），以及落库 / 读库。HTTP 外壳在 routes/quick.ts。
 // key：AES-256-GCM 加密存（secret-box.ts），响应里只给后四位。
 
 import { randomUUID } from 'node:crypto'
+import { EventEmitter } from 'node:events'
 import type { Pool } from 'pg'
 import { assertSafeUrlShape, UnsafeEndpointError, validateEndpoint, type Resolver } from './endpoint-guard.js'
 import { decryptSecret, encryptSecret } from './secret-box.js'
-import { KNOWN_ANTHROPIC_MODELS, OFFICIAL_ANTHROPIC_URL, type ModelConnection, type Protocol } from './quick.js'
+import { OFFICIAL_ANTHROPIC_URL, type ModelConnection, type Protocol } from './quick.js'
 
 export const CONNECTION_LIMIT = 10
 export const NAME_MAX = 40
@@ -81,21 +82,23 @@ export function normalizeBaseUrl(raw: unknown, protocol: Protocol): string | nul
   return protocol === 'anthropic' && out === OFFICIAL_ANTHROPIC_URL ? null : out
 }
 
-/** 模型名：anthropic + 官方地址只允许三个已知模型；其它自由填（必填、≤100 字、不含控制字符） */
-export function validateModel(raw: unknown, protocol: Protocol, baseUrl: string | null): string {
-  if (typeof raw !== 'string') throw new InputError('模型名必填')
+/** 模型名：从服务商的模型列表里选的 id（前端不给手填）。必填、≤100 字、不含控制字符 */
+export function validateModel(raw: unknown): string {
+  if (typeof raw !== 'string' || !raw.trim()) throw new InputError('请选择模型')
   const model = raw.trim()
-  if (!model) throw new InputError('模型名必填')
-  if (protocol === 'anthropic' && !baseUrl) {
-    if (!(KNOWN_ANTHROPIC_MODELS as readonly string[]).includes(model)) {
-      throw new InputError(`官方地址只支持这几个模型：${KNOWN_ANTHROPIC_MODELS.join('、')}`)
-    }
-    return model
-  }
   if (model.length > MODEL_MAX) throw new InputError(`模型名太长（最多 ${MODEL_MAX} 字）`)
   // eslint-disable-next-line no-control-regex
   if (/[\u0000-\u001f\u007f]/.test(model)) throw new InputError('模型名里不能有控制字符')
   return model
+}
+
+/** 模型列表里的这一项存不存得下（同 validateModel 的规则）：存不下的不给选，免得选了保存不了 */
+export function isUsableModelId(id: string): boolean {
+  try {
+    return validateModel(id) === id
+  } catch {
+    return false
+  }
 }
 
 export function validateName(raw: unknown): string {
@@ -124,7 +127,7 @@ export function parseDraft(input: DraftInput, base?: Draft): Draft {
     name: validateName(input.name !== undefined ? input.name : base?.name),
     protocol,
     baseUrl,
-    model: validateModel(input.model !== undefined ? input.model : base?.model, protocol, baseUrl),
+    model: validateModel(input.model !== undefined ? input.model : base?.model),
   }
 }
 
@@ -139,6 +142,16 @@ export async function checkEndpoint(baseUrl: string | null, resolve?: Resolver):
 }
 
 // ---------- 读写 ----------
+
+// 某个用户的连接表变了（增 / 改 / 删）：Genet 据此刷新输入框旁的供应商列表，不用等到下一轮
+const changes = new EventEmitter().setMaxListeners(0)
+
+export function onConnectionsChanged(listener: (userId: string) => void): () => void {
+  changes.on('changed', listener)
+  return () => {
+    changes.off('changed', listener)
+  }
+}
 
 const COLUMNS = 'id, user_id, name, protocol, base_url, model, key_ciphertext, key_last4'
 
@@ -205,6 +218,7 @@ export async function insertConnection(
            updated_at = now()`,
     [userId, id],
   )
+  changes.emit('changed', userId)
   return rows[0] as ConnectionRow
 }
 
@@ -231,6 +245,7 @@ export async function updateConnection(
       newKey ? newKey.apiKey.slice(-4) : null,
     ],
   )
+  if (rows[0]) changes.emit('changed', userId)
   return rows[0] ?? null
 }
 
@@ -244,6 +259,7 @@ export async function deleteConnection(pool: Pool, userId: string, id: string): 
       WHERE user_id = $1 AND active_connection_id IS NULL`,
     [userId],
   )
+  changes.emit('changed', userId)
   return true
 }
 

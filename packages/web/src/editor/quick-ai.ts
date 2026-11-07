@@ -1,10 +1,10 @@
-/* ---------- 随手 AI（⌘J）：正文里的改写 / 起草 ----------
+/* ---------- ⌘J：正文里的改写 / 起草 ----------
  * 单次调用：不开 agent 会话、不进对话、不出岛、不进工作台。选中一段 ⌘J 是改写，没选中是在光标处起草；
  * 光标在文档里正在写的 `>>` 草稿中，则把整条草稿写清楚（quick-draft.ts，固定指令）。
  * 结果以修订画在文档里：原文划掉（.quick-del）、新文字标绿（.quick-ins），全是 ProseMirror 装饰，
  * 不改文档；↵ 收下是一个事务替换（进 Yjs 与历史，⌘Z 回原样，落点规则见 quick-apply.ts），Esc 不要。
  * 生成中 Esc 取消请求（浮层的 onClose 统一负责：中止流、清装饰）。
- * 小浮层是 quick-popover.ts（纯 DOM、挂 body）；通道 / 模型 / key 在设置 → 随手 AI，请求走 quick-api.ts 的 SSE。
+ * 小浮层是 quick-popover.ts（纯 DOM、挂 body）；通道 / 模型 / key 在设置 → Genet，请求走 quick-api.ts 的 SSE。
  * 键位：Mod-J。⌘I 仍是斜体；浏览器自带的 Ctrl+J（下载）在编辑器里被接管。
  * 只挂编辑器（editor-session.ts，viewer 不挂）；PublicPage 不挂。装饰不是节点，两个宿主的 schema 清单无需改动。 */
 
@@ -138,7 +138,7 @@ const CARET_PRESETS = PRESETS.filter((p) => p.id === 'continue')
 
 const controllers = new WeakMap<EditorView, QuickController>()
 
-/** 选区菜单里的「✨ ⌘J」按钮 / 快捷键共用的入口；这个视图没挂随手 AI（只读等）返回 false */
+/** 选区菜单里的「✨ ⌘J」按钮 / 快捷键共用的入口；这个视图没挂 ⌘J（只读等）返回 false */
 export function openQuickAi(view: EditorView): boolean {
   return controllers.get(view)?.open() ?? false
 }
@@ -360,7 +360,7 @@ function quickDecorations(state: EditorState, owner: QuickController | null): De
   return DecorationSet.create(state.doc, decos)
 }
 
-/** 随手 AI 插件。enabled = 有写权（viewer 不挂） */
+/** ⌘J 插件。enabled = 有写权（viewer 不挂） */
 export function quickAi(opts: { enabled: boolean }) {
   return $prose((ctx) => {
     // 装饰函数拿不到视图：控制器在 view() 里建好后记在这个闭包里（每个编辑器实例一份；collab 重建插件视图时被新的覆盖）

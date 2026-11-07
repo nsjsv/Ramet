@@ -106,7 +106,7 @@ export function createRunStrip(opts: {
     stop.addEventListener('click', (event) => {
       event.stopPropagation()
       void api.stopPage(opts.pageId).catch((err: unknown) => {
-        setAgentRunError(err instanceof Error ? `${COPY.run.stopFailed}：${err.message}` : COPY.run.stopFailed)
+        setAgentRunError(opts.pageId, err instanceof Error ? `${COPY.run.stopFailed}：${err.message}` : COPY.run.stopFailed)
       })
     })
     pill.append(stop, buildRetryButton(opts.pageId, opts.replyId, opts.resume)) // 重试只在 is-failed 时显示（CSS）
@@ -118,7 +118,7 @@ export function createRunStrip(opts: {
       ? {
           onKillCommand: (terminalId) => {
             void api.stopCommand(opts.pageId, terminalId).catch((err: unknown) => {
-              setAgentRunError(err instanceof Error ? `${COPY.run.stopCommandFailed}：${err.message}` : COPY.run.stopCommandFailed)
+              setAgentRunError(opts.pageId, err instanceof Error ? `${COPY.run.stopCommandFailed}：${err.message}` : COPY.run.stopCommandFailed)
             })
           },
         }

@@ -28,6 +28,8 @@ test('按类型选编辑器', () => {
     relation: 'popover',
     rollup: 'none',
     formula: 'none',
+    button: 'none',
+    ai: 'inline',
   }
   for (const type of PROP_TYPES) expect([type, editorKind(prop(type))]).toEqual([type, expected[type]])
   expect(editorKind(TITLE_PROP)).toBe('inline')

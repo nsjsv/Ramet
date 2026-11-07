@@ -2,24 +2,31 @@
  * 只出图标，名字与当前状态（条数、按哪个属性分组）放悬停提示里；生效中的按钮转强调色，不看提示也知道开着。
  * 标签多时工具栏不跟视图标签抢宽度。viewer 全部禁用（服务端那条连接本就只读，入口在这里关掉）。
  * 不分组的布局（画廊、日历、时间线，见 layoutGroups）分组按钮禁用，悬停说明原因：写了 groupBy 解析时也会被忽略。
- * 日历 / 时间线的条目只画标题，不出「属性」（选了显示哪些属性也看不到）。 */
+ * 日历 / 时间线的条目只画标题，不出「属性」（选了显示哪些属性也看不到）。
+ * 闪电按钮：这个合集上的自动化（ai/CollectionAutomations.tsx，按需加载）；viewer 不出。 */
+import { lazy, Suspense, useState } from 'react'
 import type * as Y from 'yjs'
 import { findProp, layoutGroups, type CollectionSchema, type CollectionView } from '@ramet/shared/collection-model'
 import { COPY } from '../../copy'
 import { Icon, type IconName } from '../../icons'
 import { usesDate } from '../layouts'
 import { Popover, usePopover } from '../../ui/popover'
+import { useCollectionPages } from '../collection-store'
 import { FilterMenu } from './FilterMenu'
 import { GroupMenu, PropsMenu, SortMenu } from './menus'
 
 const C = COPY.collection.bar
+const CollectionAutomations = lazy(() => import('../../ai/CollectionAutomations'))
 
-type Props = { doc: Y.Doc; schema: CollectionSchema; view: CollectionView; readOnly: boolean; spaceId: string | null }
+type Props = { cid: string; doc: Y.Doc; schema: CollectionSchema; view: CollectionView; readOnly: boolean; spaceId: string | null }
 
 type Which = 'filter' | 'sort' | 'group' | 'props'
 
-export default function Toolbar({ doc, schema, view, readOnly, spaceId }: Props) {
+export default function Toolbar({ cid, doc, schema, view, readOnly, spaceId }: Props) {
   const [anchor, open, close] = usePopover()
+  const [autos, setAutos] = useState(false)
+  const pages = useCollectionPages()
+  const title = pages?.find((p) => p.id === cid)?.title ?? ''
   const which = anchor?.dataset.menu as Which | undefined
   const groupName = view.groupBy ? findProp(schema, view.groupBy)?.name : undefined
   const groupOff = !layoutGroups(view.layout)
@@ -46,6 +53,22 @@ export default function Toolbar({ doc, schema, view, readOnly, spaceId }: Props)
       {button('sort', 'sort', C.count(C.sort, view.sorts.length), view.sorts.length > 0)}
       {button('group', 'group', groupName ? `${C.group}：${groupName}` : C.group, view.groupBy !== null)}
       {!usesDate(view.layout) && button('props', 'eye', C.props, false)}
+      {!readOnly && (
+        <button
+          type="button"
+          className="cl-bar-btn is-icon"
+          data-tip={COPY.ai.automations.here.button}
+          aria-label={COPY.ai.automations.here.button}
+          onClick={() => setAutos(true)}
+        >
+          <Icon name="bolt" size={16} />
+        </button>
+      )}
+      {autos && (
+        <Suspense fallback={null}>
+          <CollectionAutomations cid={cid} title={title} onClose={() => setAutos(false)} />
+        </Suspense>
+      )}
       {anchor && which && !readOnly && (
         <Popover anchor={anchor} onClose={close} className="cl-bar-pop">
           {which === 'filter' && <FilterMenu doc={doc} schema={schema} view={view} spaceId={spaceId} />}

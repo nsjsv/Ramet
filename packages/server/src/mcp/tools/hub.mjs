@@ -1,7 +1,8 @@
 // ---------- 知识中枢：搜索 / 新建 / 移动 / 改名 / 移入回收站 ----------
 // 以发起这一轮的用户的身份与权限执行（凭证绑着发起人）：搜索只返回他看得见的页面，新建 / 移动 / 改名要他有写权。
-// 新建、移动、改名不用批；移入回收站要用户批准（审批弹在当前页的审批条里，没有超时，拒绝则不执行）。
-import { call, failure, reply } from '../lib.mjs'
+// 新建、移动、改名不用批（Genet 读到外来事件之后、用户亲自说话之前例外，中心先弹审批）；移入回收站要用户批准
+// （审批弹在当前页的审批条里，没有超时，拒绝则不执行）。
+import { broken, call, declined, failure, reply } from '../lib.mjs'
 
 const pageRef = (id, title) => `page:${id}「${title || '无标题'}」`
 
@@ -50,7 +51,8 @@ export const tools = [
         method: 'POST',
         body: { title: String(args.title ?? ''), text: typeof args.text === 'string' ? args.text : undefined, parentId: args.parentId },
       })
-      if (!r.ok) return failure('新建页面失败', r)
+      if (declined(r)) return declined(r)
+      if (broken(r)) return failure('新建页面失败', r)
       return reply(`已新建 ${pageRef(r.json.id, r.json.title)}${r.json.parentId ? `，在 page:${r.json.parentId} 下` : '，在空间顶层'}。`)
     },
   },
@@ -71,7 +73,8 @@ export const tools = [
     run: async (args) => {
       const id = String(args.pageId ?? '')
       const r = await call(`/api/ramet/pages/${encodeURIComponent(id)}/move`, { method: 'POST', body: { parentId: args.parentId ?? null } })
-      if (!r.ok) return failure('移动页面失败', r)
+      if (declined(r)) return declined(r)
+      if (broken(r)) return failure('移动页面失败', r)
       return reply(`已把 ${pageRef(id, r.json.title)} 移到${r.json.parentId ? ` page:${r.json.parentId} 之下` : '空间顶层'}。`)
     },
   },
@@ -92,7 +95,8 @@ export const tools = [
     run: async (args) => {
       const id = String(args.pageId ?? '')
       const r = await call(`/api/ramet/pages/${encodeURIComponent(id)}/rename`, { method: 'POST', body: { title: String(args.title ?? '') } })
-      if (!r.ok) return failure('改名失败', r)
+      if (declined(r)) return declined(r)
+      if (broken(r)) return failure('改名失败', r)
       return reply(`已改名：${pageRef(id, r.json.title)}。`)
     },
   },

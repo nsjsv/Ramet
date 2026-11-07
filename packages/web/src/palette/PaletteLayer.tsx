@@ -6,12 +6,13 @@ import { api } from '../api'
 import { agentsForPage, useAgents } from '../default-agent'
 import { Icon } from '../icons'
 import { agentName } from '../editor/agent-badge'
-import { agentCommandsFor, pageAgent, setAgentRunError, setPageChoice, useAgentEvents } from '../editor/agent-bar'
+import { agentCommandsFor, catalogForPage, pageAgent, setAgentRunError, setPageChoice, useAgentEvents } from '../editor/agent-bar'
 import { nowOf } from '../editor/run-strip'
 import { isMentionablePage } from '../editor/mention-query'
 import { closeHud, openHud, useHud } from '../hud/hud-store'
 import { requestQuickOpen, toggleProject, useProjectShell, useProjectTarget } from '../project/project-state'
 import { openSettings } from '../settings-bus'
+import { toast } from '../ui/toast'
 import { readViewMode, requestViewToggle } from '../view-mode'
 import { closePalette, paletteDraft, type PaletteProps as Props } from './CommandPalette'
 import { filterPalette, paletteItems, PALETTE_COPY as C, type PaletteHit } from './palette-model'
@@ -48,6 +49,12 @@ export default function PaletteLayer({ pages, spaceId, canWritePage, onCreated }
       closePalette()
       fn()
     }
+    // 失败原因进当前页的运行错误条；不在页面上（没有错误条）时弹提示，不然这条原因没人看得见
+    const fail = (err: unknown): void => {
+      const message = err instanceof Error ? err.message : String(err)
+      if (pageId) setAgentRunError(pageId, message)
+      else toast(message, { kind: 'error' })
+    }
     const items = paletteItems(
       {
         pageId,
@@ -57,7 +64,7 @@ export default function PaletteLayer({ pages, spaceId, canWritePage, onCreated }
         project: { available: target !== null, open: shell.open },
         chatMode: pageId ? readViewMode(pageId) : null,
         // 切换 agent 只列这一页能用的（锁定了工具就只剩它在各台机器上的）
-        agents: agentsForPage(agents, agent.lock).map((a) => ({ id: a.id, label: a.label })),
+        agents: (pageId ? catalogForPage(agents, pageId, agent) : agentsForPage(agents, agent.lock)).map((a) => ({ id: a.id, label: a.label })),
         currentAgent: current,
         canCompact: pageId ? agentCommandsFor(pageId, current).some((c) => c.name === 'compact') : false,
         pages: pages.filter((p) => isMentionablePage(p) && p.space_id === spaceId && p.in_page_tree !== false).map((p) => ({ id: p.id, title: p.title })),
@@ -67,19 +74,19 @@ export default function PaletteLayer({ pages, spaceId, canWritePage, onCreated }
       {
         openHud: close(() => openHud('overview')),
         closeHud: close(closeHud),
-        stop: close(() => pageId && void api.stopPage(pageId).catch((err: unknown) => setAgentRunError(err instanceof Error ? err.message : String(err)))),
+        stop: close(() => pageId && void api.stopPage(pageId).catch(fail)),
         toggleProject: close(toggleProject),
         quickOpen: close(requestQuickOpen),
         toggleView: close(requestViewToggle),
         switchAgent: (id) => close(() => pageId && setPageChoice(pageId, id))(),
         // 压缩 = 发一条 /compact：走排队接口（页面空着服务端直接发，在跑就排着），不需要编辑器视图
-        compact: close(() => pageId && void api.enqueue(pageId, { agent: current, kind: 'message', text: '/compact' }).catch((err: unknown) => setAgentRunError(err instanceof Error ? err.message : String(err)))),
+        compact: close(() => pageId && void api.enqueue(pageId, { agent: current, kind: 'message', text: '/compact' }).catch(fail)),
         newPage: close(() => {
           if (!spaceId) return
           void api.createPage(null, spaceId).then((p) => {
             onCreated()
             navigate(`/page/${p.id}`)
-          }, (err: unknown) => setAgentRunError(err instanceof Error ? err.message : String(err)))
+          }, fail)
         }),
         go: (path) => close(() => navigate(path))(),
         settings: (tab) => close(() => openSettings(tab, spaceId ?? undefined))(),

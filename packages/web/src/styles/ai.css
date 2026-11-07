@@ -1,0 +1,332 @@
+/* ---------- AI 页（/ai，ai/AiHub.tsx）：分页栏 + Genet 对话 / 任务列表 / 定时 ----------
+ * Skill 与记忆分页沿用 skills.css / memory.css，这里只收掉它们的顶部留白（分页栏已经占了顶部）。
+ * 内容列与 Skill 库 / 记忆同宽（760px，两侧 32px）。 */
+
+/* Genet 分页：.main 不滚，对话自己的滚动口占满分页栏以下的高度，输入卡钉在它底部。
+ * 只有这个分页做 flex 列：别的分页的内容列靠 margin: 0 auto 居中，放进 flex 列会缩成内容宽 */
+.ai-hub.is-chat {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+/* 分页栏就是这一页的标题：sticky 钉在 .main 顶部（同页面顶栏），任务 / Skill / 记忆的长列表从它下面滚过 */
+.ai-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  flex: none;
+  background: var(--bg);
+}
+
+.ai-tabs-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 760px;
+  height: 56px;
+  margin: 0 auto;
+  padding: 0 22px; /* 加上分页自己的 10px 内边距，字与下面内容的左缘对齐 */
+}
+
+.ai-tab {
+  padding: 5px 10px;
+  border-radius: var(--r-sm);
+  color: var(--ink-3);
+  font-size: var(--t-md);
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background var(--d-1), color var(--d-1);
+}
+
+.ai-tab:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.ai-tab.active {
+  background: var(--press);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.ai-hub .skill-page,
+.ai-hub .memory-page {
+  padding-top: 12px;
+}
+
+/* ---------- Genet 分页 ---------- */
+
+.ai-chat {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+/* 滚动口铺满整宽（滚动条贴画面右缘，同对话页），内容收进 760px 列 */
+.ai-chat .assistant-scroll {
+  padding: 0 max(32px, calc((100% - 696px) / 2));
+}
+
+.ai-chat .chat-dock {
+  padding-bottom: max(24px, env(safe-area-inset-bottom));
+}
+
+/* ---------- 任务分页 ---------- */
+
+.ai-tasks {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 12px 32px 96px;
+}
+
+.ai-sub {
+  margin: 0 0 16px;
+  color: var(--ink-3);
+  font-size: var(--t-sm);
+}
+
+.ai-empty {
+  margin: 0;
+  padding: 32px 0;
+  color: var(--ink-3);
+  font-size: var(--t-sm);
+  text-align: center;
+}
+
+.ai-task-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ai-task-list > li {
+  border-bottom: 1px solid var(--line);
+}
+
+.ai-task {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 8px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--d-1);
+}
+
+.ai-task:hover {
+  background: var(--hover);
+}
+
+.ai-task-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--t-md);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-task .task-mark {
+  flex: none;
+  margin-left: 0;
+  vertical-align: baseline;
+}
+
+.ai-task-time {
+  flex: none;
+  min-width: 56px; /* 「刚刚」「3分钟前」宽度不一，右对齐后状态标排成一列 */
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+  text-align: right;
+}
+
+/* ---------- 「自动」分页（ai/AutomationList.tsx）的行：外框沿用任务分页的 .ai-tasks，规则多出来的部分在 automation.css ---------- */
+
+.ai-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
+  border-radius: var(--r-sm);
+  background: var(--danger-tint);
+  color: var(--danger);
+  font-size: var(--t-sm);
+}
+
+.ai-error-close {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.ai-empty-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 32px 0;
+  color: var(--ink-3);
+  font-size: var(--t-sm);
+  text-align: center;
+}
+
+.ai-empty-card b {
+  color: var(--ink-2);
+  font-size: var(--t-md);
+}
+
+.ai-timer-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ai-timer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.ai-timer-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.ai-timer-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+
+.ai-timer-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--t-md);
+  font-weight: 600;
+}
+
+.ai-timer-when {
+  color: var(--ink-2);
+  font-size: var(--t-sm);
+}
+
+.ai-timer-state {
+  color: var(--ink-2);
+  font-size: var(--t-sm);
+}
+
+.ai-timer-state.is-warn {
+  color: var(--warn);
+}
+
+/* 指令原文：最多两行，全文在 Genet 的对话里 */
+.ai-timer-text {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  color: var(--ink-2);
+  font-size: var(--t-sm);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ai-timer-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 6px;
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+}
+
+.ai-timer-last[data-status='failed'] {
+  color: var(--danger);
+}
+
+.ai-timer-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ai-timer-link:hover {
+  text-decoration: underline;
+}
+
+.ai-timer.is-off .ai-timer-name,
+.ai-timer.is-off .ai-timer-when {
+  color: var(--ink-3);
+}
+
+.ai-timer-del {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+
+.ai-timer-del:hover {
+  background: var(--hover);
+  color: var(--danger);
+}
+
+.ai-timer-del:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* 窄屏：分页栏让出刘海安全区；折叠态左上角有浮动展开按钮，分页让开（同页面顶栏） */
+@media (max-width: 768px) {
+  .ai-tabs-row {
+    height: calc(48px + env(safe-area-inset-top));
+    padding: env(safe-area-inset-top) 6px 0;
+  }
+
+  .app.sidebar-collapsed .ai-tabs-row {
+    padding-left: 44px;
+  }
+
+  .ai-chat .assistant-scroll {
+    padding: 0 16px;
+  }
+
+  .ai-tasks {
+    padding: 8px 16px 96px;
+  }
+}

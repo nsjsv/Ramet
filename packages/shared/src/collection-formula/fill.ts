@@ -60,6 +60,7 @@ function makeReader(ctx: QueryCtx, tz: number): Reader {
     if (prop.id === TITLE_PROP_ID) return typeof row.title === 'string' && row.title !== '' ? row.title : null
     const value = rowValue(row, prop)
     switch (prop.type) {
+      case 'ai':
       case 'text':
       case 'url':
       case 'email':
@@ -95,6 +96,9 @@ function makeReader(ctx: QueryCtx, tz: number): Reader {
         return rollupValue(prop, value, ctx, tz, nameOf, optionName)
       case 'formula':
         // 公式引用公式由 formulaFiller 按求值顺序从本行刚算出的结果里取，不走这里
+        return null
+      // 按钮没有值
+      case 'button':
         return null
     }
   }

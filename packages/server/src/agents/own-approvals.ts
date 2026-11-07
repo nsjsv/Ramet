@@ -4,6 +4,8 @@
 // （前端的审批卡不区分来源），答案走同一个 POST /permission（manager.answerPermission 先问这里）。
 // 无超时，只在有人答 / 页面上的运行被停止 / 调用方断开（signal）时结束，结束时广播 permission_resolved。
 // SSE 新订阅者由 replay 补发待批，刷新页面不丢。
+// only：批的是某个人自己的事（规则替主人开跑、外来事件之后 Genet 动手）时只认他答：别人答当作没有这条（answer 返回 false，
+// 路由按「不是 Ramet 自己的审批」往下找，答不到），收件箱也只给他（inbox.ts）；事件里带着 only，前端别人的页面上不画这张卡。
 
 import { randomUUID } from 'node:crypto'
 import type { AgentEvent, PermissionEvent } from './types.js'
@@ -11,7 +13,8 @@ import type { AgentEvent, PermissionEvent } from './types.js'
 /** 一条审批的结局：allowed = 点了「允许」类选项；by = 点的人（被停止 / 调用方断开 = null） */
 export type OwnDecision = { allowed: boolean; by: string | null }
 
-type Pending = { pageId: string; agentId: string; event: PermissionEvent; settle: (allowed: boolean, by: string | null) => void }
+/** detached = 不是页面上哪一轮发起的（规则替主人开跑之前问他）：停掉这一页上的运行不收它，只等主人答 / 调用方撤 */
+type Pending = { pageId: string; agentId: string; event: PermissionEvent; detached: boolean; settle: (allowed: boolean, by: string | null) => void }
 
 export class OwnApprovals {
   private pending = new Map<string, Pending>()
@@ -31,7 +34,7 @@ export class OwnApprovals {
    *  记忆提议用它：选项叫「记住」/「不用」，写入记在点「记住」的人名下 */
   decide(
     ctx: { pageId: string; agentId: string },
-    info: { title: string; toolCall?: Record<string, unknown>; labels?: { allow: string; reject: string } },
+    info: { title: string; toolCall?: Record<string, unknown>; labels?: { allow: string; reject: string }; only?: string; detached?: boolean },
     signal?: AbortSignal,
   ): Promise<OwnDecision> {
     const requestId = `ramet-${randomUUID()}`
@@ -41,6 +44,7 @@ export class OwnApprovals {
       title: info.title,
       ...(info.toolCall ? { toolCall: info.toolCall } : {}),
       agentId: ctx.agentId,
+      ...(info.only ? { only: info.only } : {}),
       options: [
         { optionId: 'allow', name: info.labels?.allow ?? '允许', kind: 'allow_once' },
         { optionId: 'reject', name: info.labels?.reject ?? '拒绝', kind: 'reject_once' },
@@ -54,7 +58,7 @@ export class OwnApprovals {
         resolve({ allowed, by })
       }
       const onAbort = (): void => settle(false, null)
-      this.pending.set(requestId, { ...ctx, event, settle })
+      this.pending.set(requestId, { ...ctx, event, detached: info.detached === true, settle })
       if (signal?.aborted) return onAbort()
       signal?.addEventListener('abort', onAbort)
       this.broadcast(ctx.pageId, event)
@@ -65,13 +69,14 @@ export class OwnApprovals {
   answer(pageId: string, agentId: string, requestId: string, optionId: string | null, by: string | null = null): boolean {
     const p = this.pending.get(requestId)
     if (!p || p.pageId !== pageId || p.agentId !== agentId) return false
+    if (p.event.only && p.event.only !== by) return false
     p.settle(optionId === 'allow', by)
     return true
   }
 
   /** 页面上的运行被停止：它挂着的 Ramet 审批按拒绝结束 */
   cancelPage(pageId: string): void {
-    for (const p of [...this.pending.values()]) if (p.pageId === pageId) p.settle(false, null)
+    for (const p of [...this.pending.values()]) if (p.pageId === pageId && !p.detached) p.settle(false, null)
   }
 
   /** 此刻待批的全部（收件箱聚合用的只读快照） */

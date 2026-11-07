@@ -29,7 +29,7 @@ const OWN = {
   todo: 'Mod-Alt-9',
   quote: 'Mod-Shift-b',
   code: 'Mod-Alt-c',
-  /** 随手 AI：绑定在 quick-ai.ts（这里只登记说明） */
+  /** ⌘J：绑定在 quick-ai.ts（这里只登记说明） */
   quick: 'Mod-j',
 } as const
 
@@ -129,7 +129,7 @@ export const SHORTCUT_GROUPS: Array<{ title: string; rows: ShortcutRow[] }> = [
     ],
   },
   {
-    title: '随手 AI（用你自己的模型 key，设置 → 随手 AI）',
+    title: '⌘J（用你自己的模型 key，设置 → Genet）',
     rows: [
       { label: '选中文字 = 就地改写（改简洁 / 润色 / 续写 / 译成英文，或直接说）；没选中 = 在光标处起草。↵ 收下，Esc 不要', keys: [OWN.quick] },
       { label: '对话输入框 / 文档里正在写的 >> 消息：把话写清楚（只改草稿，不发送，⌘Z 回到原文）', keys: [OWN.quick] },

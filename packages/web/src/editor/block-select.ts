@@ -267,9 +267,9 @@ export function attachBlockDragSelect(getView: () => EditorView | undefined, get
       view.dispatch(tr)
       return
     }
-    // 右侧抽屉（历史 / 评论）与评论浮层虽然挂在 .main 里，却是盖在列外的浮层：按列外处理会 preventDefault，
+    // 右侧抽屉（历史 / 评论）、评论浮层与右侧评论栏虽然在 .main 里，却在正文列外：按列外处理会 preventDefault，
     // 里面的输入框点不进去。当成点编辑器外
-    if (!target.closest('.main') || target.closest('.hd-drawer, .cm-pop')) {
+    if (!target.closest('.main') || target.closest('.hd-drawer, .cm-pop, .cm-margin')) {
       // 块菜单 / 飞出面板挂在 body 上（不在 .main 里）：点它是执行动作，不能当成点编辑器外
       // 把块选区清掉，多选后点菜单删除正是靠选区还在才能删整段
       if (!target.closest('.block-menu, .block-menu-sub')) {

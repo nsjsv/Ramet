@@ -389,6 +389,33 @@ test('first_use：被授权的人第一次用机器，主人收到提醒（别�
   doc.destroy()
 })
 
+test('timer_failed：只有定时器的主人看得到（同空间成员、全局 admin、外人都没有）；「已暂停」只标让它暂停的那一次；别人消不掉且不写表；主人「知道了」后消失', async () => {
+  const w = await world()
+  await pool.query(
+    `INSERT INTO agent_triggers (id, space_id, owner_id, source, name, instruction, spec, time_zone, target_page, agent, enabled, paused_reason)
+     VALUES ('tm1', $1, $2, 'timer', '周报', 'x', '{"kind":"daily","time":"09:00"}', 'UTC', $3, 'fake', false, '连续 3 次没能触发，已自动暂停：x')`,
+    [w.spaceId, w.id.alice, w.pageId],
+  )
+  await pool.query(
+    `INSERT INTO trigger_events (id, trigger_id, owner_id, dedup_key, scheduled_at, created_at, status, reason, settled_at)
+     VALUES ('ev0', 'tm1', $1, 'timer:tm1:w', now() - interval '1 hour', now() - interval '1 hour', 'failed', '目标页已经不在了', now() - interval '1 hour'),
+            ('ev1', 'tm1', $1, 'timer:tm1:x', now(), now(), 'failed', '目标页已经不在了', now())`,
+    [w.id.alice],
+  )
+  // 「已暂停」只标在让它自动暂停的那一次上，之前的失败不标
+  const [item, older] = ofType(await inbox(w.cookie.alice), 'timer_failed')
+  expect(item).toMatchObject({ key: 'timer_failed:ev1', eventId: 'ev1', timerId: 'tm1', timerName: '周报', reason: '目标页已经不在了', paused: true })
+  expect(older).toMatchObject({ key: 'timer_failed:ev0', paused: false })
+  for (const who of ['bob', 'carol', 'dave', 'erin', 'root', 'frank'] as const) {
+    expect(await count(w.cookie[who], 'timer_failed'), who).toBe(0)
+    expect((await postJson('/api/inbox/dismiss', w.cookie[who], { key: 'timer_failed:ev1' })).status, who).toBe(404)
+  }
+  expect((await postJson('/api/inbox/dismiss', w.cookie.alice, { key: 'timer_failed:' })).status).toBe(400)
+  expect((await pool.query('SELECT 1 FROM inbox_dismissed')).rowCount).toBe(0)
+  expect((await postJson('/api/inbox/dismiss', w.cookie.alice, { key: 'timer_failed:ev1' })).status).toBe(200)
+  expect(ofType(await inbox(w.cookie.alice), 'timer_failed').map((i) => i.key)).toEqual(['timer_failed:ev0'])
+})
+
 // ---------- 做完待你看 / 在跑 ----------
 
 test('done：发起人完成一轮后出现（别人没有）；打开页面（seen）后消失；再跑一轮又出现', async () => {

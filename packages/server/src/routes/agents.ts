@@ -223,7 +223,7 @@ export function agentsRoutes(pool: Pool, manager: AgentManager) {
     const pageId = c.req.param('id') ?? ''
     // 解析一次即可判定认不认识这个 agent（纯目录 / DB 查询，不碰 agent 进程）
     try {
-      if (!(await manager.resolve(body.agent, user))) {
+      if (!(await manager.resolve(body.agent, user, pageId))) {
         return c.json({ error: 'unknown agent', message: '这个 agent 当前不可用' }, 400)
       }
     } catch (err) {
@@ -256,7 +256,7 @@ export function agentsRoutes(pool: Pool, manager: AgentManager) {
     if (!user) return c.json({ error: 'page not found' }, 404)
     const body = ((await c.req.json().catch(() => null)) ?? {}) as Record<string, unknown>
     try {
-      const item = await manager.queue.enqueue(c.req.param('id') ?? '', user, { agent: body.agent, kind: body.kind, text: body.text, images: body.images })
+      const item = await manager.queue.enqueue(c.req.param('id') ?? '', user, { agent: body.agent, kind: body.kind, text: body.text, images: body.images, ctx: body.ctx })
       return c.json({ item }, 201)
     } catch (err) {
       if (err instanceof QueueBadRequestError) return c.json({ error: 'bad request', message: err.message }, 400)
@@ -359,6 +359,9 @@ export function agentsRoutes(pool: Pool, manager: AgentManager) {
       // 首帧（当前状态 + 已收集的步骤快照）由 manager.subscribe 在订阅瞬间发出，
       // 新订阅者该先知道什么由状态所有者说了算，路由不自己拼
       const unsubscribe = manager.subscribe(pageId, async (ev) => {
+        // 只给某个人的审批（规则替主人开跑、外来事件之后 Genet 动手）不推给页面上的别人：卡上有规则名与指令，
+        // 只靠前端不画的话，别的编辑者在事件流里照样拿得到（补发待批也经这里）
+        if (ev.type === 'permission' && ev.only && ev.only !== user.id) return
         // 排队写出即可，stream 内部按序写，失败由下方 catch 兜底
         stream.writeSSE({ data: JSON.stringify(ev) }).catch(() => undefined)
       })

@@ -17,7 +17,7 @@ import { collectionApi } from './collection/collection-api'
 import FavoritesList from './FavoritesList'
 import { Avatar } from './Avatar'
 import { useInbox } from './inbox/inbox-store'
-import { attentionCount } from './inbox/inbox-model'
+import { attentionCount, newsCount } from './inbox/inbox-model'
 import { confirmDialog, promptDialog } from './ui/dialog'
 import { toast, toastError } from './ui/toast'
 import { Checkbox } from './ui/Checkbox'
@@ -157,7 +157,7 @@ export default function Sidebar({
   const [trashOpen, setTrashOpen] = useState(false)
   const [spaceMenuOpen, setSpaceMenuOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  // 编辑器里随手 AI 的「去设置」：打开设置并落在「随手 AI」页（settings-bus.ts）
+  // 编辑器里 ⌘J 的「去设置」：打开设置并落在「⌘J」页（settings-bus.ts）
   const [settingsTab, setSettingsTab] = useState<SettingsTarget | undefined>(undefined)
   useEffect(
     () =>
@@ -172,8 +172,10 @@ export default function Sidebar({
   const navigate = useNavigate()
   const location = useLocation()
 
-  // 收件箱角标 = 需要你处理的条数（数据由 Shell 常驻的 inbox-store 维护）
-  const inboxCount = attentionCount(useInbox().items)
+  // 收件箱角标 = 需要你处理的条数；没有要处理的、只有新消息时亮一个小点（数据由 Shell 常驻的 inbox-store 维护）
+  const inboxItems = useInbox().items
+  const inboxCount = attentionCount(inboxItems)
+  const inboxNews = inboxCount > 0 ? 0 : newsCount(inboxItems)
   // 账号处的头像（换头像后 Shell 更新 user，这里随之重渲染）
   const me = { id: user.id, username: user.username, avatar: user.avatar ?? null }
   const selected = spaces?.find((s) => s.id === selectedSpaceId) ?? null
@@ -261,19 +263,13 @@ export default function Sidebar({
         <b className="sidebar-name">Ramet</b>
       </div>
       <SidebarSearch onPick={(id) => navigate(`/page/${id}`)} />
-      {/* 空间功能入口（Skill 库 / 记忆 / 收件箱） */}
+      {/* 功能入口：AI（Genet / 任务 / Skill / 记忆，/ai 下哪个分页都算选中）与收件箱 */}
       <nav className="side-nav">
-        <NavLink to="/skills" className={({ isActive }) => 'side-nav-item' + (isActive ? ' active' : '')}>
+        <NavLink to="/ai" className={({ isActive }) => 'side-nav-item' + (isActive ? ' active' : '')}>
           <span className="side-nav-ic">
-            <Icon name="skill" size={18} />
+            <Icon name="genet" size={18} />
           </span>
-          <span>{COPY.side.skills}</span>
-        </NavLink>
-        <NavLink to="/memory" className={({ isActive }) => 'side-nav-item' + (isActive ? ' active' : '')}>
-          <span className="side-nav-ic">
-            <Icon name="memory" size={18} />
-          </span>
-          <span>{COPY.memory.nav}</span>
+          <span>{COPY.ai.nav}</span>
         </NavLink>
         <NavLink to="/inbox" className={({ isActive }) => 'side-nav-item' + (isActive ? ' active' : '')}>
           <span className="side-nav-ic">
@@ -285,6 +281,7 @@ export default function Sidebar({
               {inboxCount > 99 ? '99+' : inboxCount}
             </span>
           )}
+          {inboxNews > 0 && <span className="side-nav-dot" data-tip={COPY.inbox.newsDot(inboxNews)} aria-label={COPY.inbox.newsDot(inboxNews)} />}
         </NavLink>
       </nav>
       {/* 收藏：私人书签（页面 / 块 / AI 回复 / 过程页步骤） */}

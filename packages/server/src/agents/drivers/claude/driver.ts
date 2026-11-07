@@ -36,8 +36,8 @@ export class ClaudeDriver extends DriverBase {
 
   override readonly sessionPort: SessionPort
 
-  constructor(cfg: AgentConfig) {
-    super(cfg)
+  constructor(protected readonly cfg: AgentConfig) {
+    super()
     this.sessionPort = claudeSessionPort(cfg.env)
   }
 
@@ -111,7 +111,7 @@ export class ClaudeDriver extends DriverBase {
     return { sessionId, configOptions: await this.started(s) }
   }
 
-  /** 受限标记与会话在同一个同步段里建好（SDK 在第一次 prompt 之前不会问任何审批）。随手 AI 用完即弃，不预先起进程 */
+  /** 受限标记与会话在同一个同步段里建好（SDK 在第一次 prompt 之前不会问任何审批）。⌘J 用完即弃，不预先起进程 */
   async newRestrictedSession(cwd: string): Promise<{ sessionId: string; configOptions: ConfigOption[] }> {
     await this.ready()
     const sessionId = randomUUID()

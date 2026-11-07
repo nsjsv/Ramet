@@ -153,11 +153,11 @@ export class CodexDriver extends DriverBase {
   override readonly sessionPort: SessionPort
 
   constructor(
-    cfg: AgentConfig,
+    protected readonly cfg: AgentConfig,
     /** app-server 进程的工作目录（connector 上是本机默认目录）；各线程另有自己的 cwd */
     private readonly spawnCwd?: string,
   ) {
-    super(cfg)
+    super()
     this.sessionPort = codexSessionPort(cfg.env)
   }
 
@@ -315,7 +315,7 @@ export class CodexDriver extends DriverBase {
     return { sessionId: th.id, configOptions: this.sessionConfigs.get(th.id) ?? [] }
   }
 
-  /** 随手 AI：只读沙箱 + 不审批（需要审批的动作直接被拒）+ 不给环境 + 用户配置里的 MCP 逐个关掉
+  /** ⌘J：只读沙箱 + 不审批（需要审批的动作直接被拒）+ 不给环境 + 用户配置里的 MCP 逐个关掉
    *  （config 覆盖是深合并，给空表挡不住用户的服务）。受限标记在拿到线程 id 的同一个同步段里加上，codex 在第一轮之前不会发请求 */
   async newRestrictedSession(cwd: string): Promise<{ sessionId: string; configOptions: ConfigOption[] }> {
     await this.ready()

@@ -68,7 +68,7 @@ export type ConnMsg =
   /** welcome.resume 的重放已经发完，此后的事件都是新产生的。
    *  中心收到它才从静默折事件切到向 SSE 推送，否则新进程会从空再播一遍。 */
   | { t: 'resumed'; runId: string }
-  /** 随手 AI 本地通道的文本增量（rid 对应中心发的 quick 帧）；结束用 res { quick }，失败用 err */
+  /** ⌘J 本地通道的文本增量（rid 对应中心发的 quick 帧）；结束用 res { quick }，失败用 err */
   | { t: 'quick-delta'; rid: string; text: string }
   /** 终端输出（只在中心 attach 过的终端上推）：seq 在同一个 pty 内从 0 递增，一小段时间内的输出已合并 */
   | { t: 'pty-data'; ptyId: string; seq: number; data: string }
@@ -127,7 +127,7 @@ export type CenterMsg =
   | { t: 'files'; rid: string; actor: string; root: string }
   | { t: 'git-status'; rid: string; actor: string; root: string }
   | { t: 'git-diff'; rid: string; actor: string; root: string; path?: string }
-  /** 写文件（machine 范围，随手 AI 在代码查看器里收下改写时用）：只改已存在的普通文件，路径约束同 read（realpath、不越界、不进配置目录、
+  /** 写文件（machine 范围，⌘J 在代码查看器里收下改写时用）：只改已存在的普通文件，路径约束同 read（realpath、不越界、不进配置目录、
    *  不碰 .git 里面），原文件与新内容都 ≤ 1MB、不含 NUL、原文件必须是合法 UTF-8；connector 重读原文件算 sha256，与 baseHash 不符就拒绝
    *  （用户读到之后别人改过）；通过后写同目录临时文件、保留原权限位、rename 原子替换 */
   | { t: 'write'; rid: string; actor: string; root: string; path: string; baseHash: string; content: string }
@@ -154,7 +154,7 @@ export type CenterMsg =
   | { t: 'ws-open'; actor: string; previewId: string; wsId: string; path: string; headers: HeaderPairs; protocols: string[] }
   | { t: 'ws-msg'; actor: string; previewId: string; wsId: string; data: string; binary: boolean }
   | { t: 'ws-close'; actor: string; previewId: string; wsId: string; code?: number }
-  /** 随手 AI 本地通道（agent 范围）：在这台机器上用 agent 做一次文本改写。connector 起受限会话：临时空目录当 cwd、不给 MCP 工具、
+  /** ⌘J 本地通道（agent 范围）：在这台机器上用 agent 做一次文本改写。connector 起受限会话：临时空目录当 cwd、不给 MCP 工具、
    *  读写文件 / 开终端一律拒绝、审批自动拒绝、免确认档先切走（切不了就拒绝运行）、60 秒超时、每人同时一个；prompt 是中心拼好的整段文本。
    *  文本增量走 quick-delta，结束走 res { quick }，失败走 err */
   | { t: 'quick'; rid: string; actor: string; agent: string; prompt: string }

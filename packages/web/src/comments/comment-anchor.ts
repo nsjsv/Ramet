@@ -6,7 +6,8 @@
  *     块 id 靠 carryBlockIds 保住，按块里的字还能找回来。
  *   - 解析：相对位置都能解析且区间里有字 → 用它；否则按文字在块里找；都不行 = 原文已删除（抽屉里显示当时引用的原文）。
  * 高亮插件只画装饰、不加 schema，编辑页（editor-session.ts）与公开页（PublicPage.tsx）都要挂。
- * 远端改动（y-prosemirror 整篇 replace，mapping 不可靠）与串列表变化时按锚点全量重解析；本地改动按 mapping 平移。 */
+ * 远端改动（y-prosemirror 整篇 replace，mapping 不可靠）与串列表变化时按锚点全量重解析；本地改动按 mapping 平移。
+ * 插件视图在文档变化时通知 onCommentDocChange 的订阅方（右侧评论栏据此重新对齐卡片）。 */
 
 import * as Y from 'yjs'
 import { absolutePositionToRelativePosition, relativePositionToAbsolutePosition, ySyncPluginKey } from 'y-prosemirror'
@@ -121,20 +122,30 @@ export type CommentMark = { id: string; anchor: Anchor }
 type HighlightState = {
   marks: CommentMark[]
   active: string | null
+  hover: string | null
   deco: DecorationSet
   onOpen: ((threadId: string) => void) | null
 }
 
-type Meta = { marks: CommentMark[]; active: string | null; onOpen: ((threadId: string) => void) | null }
+type Meta = { marks: CommentMark[]; active: string | null; hover: string | null; onOpen: ((threadId: string) => void) | null }
 
 const highlightKey = new PluginKey<HighlightState>('commentHighlights')
 
-function build(doc: PMNode, y: YContext | null, marks: CommentMark[], active: string | null): DecorationSet {
+/** 文档变了（本地输入、远端改动、撤销重做）：右侧评论栏要按锚点重新对齐 */
+const docListeners = new Set<(view: EditorView) => void>()
+
+export function onCommentDocChange(cb: (view: EditorView) => void): () => void {
+  docListeners.add(cb)
+  return () => docListeners.delete(cb)
+}
+
+function build(doc: PMNode, y: YContext | null, s: Pick<HighlightState, 'marks' | 'active' | 'hover'>): DecorationSet {
   const decos: Decoration[] = []
-  for (const m of marks) {
+  for (const m of s.marks) {
     const r = resolveAnchor(doc, y, m.anchor)
     if (!r) continue
-    decos.push(Decoration.inline(r.from, r.to, { class: m.id === active ? 'comment-mark is-active' : 'comment-mark', 'data-comment': m.id }))
+    const cls = 'comment-mark' + (m.id === s.active ? ' is-active' : '') + (m.id === s.hover ? ' is-hover' : '')
+    decos.push(Decoration.inline(r.from, r.to, { class: cls, 'data-comment': m.id }))
   }
   return DecorationSet.create(doc, decos)
 }
@@ -150,17 +161,22 @@ export const commentHighlights = $prose(
     new Plugin<HighlightState>({
       key: highlightKey,
       state: {
-        init: () => ({ marks: [], active: null, deco: DecorationSet.empty, onOpen: null }),
+        init: () => ({ marks: [], active: null, hover: null, deco: DecorationSet.empty, onOpen: null }),
         apply(tr, value, oldState, newState) {
           const meta = tr.getMeta(highlightKey) as Meta | undefined
           // 插件排在 ySync 之前时 newState 里还取不到它的状态；绑定对象本身不变，退回旧状态取
           const y = (): YContext | null => yContextOf(newState) ?? yContextOf(oldState)
-          if (meta) return { ...meta, deco: build(tr.doc, y(), meta.marks, meta.active) }
+          if (meta) return { ...meta, deco: build(tr.doc, y(), meta) }
           if (!tr.docChanged || value.marks.length === 0) return value
-          if (fromYjs(tr)) return { ...value, deco: build(tr.doc, y(), value.marks, value.active) }
+          if (fromYjs(tr)) return { ...value, deco: build(tr.doc, y(), value) }
           return { ...value, deco: value.deco.map(tr.mapping, tr.doc) }
         },
       },
+      view: () => ({
+        update(view, prev) {
+          if (view.state.doc !== prev.doc) for (const cb of docListeners) cb(view)
+        },
+      }),
       props: {
         decorations: (state) => highlightKey.getState(state)?.deco,
         handleClick(view, _pos, event) {
@@ -174,10 +190,16 @@ export const commentHighlights = $prose(
     }),
 )
 
-/** 宿主告诉插件现在要画哪些串、哪个是激活的、点了高亮找谁 */
-export function setCommentMarks(view: EditorView, marks: CommentMark[], active: string | null, onOpen: ((threadId: string) => void) | null): void {
+/** 宿主告诉插件现在要画哪些串、哪个是激活的、指针停在哪张卡片上、点了高亮找谁 */
+export function setCommentMarks(
+  view: EditorView,
+  marks: CommentMark[],
+  active: string | null,
+  hover: string | null,
+  onOpen: ((threadId: string) => void) | null,
+): void {
   if (view.isDestroyed || !highlightKey.getState(view.state)) return
-  view.dispatch(view.state.tr.setMeta(highlightKey, { marks, active, onOpen } satisfies Meta))
+  view.dispatch(view.state.tr.setMeta(highlightKey, { marks, active, hover, onOpen } satisfies Meta))
 }
 
 /** 视图里解析一个锚点（抽屉判「原文已删除」、浮层定位、滚动到锚点都用它） */

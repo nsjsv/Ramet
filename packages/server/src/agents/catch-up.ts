@@ -10,9 +10,9 @@
 import * as Y from 'yjs'
 import type { Pool } from 'pg'
 import { lastUserMessage, serializeBlocks, stripLastUserMessage } from './doc.js'
-import { parseRemoteId, type SavedSession } from './manager-types.js'
+import type { SavedSession } from './manager-types.js'
 import { promptHash, type PromptEnv } from './prompt-env.js'
-import type { ConnectorAgentInfo } from './protocol.js'
+import { agentNames, type AgentNameHost } from './agent-names.js'
 
 /** 署名用的名字：用户 id → 用户名，agent catalog id → 显示名（connector 上的带机器名）。查不到返回 undefined */
 export type Names = { user: (id: string) => string | undefined; agent: (id: string) => string | undefined }
@@ -31,50 +31,43 @@ function attr(el: Y.XmlElement, name: string): string {
   return typeof v === 'string' ? v : ''
 }
 
-/** 读好这页里出现的作者与 agent 的名字（用户消息的 author 属性、回复块的 agent 属性）。
- *  localLabel = 本机 agent 的显示名；connector 上的 agent 取 connector 上报的清单与机器名 */
-export async function resolveNames(pool: Pool, fragment: Y.XmlFragment, localLabel: (id: string) => string | undefined): Promise<Names> {
+/** 读好这页里出现的作者与 agent 的名字（用户消息的 author 属性、回复块的 agent 属性）。agent 名的原料来自 agent-names.ts
+ *  （服务端唯一的来源），这里的写法：connector 上的 = `名字（机器名）` */
+export async function resolveNames(pool: Pool, fragment: Y.XmlFragment, agentHost: AgentNameHost): Promise<Names> {
   const users = new Set<string>()
-  const machines = new Set<string>()
+  const agents = new Set<string>()
   fragment.forEach((c) => {
     if (!(c instanceof Y.XmlElement)) return
     if (c.nodeName === 'user_message' && attr(c, 'author')) users.add(attr(c, 'author'))
-    const remote = c.nodeName === 'agent_reply' ? parseRemoteId(attr(c, 'agent')) : null
-    if (remote) machines.add(remote.connectorId)
+    if (c.nodeName === 'agent_reply' && attr(c, 'agent')) agents.add(attr(c, 'agent'))
   })
-  const [u, m] = await Promise.all([
+  const [u, named] = await Promise.all([
     users.size
       ? pool.query<{ id: string; username: string }>('SELECT id, username FROM users WHERE id = ANY($1::text[])', [[...users]])
       : { rows: [] },
-    machines.size
-      ? pool.query<{ id: string; name: string; agents: ConnectorAgentInfo[] | null }>(
-          'SELECT id, name, agents FROM connectors WHERE id = ANY($1::text[])',
-          [[...machines]],
-        )
-      : { rows: [] },
+    agentNames(pool, agentHost, agents),
   ])
   const usernames = new Map(u.rows.map((r) => [r.id, r.username]))
-  const conns = new Map(m.rows.map((r) => [r.id, r]))
   return {
     user: (id) => usernames.get(id),
     agent: (id) => {
-      const remote = parseRemoteId(id)
-      if (!remote) return localLabel(id)
-      const conn = conns.get(remote.connectorId)
-      if (!conn) return undefined
-      const label = (Array.isArray(conn.agents) ? conn.agents : []).find((a) => a.id === remote.agentId)?.label ?? remote.agentId
-      return `${label}（${conn.name}）`
+      const n = named.get(id)
+      return n && (n.machine ? `${n.label}（${n.machine}）` : n.label)
     },
   }
 }
 
 type Item = { label: string; text: string; ref: string }
 
+const NOTICE_LABEL: Record<string, string> = { timer: 'Ramet 的定时提醒', event: 'Ramet 的自动化通知', comment: 'Ramet 的评论呼叫' }
+
 /** 「alice 的消息」「Codex（laptop）的回复」：西文名后空一格，中文 / 全角结尾直接接 */
 const owned = (name: string, what: string): string => `${name}${/[\x21-\x7e]$/.test(name) ? ' ' : ''}的${what}`
 
 function labelOf(el: Y.XmlElement | null, names: Names): string {
   if (el?.nodeName === 'user_message') {
+    const notice = attr(el, 'notice')
+    if (notice) return NOTICE_LABEL[notice] ?? 'Ramet 的任务通知'
     const author = attr(el, 'author')
     return owned((author && names.user(author)) || '用户', '消息')
   }

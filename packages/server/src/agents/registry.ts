@@ -20,6 +20,10 @@ import { homedir } from 'node:os'
 import { delimiter, join } from 'node:path'
 import { AGENT_DRIVERS, type AgentConfig, type AgentDriver } from './types.js'
 
+/** 留给中心自己的 agent 的 id 前缀（Genet = `ramet:assistant`，见 assistant-agent.ts）：配置里的 agent 不许用，免得撞名。
+ *  connector 上的 agent 在中心有 `c:<connectorId>:` 前缀，本来就撞不上 */
+export const RESERVED_AGENT_PREFIX = 'ramet:'
+
 export type AgentsSource = 'env' | 'file' | 'auto' | 'none'
 export type LoadedAgents = { agents: AgentConfig[]; source: AgentsSource }
 
@@ -30,6 +34,7 @@ function parse(raw: unknown): AgentConfig[] {
     if (typeof id !== 'string' || typeof command !== 'string') {
       throw new Error('agent 配置项缺 id 或 command')
     }
+    if (id.startsWith(RESERVED_AGENT_PREFIX)) throw new Error(`agent ${id}：以 ${RESERVED_AGENT_PREFIX} 开头的 id 留给 Ramet 自己，换一个`)
     // 没写 / 写错（含已不支持的 acp）当场报出来：猜一个驱动去跟进程说话，只会握手超时、错得莫名其妙
     if (typeof driver !== 'string' || !AGENT_DRIVERS.includes(driver as AgentDriver)) {
       const got = driver === undefined ? '没写 driver' : `driver 写的是 ${JSON.stringify(driver)}`

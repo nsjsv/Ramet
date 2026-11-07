@@ -16,7 +16,7 @@ import { isFavorite, toggleFavorite } from '../favorites-store'
 import { pageAgent, regenerateReply, runAgent } from './agent-bar'
 import { findBlockIdPos } from './block-id'
 import { deleteBlockRange } from './block-delete'
-import { composerQuote, insertIntoComposer } from './composer-bridge'
+import { composerDom, composerQuote, insertIntoComposer } from './composer-bridge'
 import { quoteLabel } from './doc-send'
 import { replyTargetOf } from './reply-target'
 
@@ -121,9 +121,9 @@ export function bubbleActsFor(pageId: string, getEditor: () => Editor | undefine
       const id = typeof node.attrs.id === 'string' ? node.attrs.id : ''
       if (!id) return
       const from = btn.getBoundingClientRect()
-      if (!insertIntoComposer(composerQuote(pageId, id, node.textContent))) return
-      // 小胶囊从按钮飞到输入框里刚落下的那颗块引用 chip（飞行期间先藏，落地显现），找不到就落在框内左上后淡掉
-      const input = document.querySelector<HTMLElement>('.chat-composer .chat-input')
+      if (!insertIntoComposer(pageId, composerQuote(pageId, id, node.textContent))) return
+      // 小胶囊从按钮飞到这页输入框里刚落下的那颗块引用 chip（飞行期间先藏，落地显现），找不到就落在框内左上后淡掉
+      const input = composerDom(pageId)
       const chips = input?.querySelectorAll<HTMLElement>('.block-ref')
       const chip = chips?.[chips.length - 1]
       const label = quoteLabel(node.textContent)

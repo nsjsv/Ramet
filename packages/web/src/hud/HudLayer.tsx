@@ -1,8 +1,9 @@
 /* ---------- 右上角工作台：挂在 App 外壳（TopBar 之下）----------
- * 只管当前页：页上有在飞的一轮就在右上角浮它的岛；点岛或点回复抬头停靠的岛，展开面板。
+ * 只管当前页：页上有在飞的一轮就在右上角浮它的岛；点岛或点回复抬头停靠的岛，展开面板
+ * （点的是右下角 Genet 浮窗里的回复时，面板看的是 Genet 页的那一轮）。
  * 项目面板开着时面板改挂进「本轮」分页（HudEmbedded），这里只留岛。数据：在飞的一轮来自 agent-bar 的 store
  * （不另开连接），跑完的一轮按过程页 id 拉 record（hud-source.ts）。
- * 键盘：面板开着时 Esc 收起；岛是审批条时，焦点不在可编辑区域按 1–9 选第 n 个。没有全局开关键（⌘J 是随手 AI）。 */
+ * 键盘：面板开着时 Esc 收起；岛是审批条时，焦点不在可编辑区域按 1–9 选第 n 个。没有全局开关键（⌘J 是 ⌘J）。 */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useMatch } from 'react-router-dom'
 import { runTally } from '@ramet/shared/run-model'
@@ -57,16 +58,18 @@ function answerFromIsland(pageId: string, req: PermissionReq, i: number, el: HTM
   for (const b of buttons) b.disabled = true
   void api.respondPermission(pageId, req.agentId, req.requestId, btn.optionId, btn.content).catch((err: unknown) => {
     for (const b of buttons) b.disabled = false
-    setAgentRunError(err instanceof Error ? err.message : COPY.ask.failed)
+    setAgentRunError(pageId, err instanceof Error ? err.message : COPY.ask.failed)
   })
 }
 
 export default function HudLayer({ canStop }: { canStop: (pageId: string) => boolean }) {
-  const pageId = useMatch('/page/:id')?.params.id
-  const agent = useAgentEvents(pageId)
+  const routeId = useMatch('/page/:id')?.params.id
   const hud = useHud()
+  // 看的是哪一页：面板开着看的是点开它的那条回复所在的页（右下角 Genet 浮窗里的回复不在当前页上），否则是当前页
+  const pageId = hud.open && hud.target ? hud.target.pageId : routeId
+  const agent = useAgentEvents(pageId)
   const shell = useProjectShell()
-  const projectTarget = useProjectTarget(pageId)
+  const projectTarget = useProjectTarget(routeId)
   const projectOn = shell.open && projectTarget !== null
   const liveRun = agent.run && !agent.run.outcome ? agent.run : null
   const now = useClock(liveRun !== null)
@@ -80,7 +83,7 @@ export default function HudLayer({ canStop }: { canStop: (pageId: string) => boo
   const latest = useRef({ hud, permissions: agent.permissions })
   latest.current = { hud, permissions: agent.permissions }
 
-  useEffect(() => resetHudFor(pageId), [pageId])
+  useEffect(() => resetHudFor(routeId), [routeId])
   // 项目面板开着时，面板在它的「本轮」分页里：点岛 / 点停靠的岛要把项目面板切过去，不然看不见
   useEffect(() => {
     if (hud.open && projectOn) setProjectTab('round')

@@ -38,3 +38,13 @@ test('只有一条消息 / 没有消息', () => {
   expect(lastUserMessage(serializeDoc(build(block('user_message', para('a'), para('b')))))).toBe('a\n\nb')
   expect(lastUserMessage(serializeDoc(build(para('正文'))))).toBeNull()
 })
+
+test('消息记着发送时正在看的页面（ctx）：接在消息末尾一行，增量取消息时一起带上', () => {
+  const msg = block('user_message', para('总结一下这页'))
+  msg.setAttribute('ctx', 'p1')
+  const doc = serializeDoc(build(block('user_message', para('第一问')), msg))
+  expect(doc.endsWith('>> 总结一下这页\n>> \n>> [当前页面 page:p1]')).toBe(true)
+  expect(lastUserMessage(doc)).toBe('总结一下这页\n\n[当前页面 page:p1]')
+  // 没记的消息照旧
+  expect(serializeDoc(build(block('user_message', para('a'))))).toBe('>> a')
+})

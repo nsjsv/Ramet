@@ -23,6 +23,8 @@ const TYPES: Record<PropType, string> = {
   relation: '关联',
   rollup: '汇总',
   formula: '公式',
+  button: '按钮',
+  ai: 'AI 属性',
 }
 
 /** 筛选运算的叫法（按类型有不同说法的在 opLabel 里换） */
@@ -189,6 +191,22 @@ export const COLLECTION_COPY = {
     /** 自动编号的前缀（显示成「前缀-编号」） */
     prefix: '前缀',
     prefixHint: '如 TASK',
+    buttonSetup: '设置按钮：点了做什么',
+    buttonEdit: '修改按钮：点了做什么',
+    buttonUnset: '还没设置：在属性设置里配上要做的事',
+    ai: {
+      prompt: '要 AI 填什么',
+      placeholder: '比如「用一句话总结这一行」「判断优先级：高 / 中 / 低」',
+      fillEmpty: '填空白的行',
+      fillAll: '全部重新生成',
+      started: (n: number) => `开始填 ${n} 行，填好的会陆续出现`,
+      nothing: '没有要填的行',
+      failed: '没能开始填，请重试',
+      auto: '行新增 / 改了之后自动更新',
+      autoTip: '用你的模型连接；AI 自己填的值不会再触发',
+      autoFailed: '没能改自动更新，请重试',
+      ruleName: 'AI 属性自动更新：',
+    },
   },
   /** 单元格 */
   cell: {

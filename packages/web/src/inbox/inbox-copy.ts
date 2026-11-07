@@ -4,10 +4,12 @@ export const INBOX_COPY = {
   title: '收件箱',
   sub: '所有页面里需要你的事',
   badge: (n: number) => `${n} 件事等你处理`,
+  /** 没有要处理的、只有新消息时侧栏的小点 */
+  newsDot: (n: number) => `${n} 条新消息`,
   loading: '加载中…',
   loadFailed: '收件箱加载失败，请稍后再试',
   empty: '没有需要你处理的事',
-  emptyHint: '等你批准的命令、待批准的机器接入、做完的任务都会汇总在这里。',
+  emptyHint: '等你批准的命令、待批准的机器接入、做完的任务、别人在评论和正文里找你、没能触发的规则、规则发给你的通知都会汇总在这里。',
   group: { attention: '需要你处理', news: '新消息', running: '在跑' },
   open: '打开页面',
   failed: '操作失败，请重试',
@@ -53,6 +55,26 @@ export const INBOX_COPY = {
   },
   question: { head: (page: string) => `「${page}」里有问题等你回答` },
   plan: { head: (page: string) => `「${page}」的计划等你确认`, go: '去确认' },
+  timer: {
+    head: (name: string, reason: string) => `定时「${name}」没能触发：${reason}`,
+    /** 别的来源的规则（评论、页面变动……） */
+    ruleHead: (name: string, reason: string) => `规则「${name}」没能触发：${reason}`,
+    /** 本应触发的时刻（相对时间） */
+    when: (at: string) => `本应在${at}触发`,
+    /** 事件来源的规则：发生的时刻 */
+    happened: (at: string) => `${at}发生`,
+    paused: '已暂停',
+    pausedHint: '连续失败，规则已自动暂停；处理好原因后到 AI 页的「自动」里重新打开',
+    ack: '知道了',
+  },
+  automation: {
+    head: (name: string, text: string) => `规则「${name}」：${text}`,
+    where: (page: string) => `页面「${page}」`,
+    ack: '知道了',
+  },
+  docMention: {
+    head: (who: string, page: string) => `${who} 在《${page}》正文里 @了你`,
+  },
   comment: {
     reason: { reply: '回复了你', mention: '@了你', new_thread: '发了新评论' },
     head: (who: string, what: string) => `${who} ${what}`,

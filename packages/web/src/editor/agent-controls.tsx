@@ -10,6 +10,7 @@
 
 import { useEffect, useState } from 'react'
 import { api, ApiError } from '../api'
+import { builtinAgent } from '../assistant/identity'
 import { setDefaultAgent, agentList } from '../default-agent'
 import { agentOptionsFor, setAgentRunError, setPageChoice, usePageAgent, type AgentState } from './agent-bar'
 import { modeOptionOf, nextModeValue } from './agent-mode'
@@ -43,7 +44,8 @@ export function askAgent(pageId: string | undefined, agent: string): void {
   if (!pageId || !agent) return
   // 不在目录里的 agent（connector 被撤销、消息 attrs 里的失效来源）不要 prepare：必然 400，
   // 只会往运行错误条里灌一条用户无法处理的 unknown agent。收敛失效值是 chip 的 repairStaleAgent 的职责。
-  if (!agentList().some((a) => a.id === agent)) return
+  // 前端自带的 Genet 不在目录里，但只出现在它自己的页面上（assistant/identity.ts 的 pageCatalog），照样要问：供应商 / 思考程度靠它
+  if (!agentList().some((a) => a.id === agent) && !builtinAgent(agent)) return
   const key = `${pageId}:${agent}`
   if (asked.has(key) || agentOptionsFor(pageId, agent).length > 0) return
   asked.add(key)
@@ -54,7 +56,7 @@ export function askAgent(pageId: string | undefined, agent: string): void {
     // 403 = 这台机器不属于你也没授权给你（服务端 message 是人话）：给用户看，且不重试，
     // 重试只会再被拒；授权下来后目录变化或刷新页面会重新问
     if (err instanceof ApiError && err.status === 403) {
-      setAgentRunError(err.message)
+      setAgentRunError(pageId, err.message)
       return
     }
     asked.delete(key) // 允许重试（例如刚才是网络抖动）
@@ -77,11 +79,11 @@ export function writeSessionOption(pageId: string, agent: string, configId: stri
   const name = agentOptionsFor(pageId, agent).find((o) => o.id === configId)?.name ?? configId
   return api.setAgentConfig(pageId, { agent, configId, value }).then(
     () => {
-      setAgentRunError(null)
+      setAgentRunError(pageId, null)
       return true
     },
     (err: unknown) => {
-      setAgentRunError(err instanceof Error ? `切换「${name}」失败：${err.message}` : `切换「${name}」失败`)
+      setAgentRunError(pageId, err instanceof Error ? `切换「${name}」失败：${err.message}` : `切换「${name}」失败`)
       return false
     },
   )
@@ -142,7 +144,7 @@ export function useAgentControls(pageId: string, agentState: AgentState, readOnl
       try {
         await api.prepareAgent(pageId, agent)
       } catch (err) {
-        setAgentRunError(err instanceof Error ? `工作区不可用：${err.message}` : '工作区不可用')
+        setAgentRunError(pageId, err instanceof Error ? `工作区不可用：${err.message}` : '工作区不可用')
       }
     })
   }

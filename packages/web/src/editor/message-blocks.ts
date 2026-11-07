@@ -101,8 +101,29 @@ export const userMessageSchema = $nodeSchema('user_message', () => ({
   defining: true, // 与 blockquote 同：输入规则不整块改写，块边界稳定
   // agent/cwd/opts 是这条消息的调用配置（见 MessageConfig），只进 attrs，markdown 不带。
   // author 是发言人的用户 id，对话气泡按它画头像：本端新写的消息由创建处填 selfId()（people.ts）；
-  // 老消息 / markdown 导入的为空，显示时回落页面创建者。只进 attrs，不进 markdown / 提示词，服务端不读
-  attrs: { id: { default: '' }, agent: { default: '' }, cwd: { default: '' }, opts: { default: '' }, author: { default: '' } },
+  // 老消息 / markdown 导入的为空，显示时回落页面创建者。只进 attrs，不进 markdown / 提示词，服务端不读。
+  // ctx 是发这条消息时用户正在看的页面 id（Genet 浮窗：输入框里不放当前页的 chip，靠它告诉模型「这页」是哪页），
+  // 服务端拼提示词时接在消息末尾（agents/doc.ts 的 focusLine）；不进 markdown。
+  // notice / task：Genet 派出去的任务做完时服务端写的任务通知（agents/task-watch.ts）：notice = done / failed（定时通知是 timer，见下），task = 任务页 id。
+  // 占着用户消息的位置（Genet 的一轮取最后一条用户消息当输入），对话里画成通知卡（task-notice.ts）不是用户气泡；不进 markdown。
+  // timer：定时器到点时服务端写的（server triggers/）= 定时器 id。Genet 页上是定时通知（notice = timer），
+  // 任务页上是以主人身份发出的指令消息（没有 notice，气泡上带「定时」小标）。schema 里不登记的话，协同绑定会把它从文档里抹掉
+  // rule / external：别的规则（server triggers/）写的。Genet 页上是事件通知（notice = event，rule = 规则 id；external = '1' 表示触发者不是主人，
+  // 里面引用的是别人写的内容）；目标页上是以主人身份发出的指令消息（只有 rule，气泡上带「自动化」小标）。
+  // 评论呼叫（用户在评论里 @Genet，server comments/genet-call.ts）是 notice = comment，串里有别人的评论时同样带 external = '1'
+  attrs: {
+    id: { default: '' },
+    agent: { default: '' },
+    cwd: { default: '' },
+    opts: { default: '' },
+    author: { default: '' },
+    ctx: { default: '' },
+    notice: { default: '' },
+    task: { default: '' },
+    timer: { default: '' },
+    rule: { default: '' },
+    external: { default: '' },
+  },
   // 剪贴板往返：DOM 带块身份 + 调用配置 + 发言人（同 agent_reply 的 data-agent/data-run 口径）
   parseDOM: [
     {
@@ -114,6 +135,12 @@ export const userMessageSchema = $nodeSchema('user_message', () => ({
           cwd: el.getAttribute('data-cwd') ?? '',
           opts: el.getAttribute('data-opts') ?? '',
           author: el.getAttribute('data-author') ?? '',
+          ctx: el.getAttribute('data-ctx') ?? '',
+          notice: el.getAttribute('data-notice') ?? '',
+          task: el.getAttribute('data-task') ?? '',
+          timer: el.getAttribute('data-timer') ?? '',
+          rule: el.getAttribute('data-rule') ?? '',
+          external: el.getAttribute('data-external') ?? '',
         }
       },
     },
@@ -121,12 +148,18 @@ export const userMessageSchema = $nodeSchema('user_message', () => ({
   toDOM: (node) => [
     'div',
     {
-      class: 'user-message',
+      class: node.attrs.notice ? 'user-message is-notice' : 'user-message',
       'data-user-message': '',
       'data-agent': typeof node.attrs.agent === 'string' ? node.attrs.agent : '',
       'data-cwd': typeof node.attrs.cwd === 'string' ? node.attrs.cwd : '',
       'data-opts': typeof node.attrs.opts === 'string' ? node.attrs.opts : '',
       'data-author': typeof node.attrs.author === 'string' ? node.attrs.author : '',
+      'data-ctx': typeof node.attrs.ctx === 'string' ? node.attrs.ctx : '',
+      'data-notice': typeof node.attrs.notice === 'string' ? node.attrs.notice : '',
+      'data-task': typeof node.attrs.task === 'string' ? node.attrs.task : '',
+      'data-timer': typeof node.attrs.timer === 'string' ? node.attrs.timer : '',
+      'data-rule': typeof node.attrs.rule === 'string' ? node.attrs.rule : '',
+      'data-external': typeof node.attrs.external === 'string' ? node.attrs.external : '',
     },
     0,
   ],
@@ -148,8 +181,17 @@ export const agentReplySchema = $nodeSchema('agent_reply', () => ({
   // stats 是回复的生命周期 + 用量（server ReplyWriter 写：建块 `o:run`，收尾覆盖成终态）。
   // plan 是 agent 最后一份计划清单（JSON 串，收尾时写；见 @ramet/shared/run-model 的 encodePlan / plan-card.ts）。
   // team 是带队（/带队）的团队计划与进度（JSON 串，收尾时写；见 @ramet/shared/run-model 的 encodeTeam / team/team-mount.tsx）。
+  // quiet 是 Genet 标「不用处理」时写的一句理由（server routes/mark-handled.ts）：这条回复连同它前面紧挨着的通知折成一行灰字（quiet-fold.ts）。
   // 只进 attrs，markdown 不带（同 user_message 的调用配置：源码模式往返丢它是可接受的取舍）
-  attrs: { id: { default: '' }, agent: { default: '' }, run: { default: '' }, stats: { default: '' }, plan: { default: '' }, team: { default: '' } },
+  attrs: {
+    id: { default: '' },
+    agent: { default: '' },
+    run: { default: '' },
+    stats: { default: '' },
+    plan: { default: '' },
+    team: { default: '' },
+    quiet: { default: '' },
+  },
   parseDOM: [
     {
       tag: 'div[data-agent-reply]',
@@ -161,6 +203,7 @@ export const agentReplySchema = $nodeSchema('agent_reply', () => ({
           stats: el.getAttribute('data-stats') ?? '',
           plan: el.getAttribute('data-plan') ?? '',
           team: el.getAttribute('data-team') ?? '',
+          quiet: el.getAttribute('data-quiet') ?? '',
         }
       },
     },
@@ -175,6 +218,7 @@ export const agentReplySchema = $nodeSchema('agent_reply', () => ({
       'data-stats': typeof node.attrs.stats === 'string' ? node.attrs.stats : '',
       'data-plan': typeof node.attrs.plan === 'string' ? node.attrs.plan : '',
       'data-team': typeof node.attrs.team === 'string' ? node.attrs.team : '',
+      'data-quiet': typeof node.attrs.quiet === 'string' ? node.attrs.quiet : '',
     },
     0,
   ],

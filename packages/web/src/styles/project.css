@@ -687,7 +687,7 @@
   color: var(--accent);
 }
 
-/* ---------- 代码查看器里的 ⌘J（随手 AI）：选区旁的小提示 + 就地 diff 预览 ---------- */
+/* ---------- 代码查看器里的 ⌘J（⌘J）：选区旁的小提示 + 就地 diff 预览 ---------- */
 .project-quick-hint {
   position: fixed;
   z-index: 40;

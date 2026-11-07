@@ -27,10 +27,10 @@ export class RpcAgentDriver extends DriverBase {
   override readonly sessionPort: SessionPort
 
   constructor(
-    cfg: AgentConfig,
+    protected readonly cfg: AgentConfig,
     readonly dialect: PiDialect,
   ) {
-    super(cfg)
+    super()
     this.sessionPort = dialect === 'pi' ? piSessionPort() : ompSessionPort(cfg.env)
   }
 
@@ -132,7 +132,7 @@ export class RpcAgentDriver extends DriverBase {
     return { sessionId, configOptions: await this.started(s, false) }
   }
 
-  /** 受限标记与会话在同一个同步段里建好（第一次 prompt 之前 CLI 不会发任何请求）。随手 AI 用完即弃，不预先起进程 */
+  /** 受限标记与会话在同一个同步段里建好（第一次 prompt 之前 CLI 不会发任何请求）。⌘J 用完即弃，不预先起进程 */
   async newRestrictedSession(cwd: string): Promise<{ sessionId: string; configOptions: ConfigOption[] }> {
     await this.ready()
     const sessionId = randomUUID()
@@ -196,7 +196,7 @@ export class RpcAgentDriver extends DriverBase {
     return this.sessions.get(sessionId)?.location
   }
 
-  /** 受限会话用完即弃：连同 CLI 落下的会话记录一起删掉，随手 AI 不在用户机器上越攒越多 */
+  /** 受限会话用完即弃：连同 CLI 落下的会话记录一起删掉，⌘J 不在用户机器上越攒越多 */
   override discardSession(sessionId: string): void {
     const s = this.sessions.get(sessionId)
     s?.close()

@@ -1,0 +1,388 @@
+/* 消息附件（图片 / 文件引用 / 块引用 / 页面提及）在对话里的两种摆法（editor/attach-layout.ts，挂在 .chat-page 的 data-att-layout 上）。
+ * 容器：对话输入框 .chat-input、用户气泡 .chat-user .chat-bubble；文档模式 / 公开页里的用户消息固定按行内画
+ * （图片落在文字原位，按原尺寸画会把一句话撑散）。
+ * 「图 N / 引用 N / 页面 N」是 CSS counter：容器 reset、token 递增，与 att-cards.ts 的 attLabels 同序，增删重排自然更新。
+ * 选择器里的 .img-wrap 是图片节点的 wrapper（media.ts / composer-input.tsx 的 toDOM），要压过 prose.css 的文档图片样式。 */
+
+.chat-input,
+.chat-user .chat-bubble,
+.ProseMirror > .user-message {
+  counter-reset: att-img att-quote att-page;
+}
+
+/* ---------- 行内（默认）：图片 = 小缩略图 + 图 N，与提及 chip 同高同字号 ---------- */
+
+:is(.chat-input, .chat-user .chat-bubble, .ProseMirror > .user-message) .img-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 1.6em;
+  max-width: none;
+  margin: 0;
+  padding: 0 7px 0 3px;
+  border-radius: 4px;
+  background: var(--press);
+  color: var(--ink);
+  font-size: 0.92em;
+  line-height: 1;
+  vertical-align: -0.3em;
+  white-space: nowrap;
+  cursor: zoom-in;
+  user-select: none;
+  counter-increment: att-img;
+  transition: background var(--d-1), color var(--d-1), box-shadow var(--d-1);
+}
+
+:is(.chat-input, .chat-user .chat-bubble, .ProseMirror > .user-message) .img-wrap img:not(.ProseMirror-separator) {
+  display: block;
+  width: 20px;
+  height: 16px;
+  max-width: none;
+  margin: 0;
+  border-radius: 3px;
+  object-fit: cover;
+  cursor: inherit;
+}
+
+:is(.chat-input, .chat-user .chat-bubble, .ProseMirror > .user-message) .img-wrap::after {
+  content: '图 ' counter(att-img);
+}
+
+/* 文档模式图片节点的加载态（media.ts imageView）是大占位框，这里收回胶囊 */
+.ProseMirror > .user-message .img-wrap.is-loading {
+  width: auto;
+  aspect-ratio: auto;
+  overflow: visible;
+  background: var(--press);
+  box-shadow: none;
+  animation: none;
+}
+
+.ProseMirror > .user-message .img-wrap.is-loading::before {
+  display: none;
+}
+
+/* 输入框里还在上传 / 上传失败的图（composer-input.tsx）：不转圈，缩略图安静地呼吸 */
+.chat-input .img-wrap.is-uploading img {
+  animation: img-glyph-breathe 1.6s ease-in-out infinite;
+}
+
+.chat-input .img-wrap.is-failed {
+  background: var(--danger-tint);
+  color: var(--danger);
+}
+
+.chat-input .img-wrap.is-failed img {
+  opacity: 0.45;
+}
+
+/* 悬停联动（editor/att-hover.ts）：token 与卡片一起亮 */
+:is(.img-wrap, .file-mention, .block-ref, .page-mention).is-att-hot {
+  background: var(--accent-tint);
+  color: var(--accent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+:is(.file-mention, .block-ref, .page-mention).is-att-hot::before {
+  background: var(--accent);
+}
+
+/* ---------- 托盘：正文里只留占位符（图片画图标不画缩略图、块引用 / 页面提及收成「引用 N / 页面 N」），附件在上方的卡片里 ---------- */
+
+[data-att-layout='tray'] :is(.chat-input, .chat-user .chat-bubble) .img-wrap {
+  position: relative;
+  padding-left: 21px;
+}
+
+[data-att-layout='tray'] :is(.chat-input, .chat-user .chat-bubble) .img-wrap img:not(.ProseMirror-separator) {
+  display: none;
+}
+
+[data-att-layout='tray'] :is(.chat-input, .chat-user .chat-bubble) .img-wrap::before {
+  content: '';
+  position: absolute;
+  left: 7px;
+  top: 50%;
+  width: 11px;
+  height: 11px;
+  background: var(--ink-3);
+  -webkit-mask: var(--image-glyph) center / contain no-repeat;
+  mask: var(--image-glyph) center / contain no-repeat;
+  transform: translateY(-50%);
+}
+
+[data-att-layout='tray'] .chat-input .img-wrap.is-uploading::before {
+  animation: img-glyph-breathe 1.6s ease-in-out infinite;
+}
+
+[data-att-layout='tray'] .chat-input .img-wrap.is-failed::before {
+  background: var(--danger);
+}
+
+[data-att-layout='tray'] :is(.chat-input, .chat-user .chat-bubble) .img-wrap.is-att-hot::before {
+  background: var(--accent);
+}
+
+/* 块引用：字号归零藏掉片段（文字还在 DOM 里，复制照样拿得到），计数文字自带字号（两个容器都是 --t-md 的正文） */
+[data-att-layout='tray'] :is(.chat-input, .chat-user .chat-bubble) .block-ref {
+  max-width: none;
+  font-size: 0;
+  counter-increment: att-quote;
+}
+
+[data-att-layout='tray'] :is(.chat-input, .chat-user .chat-bubble) .block-ref::after {
+  content: '引用 ' counter(att-quote);
+  font-size: calc(var(--t-md) * 0.92);
+}
+
+/* 页面提及：标题收起（卡片上有），只留「页面 N」 */
+[data-att-layout='tray'] :is(.chat-input, .chat-user .chat-bubble) .page-mention {
+  max-width: none;
+  counter-increment: att-page;
+}
+
+[data-att-layout='tray'] :is(.chat-input, .chat-user .chat-bubble) .page-mention-title {
+  display: none;
+}
+
+[data-att-layout='tray'] :is(.chat-input, .chat-user .chat-bubble) .page-mention::after {
+  content: '页面 ' counter(att-page);
+}
+
+/* 托盘：输入卡外面、上方一排卡片（editor/composer-attach.tsx 的 AttachTray） */
+.att-tray {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 0 2px 8px;
+}
+
+/* 已发消息的附件：气泡上方靠右（chat-view.tsx 的 buildBubble） */
+.chat-user-col {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  min-width: 0;
+  max-width: min(78%, 540px);
+}
+
+.chat-root .chat-user-col > .chat-bubble {
+  max-width: 100%;
+}
+
+.att-cards {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+/* ---------- 卡片（editor/att-cards.ts 的 attCard） ---------- */
+
+.att-card {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 48px;
+  max-width: 230px;
+  padding: 0 12px 0 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgba(15, 15, 15, 0.04);
+  transition: transform var(--d-2) var(--ease-out), border-color var(--d-1), box-shadow var(--d-1);
+}
+
+.att-card.is-new {
+  animation: att-card-in var(--d-3) var(--ease-out) both;
+}
+
+@keyframes att-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.96);
+  }
+}
+
+.att-card.is-att-hot {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-tint);
+  transform: translateY(-2px);
+}
+
+.att-card.is-image {
+  width: 48px;
+  padding: 0;
+}
+
+.att-cards .att-card.is-image {
+  width: 88px;
+  height: 88px;
+}
+
+.att-card-img {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: calc(var(--r-md) - 1px);
+  background: var(--bg-sunk);
+  cursor: zoom-in;
+}
+
+.att-card-img img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.att-card.is-uploading .att-card-img img {
+  animation: img-glyph-breathe 1.6s ease-in-out infinite;
+}
+
+.att-card.is-failed {
+  border-color: var(--danger);
+}
+
+.att-card.is-failed .att-card-img img {
+  opacity: 0.45;
+}
+
+.att-card-badge {
+  position: absolute;
+  left: 4px;
+  bottom: 4px;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.58);
+  color: #fff;
+  font-size: 10.5px;
+  line-height: 16px;
+  pointer-events: none;
+}
+
+.att-card-ico {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  background: var(--bg-sunk);
+  color: var(--ink-2);
+  transition: background var(--d-1), color var(--d-1);
+}
+
+.att-card.is-att-hot .att-card-ico {
+  background: var(--accent-tint);
+  color: var(--accent);
+}
+
+.att-card-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.att-card-title,
+.att-card-sub {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.att-card-title {
+  font-size: var(--t-sm);
+  color: var(--ink);
+}
+
+.att-card-sub {
+  font-size: 11.5px;
+  color: var(--ink-3);
+}
+
+/* × 悬停才出（触屏没有悬停，常显） */
+.att-card-x {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 2px solid var(--bg);
+  border-radius: 50%;
+  background: var(--ink);
+  color: var(--bg);
+  cursor: pointer;
+  opacity: 0;
+  transform: scale(0.8);
+  transition: opacity var(--d-1), transform var(--d-1);
+}
+
+.att-card:hover .att-card-x,
+.att-card-x:focus-visible {
+  opacity: 1;
+  transform: none;
+}
+
+@media (hover: none) {
+  .att-card-x {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ---------- 行内摆法的悬停预览（editor/att-hover.ts，挂 body） ---------- */
+
+.att-peek {
+  position: fixed;
+  z-index: 50;
+  max-width: 320px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity var(--d-1), visibility var(--d-1);
+}
+
+.att-peek.is-on {
+  opacity: 1;
+  visibility: visible;
+}
+
+.att-peek img {
+  display: block;
+  max-width: 300px;
+  max-height: 220px;
+  border-radius: 6px;
+}
+
+.att-peek-quote {
+  max-width: 300px;
+  padding: 2px 6px 2px 10px;
+  border-left: 3px solid var(--line-strong);
+  font-size: var(--t-sm);
+  line-height: 1.6;
+  color: var(--ink);
+}
+
+/* 循环动画不走时长令牌，减弱动效时显式关掉 */
+@media (prefers-reduced-motion: reduce) {
+  .chat-input .img-wrap.is-uploading img,
+  [data-att-layout='tray'] .chat-input .img-wrap.is-uploading::before,
+  .att-card.is-uploading .att-card-img img {
+    animation: none;
+  }
+}

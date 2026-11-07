@@ -3,7 +3,7 @@
 // （markdown-blocks.ts 的 parseBlocks）、导入都走它。新块的写法：识别规则登记进 transform.ts 的两张表，
 // 序列化方向由节点自己的 toMarkdown 产出标准 mdast。
 
-export { BOOKMARK, CALLOUT, COLUMN, COLUMNS, EMBED, plainText, safeBookmarkUrl, safeEmbedSrc, TOC, TOGGLE } from './blocks.js'
+export { AI_GEN, BOOKMARK, BUTTON, CALLOUT, COLUMN, COLUMNS, EMBED, plainText, safeBookmarkUrl, safeEmbedSrc, TOC, TOGGLE } from './blocks.js'
 export { BG_HEX, COLOR_NAMES, DEFAULT_HIGHLIGHT, isColorName, markCloseTag, markOpenTag, TEXT_HEX, type ColorName } from './colors.js'
 export { parseMdast } from './extensions.js'
 export { parseMarkdown } from './parse.js'

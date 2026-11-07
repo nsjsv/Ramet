@@ -40,6 +40,7 @@ const PERSON_TYPES: ReadonlySet<PropType> = new Set(['person', 'created_by', 'ed
 export function propFormulaType(prop: Pick<CollectionProp, 'id' | 'type' | 'cfg'>): FormulaType | null {
   if (prop.id === TITLE_PROP_ID) return 'text'
   switch (prop.type) {
+    case 'ai':
     case 'text':
     case 'url':
     case 'email':
@@ -69,6 +70,9 @@ export function propFormulaType(prop: Pick<CollectionProp, 'id' | 'type' | 'cfg'
       return rollupOutput(prop.cfg.fn)
     case 'formula':
       return null
+    // 按钮没有值：公式里读到的恒为空，按文字算
+    case 'button':
+      return 'text'
   }
 }
 

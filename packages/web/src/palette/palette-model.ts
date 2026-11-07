@@ -44,7 +44,7 @@ export const PALETTE_COPY = {
     memory: '空间的公共记忆',
     skills: 'Skill 库',
     machines: '设置：机器',
-    quick: '设置：随手 AI',
+    quick: '设置：⌘J',
   },
 }
 
@@ -117,8 +117,8 @@ export function paletteItems(ctx: PaletteCtx, act: PaletteActions): PaletteItem[
   }
   if (ctx.spaceId) cmd('new-page', C.cmd.newPage, 'plus', act.newPage)
   cmd('inbox', C.cmd.inbox, 'inbox', () => act.go('/inbox'))
-  cmd('memory', C.cmd.memory, 'memory', () => act.go('/memory'))
-  cmd('skills', C.cmd.skills, 'skill', () => act.go('/skills'))
+  cmd('memory', C.cmd.memory, 'memory', () => act.go('/ai/memory'))
+  cmd('skills', C.cmd.skills, 'skill', () => act.go('/ai/skills'))
   cmd('machines', C.cmd.machines, 'plug', () => act.settings('machines'))
   cmd('quick', C.cmd.quick, 'sparkle', () => act.settings('quick'))
   for (const p of ctx.pages) {

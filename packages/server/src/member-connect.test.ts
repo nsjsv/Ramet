@@ -2,7 +2,7 @@
  * 空间 member 也能接入机器，但要该空间的 owner 批准后才生效：
  *   - connectors.status：owner 确认 → approved，member 确认 → pending（按浏览器里确认配对的人确认时的角色定）；
  *   - pending 的机器任何人都用不了，包括接入人自己：唯一闸门是 machine-access.ts 的 USABLE，这里挑 agent 目录 /
- *     prepare / 项目面板 / 终端 / 随手 AI 本地通道各打一下，它们是同一处判定；
+ *     prepare / 项目面板 / 终端 / ⌘J 本地通道各打一下，它们是同一处判定；
  *   - 批准 / 拒绝的门槛是该空间的 owner（全局 admin 不参与，除非他本人就是该空间 owner）；
  *   - 可见性：pending 只有空间 owner 和接入人本人看得到（connectors 列表 / machines 列表都不返回给别人）；
  *   - 接入人能撤销自己的机器；被移出空间 / 降为 viewer（含自己退出、重新邀请降权）→ 他在该空间接入的机器被删、在线连接断开。
@@ -140,7 +140,7 @@ test('pending 的机器在线：接入人自己、空间 owner、别的成员的
     expect((await usableConnectors(pool, w.id.mem, scope)).has(m.id), `usableConnectors ${scope}`).toBe(false)
   }
 
-  // 入口：prepare / dirs（agent 范围）、项目面板与终端（machine 范围）、随手 AI 本地通道（agent 范围）
+  // 入口：prepare / dirs（agent 范围）、项目面板与终端（machine 范围）、⌘J 本地通道（agent 范围）
   const prepare = await postJson(`/api/pages/${w.pageId}/agent-prepare`, w.cookie.mem, { agent })
   expect(prepare.status).toBe(403)
   expect(await prepare.json()).toMatchObject({ error: 'forbidden', message: '这台机器还在等空间管理员批准' })
@@ -148,7 +148,7 @@ test('pending 的机器在线：接入人自己、空间 owner、别的成员的
   expect((await call('GET', `/api/pages/${w.pageId}/project?agent=${encodeURIComponent(agent)}`, w.cookie.mem)).status).toBe(403)
   expect((await call('GET', `/api/pages/${w.pageId}/project/tree?agent=${encodeURIComponent(agent)}&path=`, w.cookie.mem)).status).toBe(403)
   expect((await call('POST', `/api/pages/${w.pageId}/project/pty?agent=${encodeURIComponent(agent)}`, w.cookie.mem, { cols: 80, rows: 24 })).status).toBe(403)
-  // 随手 AI 本地通道：设置里选不了它；就算设置行里留着，调用也被拒
+  // ⌘J 本地通道：设置里选不了它；就算设置行里留着，调用也被拒
   const put = await call('PUT', '/api/me/ai-settings', w.cookie.mem, { channel: 'local', localAgent: agent })
   expect(put.status).toBe(400)
   await pool.query(

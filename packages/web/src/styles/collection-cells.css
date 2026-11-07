@@ -345,3 +345,36 @@ a.cl-files-name:hover {
   text-align: left;
   cursor: pointer;
 }
+
+/* 按钮属性的格子：一颗小按钮，没设置时虚线 */
+.cl-btn {
+  max-width: 100%;
+  padding: 1px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--t-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.cl-btn:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.cl-btn:disabled {
+  color: var(--ink-3);
+  cursor: default;
+}
+
+.cl-btn.is-unset {
+  border-style: dashed;
+}
+
+.cl-btn.is-busy {
+  opacity: 0.6;
+}

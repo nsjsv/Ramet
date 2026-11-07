@@ -99,6 +99,8 @@ function mapNode(node: PMNode, ctx: ExportContext): PMNode[] {
       return [ctx.schema.text(`@${str(node.attrs.label) || ctx.agentLabel(str(node.attrs.agentId))}`)]
     case 'user_mention':
       return [ctx.schema.text(`@${str(node.attrs.name) || '成员'}`)]
+    case 'file_mention':
+      return [ctx.schema.text(`@${str(node.attrs.path) || '文件'}`)]
     case 'user_message': {
       const label = boldLine(ctx, '你')
       return [ctx.schema.nodes.blockquote!.create(null, [...(label ? [label] : []), ...mapChildren(node, ctx)])]

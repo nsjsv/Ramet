@@ -3,6 +3,7 @@ import { copyText } from '../clipboard'
 import { COPY } from '../copy'
 import { Icon } from '../icons'
 import { insertIntoComposer } from '../editor/composer-bridge'
+import { fileMark } from '../editor/file-mention'
 import { hydrateCode } from '../editor/code-highlight'
 import { QUICK_KEY_LABEL } from '../editor/quick-keys'
 import { langOfPath, sizeLabel } from './file-tree'
@@ -15,7 +16,7 @@ const C = COPY.project.files
 type State = { status: 'loading' } | { status: 'error'; message: string } | { status: 'ok'; data: ReadResult }
 
 /* ---------- 文件查看器：行号 + 语法高亮（复用编辑器代码块的 lowlight 与配色）----------
- * 查看器本身只读；唯一能改文件的是选中几行后的 ⌘J（随手 AI，use-code-quick.tsx）：就地 diff，↵ 收下才写回。
+ * 查看器本身只读；唯一能改文件的是选中几行后的 ⌘J（⌘J，use-code-quick.tsx）：就地 diff，↵ 收下才写回。
  * 行号和代码是并排的两个 <pre>（同字体同行高，不换行，一起横向滚），代码那个交给 hydrateCode 画高亮。
  * hydrateCode 直接改 DOM（把文字切成带 class 的 span），所以 <code> 的内容由 effect 手动写，React 不碰它的子节点。
  * 二进制不显示内容；超过 1 MB 只给前 1 MB 并说明。 */
@@ -37,7 +38,7 @@ export default function FileViewer({
   tick: number
   /** 页面可写（不是只读成员）：只有这时 ⌘J 才能把改写写回文件 */
   canWrite: boolean
-  /** 随手 AI 把改写写进了文件：改动分页据此刷新 */
+  /** ⌘J 把改写写进了文件：改动分页据此刷新 */
   onWritten: () => void
   onBack: () => void
 }) {
@@ -75,11 +76,10 @@ export default function FileViewer({
     return () => window.clearTimeout(timer)
   }, [hint])
 
-  /** 把文件 @ 引用进输入卡；文档模式没有输入卡时退回复制（粘贴进 >> 消息） */
+  /** 把文件引用进输入卡（框里成文件 chip，发出去 agent 看到 `@路径`）；文档模式没有输入卡时退回复制 `@路径`（粘贴进 >> 消息） */
   function reference(): void {
-    const mark = `@${path} `
-    if (insertIntoComposer(mark)) setHint(C.referenced)
-    else void copyText(mark.trim()).then((ok) => ok && setHint(C.copied))
+    if (insertIntoComposer(pageId, fileMark(path))) setHint(C.referenced)
+    else void copyText(`@${path}`).then((ok) => ok && setHint(C.copied))
   }
 
   return (

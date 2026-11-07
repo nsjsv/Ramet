@@ -90,7 +90,7 @@ export default function SkillHead({ pageId, readOnly, pages }: { pageId: string;
   return (
     <section className="skill-head">
       <div className="skill-head-top">
-        <button type="button" onClick={() => navigate('/skills')}>
+        <button type="button" onClick={() => navigate('/ai/skills')}>
           <Icon name="skill" size={13} /> {C.library}
         </button>
         {source && (

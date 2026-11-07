@@ -330,6 +330,26 @@
   flex: 1;
 }
 
+/* AI 属性的设置：要求（多行）+ 填充按钮 + 自动更新 */
+.cl-ai-prop {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cl-field-col {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+}
+
+.cl-ai-prompt {
+  min-height: 4.2em;
+  resize: vertical;
+  font: inherit;
+  line-height: 1.5;
+}
+
 .cl-option-row {
   display: flex;
   flex-wrap: wrap;

@@ -11,9 +11,9 @@ import { SESSION_CAP } from './session-types.js'
 /** hello 里的能力标记：带 'project' 的 connector 认识下面的五种只读帧（写文件是另一个能力 'write'）。老 connector 没有这个标记，
  *  中心不发新帧（发了它也只会在 switch 里掉进 default 不应答，等到超时），接口回 409 */
 export const PROJECT_CAP = 'project'
-/** 随手 AI 的本地通道（quick 帧：在这台机器上用 agent 单次改写，受限会话）。老 connector 没有，中心回 409 connector outdated */
+/** ⌘J 的本地通道（quick 帧：在这台机器上用 agent 单次改写，受限会话）。老 connector 没有，中心回 409 connector outdated */
 export const QUICK_CAP = 'quick'
-/** 写文件（write 帧：代码查看器里收下随手 AI 的改写）。带 'project' 但没有 'write' 的老 connector，中心回 409 connector outdated，不发帧 */
+/** 写文件（write 帧：代码查看器里收下 ⌘J 的改写）。带 'project' 但没有 'write' 的老 connector，中心回 409 connector outdated，不发帧 */
 export const WRITE_CAP = 'write'
 /** prompt 帧里的图片块（这一轮那条用户消息里的截图，PromptBlock 的 image 变体）。老 connector 不认它
  *  （会当成 resource 块发出去），中心发帧前把图片块剥掉，只发文本 */

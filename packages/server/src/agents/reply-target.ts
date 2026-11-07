@@ -49,7 +49,7 @@ async function replyRunTarget(
 ): Promise<RunTarget> {
   const target = redoTarget(fragment, replyId)
   if (!target.ok) throw target.reason === 'no-reply' ? new ReplyNotFoundError() : new NoUserMessageError()
-  const agent = (await host.resolve(target.agent, user)) ?? (elsewhere ? await sameToolElsewhere(host, pageId, target.agent, user) : null)
+  const agent = (await host.resolve(target.agent, user, pageId)) ?? (elsewhere ? await sameToolElsewhere(host, pageId, target.agent, user) : null)
   if (!agent) throw new UnknownAgentError()
   // 混用过多个工具的老页面：后来换了工具的回复只能新开一页再问；@ 点名出来的回复照常（本来就是合法产生的）
   const lock = lockedTool(fragment)

@@ -94,7 +94,7 @@ export default function AgentCommands({
                   className="project-chip-btn"
                   onClick={() => {
                     void api.stopCommand(pageId, c.terminalId!).catch((err: unknown) => {
-                      setAgentRunError(err instanceof Error ? `${COPY.run.stopCommandFailed}：${err.message}` : COPY.run.stopCommandFailed)
+                      setAgentRunError(pageId, err instanceof Error ? `${COPY.run.stopCommandFailed}：${err.message}` : COPY.run.stopCommandFailed)
                     })
                   }}
                 >

@@ -10,11 +10,11 @@ export function agentShortLabel(id: string, agents: readonly AgentInfo[]): strin
   return id.replace(/^c:[^:]+:/, '') || 'AI'
 }
 
-/** 改动列表里「谁改的」：by 是 agent 的 catalog id；'quick' = 随手 AI 写的；没有 = 用户自己 */
+/** 改动列表里「谁改的」：by 是 agent 的 catalog id；'quick' = ⌘J 写的；没有 = 用户自己 */
 export function authorLabel(by: string | undefined, agents: readonly AgentInfo[], you: string, quick: string): string {
   if (!by) return you
   return by === QUICK_AUTHOR ? quick : agentShortLabel(by, agents)
 }
 
-/** 服务端给 git-status 的 by：随手 AI 写进去的文件（不是 agent 的 catalog id） */
+/** 服务端给 git-status 的 by：⌘J 写进去的文件（不是 agent 的 catalog id） */
 export const QUICK_AUTHOR = 'quick'

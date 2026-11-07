@@ -103,7 +103,7 @@ export function createLiveReply(opts: {
     view.sync(run, agentStateFor(opts.pageId))
     // 审批卡归这条运行（结束后的后台审批回到底部弹条）
     const hosting = !run.outcome
-    if (hosting && !unhost) unhost = registerApprovalHost()
+    if (hosting && !unhost) unhost = registerApprovalHost(opts.pageId)
     else if (!hosting && unhost) {
       unhost()
       unhost = null

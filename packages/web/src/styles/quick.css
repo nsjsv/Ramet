@@ -1,5 +1,5 @@
-/* ---------- 随手 AI（⌘J） ----------
- * 浮层（editor/quick-popover.ts，挂 body、fixed）、文档里的修订预览（editor/quick-ai.ts 的装饰）、选区菜单里的 ✨ 按钮、设置 → 随手 AI。
+/* ---------- ⌘J ----------
+ * 浮层（editor/quick-popover.ts，挂 body、fixed）、文档里的修订预览（editor/quick-ai.ts 的装饰）、选区菜单里的 ✨ 按钮、设置 → Genet。
  * 卡片外观复用 menus.css 的 .pop-card；颜色全走令牌，深色模式自动跟随（revisions 用 --ok / --danger，与版本历史的 .snap-ins / .snap-del 同色）。
  * 动画只用令牌时长，减弱动效下归零。 */
 
@@ -260,7 +260,7 @@
   color: var(--ink-3);
 }
 
-/* ---------- 设置 → 随手 AI ---------- */
+/* ---------- 设置 → Genet ---------- */
 .quick-set-warn {
   color: var(--warn);
   font-size: var(--t-xs);
@@ -318,5 +318,16 @@
 }
 
 .quick-set-grow {
+  flex: 1;
+}
+
+/* 模型：下拉占满，右边是「获取模型」 */
+.quick-set-model {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.quick-set-model .ui-select {
   flex: 1;
 }

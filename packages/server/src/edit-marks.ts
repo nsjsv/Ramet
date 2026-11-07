@@ -13,10 +13,13 @@ import { isAddressable } from '@ramet/shared/block-address'
 /** 一笔事务记给谁 */
 export type Editor = { userId: string; actor: 'user' | 'agent'; agent: string | null }
 type Mark = Editor & { at: Date }
-/** 两次落库之间攒下的编辑。块存元素引用、落库时再读 id：新块的 id 可能由下一笔事务才补上 */
-type Pending = { page: Mark | null; blocks: Map<Y.XmlElement, Mark> }
+/** 两次落库之间攒下的编辑。块存元素引用、落库时再读 id：新块的 id 可能由下一笔事务才补上。
+ *  editors = 这一批里动过手的每个人最后一次动手的时刻（「上次编辑」只留每块最后一个人，盯页面要知道这一批都有谁） */
+type Pending = { page: Mark | null; blocks: Map<Y.XmlElement, Mark>; editors: Map<string, Date> }
 
 const pending = new WeakMap<Y.Doc, Pending>()
+/** 刚落库的那一批的编辑者：存盘之后的扩展钩子（afterStoreDocument）来取 */
+const flushed = new WeakMap<Y.Doc, Map<string, Date>>()
 const tracked = new WeakSet<Y.Doc>()
 
 type OriginContext = { user?: { id?: string }; actor?: { kind?: string; agent?: string | null } }
@@ -82,10 +85,18 @@ export function trackEdits(doc: Y.Doc): void {
     })
     if (!edited) return
     let batch = pending.get(doc)
-    if (!batch) pending.set(doc, (batch = { page: null, blocks: new Map() }))
+    if (!batch) pending.set(doc, (batch = { page: null, blocks: new Map(), editors: new Map() }))
     batch.page = mark
+    batch.editors.set(mark.userId, mark.at)
     for (const el of touched) batch.blocks.set(el, mark)
   })
+}
+
+/** 还没落库的编辑里这一块最后是谁改的（存盘钩子落库之后又来的编辑，要等下一次存盘）；没有 = null。
+ *  正文提及（triggers/sources/mention.ts）认「谁加的 @」时先看它，不然落库与扫描之间的编辑会被记到上一个编辑者头上 */
+export function pendingEditor(doc: Y.Doc, el: Y.XmlElement): Editor | null {
+  const mark = pending.get(doc)?.blocks.get(el)
+  return mark ? { userId: mark.userId, actor: mark.actor, agent: mark.agent } : null
 }
 
 // 同一批里 block_id 已去重（ON CONFLICT 不能在一条语句里改同一行两次）；乱序到达的旧标记不覆盖新的
@@ -97,11 +108,20 @@ const UPSERT_MARKS = `INSERT INTO edit_marks (page_id, block_id, user_id, actor,
     actor_agent = EXCLUDED.actor_agent, edited_at = EXCLUDED.edited_at
   WHERE edit_marks.edited_at <= EXCLUDED.edited_at`
 
+/** 上一次存盘落库的那一批里动过手的人（userId → 最后一次动手的时刻），取一次就清掉；那一批没人动手 = 空。
+ *  盯页面（triggers/sources/page-watch.ts）在 afterStoreDocument 里取：它在 onStoreDocument（含落库）全部跑完之后 */
+export function takeFlushedEditors(doc: Y.Doc): Map<string, Date> {
+  const editors = flushed.get(doc) ?? new Map<string, Date>()
+  flushed.delete(doc)
+  return editors
+}
+
 /** 把攒下的编辑落库。先摘下暂存再写（落库期间的新编辑进下一批）。尽力而为：失败只记日志，不顶给 Hocuspocus 钩子 */
 export async function flushEditMarks(pool: Pool, pageId: string, doc: Y.Doc): Promise<void> {
   const batch = pending.get(doc)
   if (!batch) return
   pending.delete(doc)
+  flushed.set(doc, batch.editors)
   const rows = new Map<string, Mark>()
   if (batch.page) rows.set('', batch.page)
   for (const [el, mark] of batch.blocks) {

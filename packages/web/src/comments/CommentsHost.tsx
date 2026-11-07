@@ -1,7 +1,8 @@
 /* ---------- 一个页面的评论宿主（编辑页 / 公开页各挂一个）----------
  * 绑定 store、把未解决的划词串（和正在写的草稿）喂给高亮插件、登记划词菜单的「评论」入口（只编辑页）、
- * 处理 `?comment=<串>` 深链（划词串滚到锚点开浮层；整页讨论 / 原文已删除的打开抽屉并展开），画浮层与抽屉。
- * 整页讨论区（PageDiscussion）由宿主页面放在正文下方，同一个 store。
+ * 处理 `?comment=<串>` 深链（划词串滚到锚点并激活；整页讨论 / 原文已删除的打开抽屉并展开），画浮层与抽屉。
+ * 激活的串放得下右侧评论栏（store.wide）时画成卡片、不弹浮层。
+ * 右侧评论栏（CommentMargin）与整页讨论区（PageDiscussion）由宿主页面放在正文列里，同一个 store。
  * 两种评论的开关（kinds）由宿主读页面属性传进来：服务端只列开着的那种串，划词评论关着就不登记划词入口。
  * 宿主按开关做 key：开关一变就重新绑定、重拉（别人切的开关随页面树重拉过来，也走这条）。 */
 
@@ -13,13 +14,11 @@ import CommentPopover from './CommentPopover'
 import CommentsDrawer from './CommentsDrawer'
 import type { CommentSwitchState } from './CommentSwitches'
 import type { CommentCtx } from './CommentThread'
-import { bindCommentsPage, openDraft, openDrawer, openThread, useComments } from './comments-store'
+import { DRAFT_ID, bindCommentsPage, openDraft, openDrawer, openThread, useComments } from './comments-store'
 
-/** 草稿的高亮 id（还没有串）：点它什么也不做 */
-const DRAFT = '__draft'
-
+// 草稿的高亮（还没有串）：点它什么也不做
 const onMarkClick = (id: string): void => {
-  if (id !== DRAFT) openThread(id)
+  if (id !== DRAFT_ID) openThread(id)
 }
 
 interface Props {
@@ -48,21 +47,21 @@ export default function CommentsHost({ pageId, mode, getView, ctx, deepLink, rea
   }, [pageId, mode, inline])
 
   const ours = s.pageId === pageId
-  const { threads, popover } = s
+  const { threads, popover, hover } = s
   useEffect(() => {
     const view = getView()
     if (!view || !ours) return
     const marks: CommentMark[] = []
     for (const t of threads) if (t.kind === 'inline' && t.anchor && !t.resolvedAt) marks.push({ id: t.id, anchor: t.anchor })
-    if (popover?.kind === 'draft') marks.push({ id: DRAFT, anchor: popover.anchor })
-    const active = popover?.kind === 'thread' ? popover.threadId : popover ? DRAFT : null
-    setCommentMarks(view, marks, active, onMarkClick)
-  }, [threads, popover, ours, ctx.tick, getView])
+    if (popover?.kind === 'draft') marks.push({ id: DRAFT_ID, anchor: popover.anchor })
+    const active = popover?.kind === 'thread' ? popover.threadId : popover ? DRAFT_ID : null
+    setCommentMarks(view, marks, active, hover, onMarkClick)
+  }, [threads, popover, hover, ours, ctx.tick, getView])
   // 卸载（换页 / 切到对话视图）：高亮撤掉
   useEffect(
     () => () => {
       const view = getView()
-      if (view) setCommentMarks(view, [], null, null)
+      if (view) setCommentMarks(view, [], null, null, null)
     },
     [getView],
   )
@@ -90,7 +89,7 @@ export default function CommentsHost({ pageId, mode, getView, ctx, deepLink, rea
   if (!ours) return null
   return (
     <>
-      {popover && <CommentPopover popover={popover} threads={threads} getView={getView} ctx={ctx} />}
+      {popover && !s.wide && <CommentPopover popover={popover} threads={threads} getView={getView} ctx={ctx} />}
       {s.drawer && <CommentsDrawer threads={threads} expanded={s.expanded} ctx={ctx} getView={getView} kinds={kinds} />}
     </>
   )

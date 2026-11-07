@@ -27,7 +27,7 @@ export function answerOption(pageId: string, req: PermissionReq, optionId: strin
   void api.respondPermission(pageId, req.agentId, req.requestId, optionId).catch((err: unknown) => {
     for (const b of list) b.disabled = false
     if (err instanceof ApiError && err.status === 404) return
-    setAgentRunError(err instanceof Error ? err.message : COPY.ask.failed)
+    setAgentRunError(pageId, err instanceof Error ? err.message : COPY.ask.failed)
   })
 }
 
@@ -48,7 +48,7 @@ export function buildAskCard(pageId: string, req: PermissionReq, team: TeamState
   }
   // agent 的提问：表单替代选项按钮（提交 / 跳过；答案不合表单的原因显示在卡片里）
   if (req.form) {
-    card.append(mountAsk(pageId, { agentId: req.agentId, requestId: req.requestId, form: req.form }, setAgentRunError).el)
+    card.append(mountAsk(pageId, { agentId: req.agentId, requestId: req.requestId, form: req.form }, (message) => setAgentRunError(pageId, message)).el)
     return card
   }
   const preview = permissionPreviewHtml(req)

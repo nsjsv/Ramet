@@ -4,7 +4,7 @@
 //   ExitPlanMode    → 审批卡，选项 = 批准并切到哪个模式（来自 permission_suggestions 的 setMode），id 前缀固定，posture 据此认提权
 //   其余工具        → 允许一次 / 总是允许（有建议规则、且 CLI 没说不许给「总是」时）/ 拒绝
 //   MCP elicitation → 带 form 的 permission（requestedSchema 走 ask-form 的同一份归一）；url 模式 = 链接 + 完成
-// 受限会话（随手 AI）一律拒绝，不发事件。
+// 受限会话（⌘J）一律拒绝，不发事件。
 
 import type {
   CanUseTool,
@@ -20,8 +20,8 @@ import type { AskContent, AskForm, PermissionEvent, PermissionOption } from '../
 import { rec, str } from '../tool-text.js'
 import { toolUseFace } from './tools.js'
 
-/** 受限会话（随手 AI）里 claude 要用工具时回给它的话 */
-export const RESTRICTED_MESSAGE = '这是随手 AI 的单次改写，不允许读写文件或运行命令'
+/** 受限会话（⌘J）里 claude 要用工具时回给它的话 */
+export const RESTRICTED_MESSAGE = '这是 ⌘J 的单次改写，不允许读写文件或运行命令'
 
 /** 不经人确认就执行的模式：bypassPermissions 全部放行，auto 由分类器代批。两者都等于把机器交给 agent，只有机器主人能进 */
 export const UNRESTRICTED_MODES: readonly PermissionMode[] = ['bypassPermissions', 'auto']

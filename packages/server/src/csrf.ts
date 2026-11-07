@@ -42,9 +42,12 @@ export function originAllowed(origin: string | undefined, host: string | undefin
   return false
 }
 
+/** 不碰登录态的端点（收到外部请求：只认地址里的密钥），跨来源的浏览器请求照收 */
+const NO_SESSION_PREFIXES = ['/api/hooks/']
+
 export function csrfGuard(): MiddlewareHandler {
   return async (c, next) => {
-    if (SAFE_METHODS.has(c.req.method)) return next()
+    if (SAFE_METHODS.has(c.req.method) || NO_SESSION_PREFIXES.some((p) => c.req.path.startsWith(p))) return next()
     const site = c.req.header('sec-fetch-site')
     const blocked =
       site === 'same-site' || site === 'cross-site' || !originAllowed(c.req.header('origin'), c.req.header('host'))

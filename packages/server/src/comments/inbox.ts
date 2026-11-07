@@ -24,30 +24,30 @@ const WINDOW_DAYS = 30
 const LIST_MAX = 30
 const EXCERPT_MAX = 120
 
+/** 评论 c 为什么该让 who 看到（who 是 SQL 表达式；c = comments、t = comment_threads、p = pages 的别名）：
+ *  @了他 > 他在串里有未删的发言 > c 是首条且他是页面创建者；都不是 = NULL。
+ *  收件箱的评论条目与「评论找我」触发（triggers/sources/comment.ts）都用这一份，两边认的人才对得上 */
+export function commentReason(who: string): string {
+  return `CASE WHEN c.mentions @> ARRAY[${who}::text] THEN 'mention'
+    WHEN EXISTS (SELECT 1 FROM comments o WHERE o.thread_id = t.id AND o.author_id = ${who} AND o.deleted_at IS NULL) THEN 'reply'
+    WHEN p.owner_id = ${who} AND c.id = (SELECT f.id FROM comments f WHERE f.thread_id = t.id ORDER BY f.created_at, f.id LIMIT 1) THEN 'new_thread' END`
+}
+
 const SELECT_COMMENT_ITEMS = `SELECT * FROM (
-  SELECT DISTINCT ON (t.id) t.id AS thread_id, p.id AS page_id, p.title, c.body, c.created_at, c.author_id, u.username,
-    CASE WHEN c.mentions @> ARRAY[$1::text] THEN 'mention'
-         WHEN mine.yes THEN 'reply'
-         ELSE 'new_thread' END AS reason
+  SELECT DISTINCT ON (t.id) t.id AS thread_id, p.id AS page_id, p.title, c.body, c.created_at, c.author_id, u.username, why.reason
   FROM comment_threads t
   JOIN live_pages p ON p.id = t.page_id
   JOIN space_members m ON m.space_id = p.space_id AND m.user_id = $1
   JOIN comments c ON c.thread_id = t.id
   LEFT JOIN users u ON u.id = c.author_id
   LEFT JOIN comment_reads r ON r.thread_id = t.id AND r.user_id = $1
-  CROSS JOIN LATERAL (SELECT EXISTS (
-    SELECT 1 FROM comments o WHERE o.thread_id = t.id AND o.author_id = $1 AND o.deleted_at IS NULL
-  ) AS yes) mine
+  CROSS JOIN LATERAL (SELECT ${commentReason('$1')} AS reason) why
   WHERE c.deleted_at IS NULL
     AND ${KIND_ENABLED}
     AND c.author_id IS DISTINCT FROM $1
     AND c.created_at > now() - interval '${WINDOW_DAYS} days'
     AND (r.read_at IS NULL OR c.created_at > r.read_at)
-    AND (
-      c.mentions @> ARRAY[$1::text]
-      OR mine.yes
-      OR (p.owner_id = $1 AND c.id = (SELECT f.id FROM comments f WHERE f.thread_id = t.id ORDER BY f.created_at, f.id LIMIT 1))
-    )
+    AND why.reason IS NOT NULL
   ORDER BY t.id, c.created_at DESC, c.id DESC
 ) hit ORDER BY created_at DESC, thread_id LIMIT ${LIST_MAX}`
 

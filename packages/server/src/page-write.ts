@@ -29,7 +29,7 @@ import { materialize, materializeInlines } from './agents/markdown.js'
 /** 图片：`image:<uuid>` 单独一行落成 image 节点，src 是本站原图地址（不带 /display）。
  *  uuid 是文件 id，写之前要查库确认存在。外链不是这个形状，当普通文字。 */
 const IMAGE_LINE_RE = /^image:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i
-/** 页面提及：`page:<uuid>` 记号落成 page_mention 行内 chip（title 可空）。出现在 `new` 的任何位置都升成 chip */
+/** 页面提及：`page:<uuid>` 记号落成 page_mention 行内 chip（title 可空）。出现在 `new` 文字里的任何位置（行内代码除外）都升成 chip */
 const PAGE_TOKEN_RE = /page:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/gi
 /** 同上但不带 /g：只做有没有的判定，/g 的 lastIndex 状态会让重复调用漏判 */
 const HAS_PAGE_TOKEN_RE = /page:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
@@ -53,22 +53,45 @@ async function assertImageFile(pool: Pool, fileId: string): Promise<void> {
 
 // ---------- `new` → 块 / 行内 ----------
 
-/** 一行里的 `page:<uuid>` 记号 → page_mention chip，其余按文字。图片整块落成 image 节点（见 lineBlock），
- *  行内出现的 image: 当普通文字，与 textOf 只认 image 节点 attr 同一口径。 */
-function inlinesWithMentions(line: string): Inline[] {
+/** 文字里的 `page:<uuid>` 记号 → page_mention chip（行内代码里的不动）。在 markdown 解析之后扫：解析器把记号当普通文字留着；
+ *  `[@名字](page:<uuid>)` 这种链接形态解析时已经按 @ramet/shared/markdown-blocks 的规则落成 chip（与 agent 回复落块同一条），
+ *  链接地址不是文字，不会被这里再切一刀。图片整块落成 image 节点（见 lineBlock），行内出现的 image: 当普通文字，
+ *  与 textOf 只认 image 节点 attr 同一口径。 */
+function withPageTokens(inlines: Inline[]): Inline[] {
   const out: Inline[] = []
-  let last = 0
-  for (const m of line.matchAll(PAGE_TOKEN_RE)) {
-    if (m.index! > last) out.push({ text: line.slice(last, m.index), marks: [] })
-    out.push({ atom: 'page_mention', attrs: { pageId: m[1]!, title: '' } })
-    last = m.index! + m[0].length
+  for (const inline of inlines) {
+    if (!('text' in inline) || inline.marks.some((m) => m.name === 'inlineCode') || !HAS_PAGE_TOKEN_RE.test(inline.text)) {
+      out.push(inline)
+      continue
+    }
+    let last = 0
+    for (const m of inline.text.matchAll(PAGE_TOKEN_RE)) {
+      if (m.index! > last) out.push({ text: inline.text.slice(last, m.index), marks: inline.marks })
+      out.push({ atom: 'page_mention', attrs: { pageId: m[1]!, title: '' } })
+      last = m.index! + m[0].length
+    }
+    if (last < inline.text.length) out.push({ text: inline.text.slice(last), marks: inline.marks })
   }
-  if (last < line.length) out.push({ text: line.slice(last), marks: [] })
   return out
 }
 
-/** 一行文字 → 块。`image:<uuid>` 单独一行落成 image 节点；带 `page:<uuid>` 记号的行落成 chip 段落，
- *  不能交给 parseBlocks，它会把记号当普通文字，前端反解不回 chip */
+/** 块树里所有行内内容都过一遍 withPageTokens（代码块的正文是 text，不是行内内容，不动） */
+function withTokens(block: Block): Block {
+  return {
+    ...block,
+    ...(block.inlines ? { inlines: withPageTokens(block.inlines) } : {}),
+    ...(block.blocks ? { blocks: block.blocks.map(withTokens) } : {}),
+  }
+}
+
+/** markdown → 块，再把记号升成 chip；解析不出东西（解析失败）就整段当一段文字 */
+function markdownBlocks(text: string): Block[] {
+  const blocks = parseBlocks(text).blocks
+  if (blocks.length === 0) return [{ name: 'paragraph', attrs: {}, inlines: withPageTokens([{ text, marks: [] }]) }]
+  return blocks.map(withTokens)
+}
+
+/** 一行文字 → 块。`image:<uuid>` 单独一行落成 image 节点，其余按 markdown（记号见 withPageTokens） */
 function lineBlock(line: string): Block {
   const image = IMAGE_LINE_RE.exec(line.trim())
   if (image) {
@@ -78,14 +101,11 @@ function lineBlock(line: string): Block {
       inlines: [{ atom: 'image', attrs: { src: `/api/files/${image[1]}`, alt: '', title: '' } }],
     }
   }
-  if (HAS_PAGE_TOKEN_RE.test(line)) {
-    return { name: 'paragraph', attrs: {}, inlines: inlinesWithMentions(line) }
-  }
-  return parseBlocks(line).blocks[0] ?? { name: 'paragraph', attrs: {}, inlines: [{ text: line, marks: [] }] }
+  return markdownBlocks(line)[0]!
 }
 
 /** `new` → 块序列（一次 replace 落成的一批顶层块）。
- *  空行分块或出现 `image:` `page:` 记号时逐行落块（记号不能被 markdown 解析吃掉），
+ *  空行分块或出现 `image:` `page:` 记号时逐行落块，
  *  其余整段跑一次 markdown，标题 / 列表 / 表格这类跨行结构才留得住。 */
 export function parseNew(text: string): Block[] {
   if (!text) return []
@@ -102,9 +122,7 @@ export function parseNew(text: string): Block[] {
     }
     return out
   }
-  const blocks = parseBlocks(text).blocks
-  if (blocks.length > 0) return blocks
-  return [{ name: 'paragraph', attrs: {}, inlines: inlinesWithMentions(text) }]
+  return markdownBlocks(text)
 }
 
 /** `new` 作为行内内容（换掉一段文字里的片段）时的形态，只有单一段落能这样落。

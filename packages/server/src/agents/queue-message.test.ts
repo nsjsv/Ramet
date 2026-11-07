@@ -58,3 +58,27 @@ test('一条用户消息：按行成段（空行也是一段），附件图片�
   expect(((a!.get(3) as Y.XmlElement).get(0) as Y.XmlElement).getAttribute('src')).toBe('/api/files/a')
   expect(b!.toArray()).toHaveLength(1)
 })
+
+test('图片记号落在文字原位（只认本站文件 id，别的原样留字）；文件引用解出完整路径', () => {
+  const id = '0b6f4a52-9f9e-4c1d-8f3a-1c2d3e4f5a6b'
+  expect(shape(lineInlines(`对比 @[图片](image:${id}) 和 @[a b.ts](file:src/a%20b%20%28v2%29.ts)`))).toEqual([
+    '对比 ',
+    { image: { src: `/api/files/${id}`, alt: '', title: '' } },
+    ' 和 ',
+    { file_mention: { path: 'src/a b (v2).ts' } },
+  ])
+  // 升不了的记号并进前后的字，同一段文字只有一个文本节点
+  expect(shape(lineInlines('看 @[图片](image:x.png) 就行'))).toEqual(['看 @[图片](image:x.png) 就行'])
+})
+
+test('排队消息带着发送时正在看的页面（ctx）；没有就不写这个属性', () => {
+  const doc = new Y.Doc()
+  const frag = doc.getXmlFragment('prosemirror')
+  frag.insert(0, [
+    userMessageElement('这页讲了啥', [], { agent: '', cwd: '', opts: '', author: 'u1', ctx: 'p9' }),
+    userMessageElement('别的', [], { agent: '', cwd: '', opts: '', author: 'u1' }),
+  ])
+  const [a, b] = frag.toArray() as Y.XmlElement[]
+  expect(a!.getAttribute('ctx')).toBe('p9')
+  expect(b!.getAttribute('ctx')).toBeUndefined()
+})

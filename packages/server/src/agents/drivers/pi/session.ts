@@ -192,7 +192,7 @@ export class PiSession {
     // 受限会话不带审批档：它的审批一律由驱动拒绝，没有配置项
     if (dialect === 'omp') return { args: ['--mode', 'rpc-ui', ...(spec.restricted ? ['--no-tools'] : this.config.launchArgs())], env: {} }
     const args = ['--mode', 'rpc', '--session', this.location]
-    // 受限会话（随手 AI）：不给内置工具、不连任何 MCP（用户配置里的也不连）、不加载我们的扩展
+    // 受限会话（⌘J）：不给内置工具、不连任何 MCP（用户配置里的也不连）、不加载我们的扩展
     if (spec.restricted) return { args: [...args, '--no-tools', '--no-mcp'], env: {} }
     if (spec.tools.length === 0) return { args, env: {} }
     const agentDir = cfg.env?.PI_CODING_AGENT_DIR ?? process.env.PI_CODING_AGENT_DIR ?? join(process.env.HOME ?? '', '.pi', 'agent')

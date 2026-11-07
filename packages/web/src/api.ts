@@ -388,6 +388,8 @@ export interface AgentInfo {
   id: string
   label: string
   logo?: string
+  /** 品牌 mark key（agent-marks.css 的 --mark-<key>）：只有前端自带的目录项指定（如 Genet），别的 agent 按 id / label 里的词认 */
+  mark?: string
   /** 缺省 = 未提供（ConnectorSummary.agents 复用本形状但不带姿态） */
   posture?: AgentPosture
   /** 我对这台机器有 machine 范围的使用权（接入人或有效授权）：项目面板入口的依据；本机 agent 恒为 false。
@@ -395,6 +397,15 @@ export interface AgentInfo {
   machine?: boolean
   /** 有值 = 这个 agent 现在用不了（比如本机 CLI 版本太旧），值是给人看的原因：选择器里置灰、不可选 */
   unavailable?: string
+  /** 只有前端自带的目录项（服务端目录里不列的，如中心里的 Genet，assistant/identity.ts）才有：缺省 = 全都有 */
+  caps?: AgentCaps
+}
+
+/** 发起控件里哪些对这个 agent 有意义：工作区（它在哪台机器的哪个目录跑）、工具档位、带队 */
+export interface AgentCaps {
+  workspace: boolean
+  toolProfile: boolean
+  team: boolean
 }
 
 /** 本地 connector（托管云拓扑）：出站连中心的 agent 宿主机；online 来自中心进程内状态 */
@@ -662,7 +673,7 @@ export const api = {
 
   /** 运行中排队发送：在跑时发的消息先排着，这一轮正常结束后由服务端写进文档并发起下一轮。
    *  message = 带文字 / 图片（文件地址）；continue = 文档模式（消息已在文档里，只继续）。页面空着时服务端直接发 */
-  enqueue: (id: string, body: { agent: string; kind: 'message' | 'continue'; text?: string; images?: string[] }) =>
+  enqueue: (id: string, body: { agent: string; kind: 'message' | 'continue'; text?: string; images?: string[]; ctx?: string }) =>
     request<{ item: QueueItem }>(`/api/pages/${id}/queue`, { method: 'POST', body: JSON.stringify(body) }),
   /** 撤回自己排的（文字 / 图片还给输入框） */
   withdrawQueued: (id: string, itemId: string) => request<{ text: string; images: string[] }>(`/api/pages/${id}/queue/${itemId}`, { method: 'DELETE' }),

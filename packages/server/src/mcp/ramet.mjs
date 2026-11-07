@@ -13,31 +13,38 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js'
 import { call, reply } from './lib.mjs'
+import * as comments from './tools/comments.mjs'
 import * as dispatch from './tools/dispatch.mjs'
+import * as handled from './tools/handled.mjs'
 import * as hub from './tools/hub.mjs'
 import * as images from './tools/images.mjs'
 import * as memory from './tools/memory.mjs'
 import * as pages from './tools/pages.mjs'
 import * as skills from './tools/skills.mjs'
 import * as team from './tools/team.mjs'
+import * as timers from './tools/timers.mjs'
+import * as watches from './tools/watches.mjs'
 
-const ALL = [...pages.tools, ...images.tools, ...hub.tools, ...memory.tools, ...dispatch.tools, ...skills.tools, ...team.tools]
+const ALL = [...pages.tools, ...images.tools, ...hub.tools, ...memory.tools, ...dispatch.tools, ...skills.tools, ...team.tools, ...timers.tools, ...watches.tools, ...handled.tools, ...comments.tools]
 /** 中心不认识 /api/ramet/tools 或暂时不通时的兜底：只留三个基础工具 */
 const FALLBACK = { tools: ['read_page', 'read_image', 'edit_page'], agents: [] }
 
-let capsOnce
-/** 这把凭证能用的工具与可叫的 agent；进程内缓存一次（会话很短，凭证上下文不会中途变） */
-function loadCaps() {
-  capsOnce ??= call('/api/ramet/tools')
-    .then((r) => (r.ok && Array.isArray(r.json?.tools) ? r.json : FALLBACK))
-    .catch(() => FALLBACK)
-  return capsOnce
+let capsNow
+/** 这把凭证能用的工具与可叫的 agent。每次列工具都重新问一次中心：Genet 的这个进程跨很多轮常驻，机器会上下线
+ *  （它每一轮开头列一次）；别的 agent 只在会话开始时列。调用工具时用最近一次列出的 */
+function loadCaps(fresh = false) {
+  if (fresh || !capsNow) {
+    capsNow = call('/api/ramet/tools')
+      .then((r) => (r.ok && Array.isArray(r.json?.tools) ? r.json : FALLBACK))
+      .catch(() => FALLBACK)
+  }
+  return capsNow
 }
 
 const server = new Server({ name: 'ramet', version: '1.1.0' }, { capabilities: { tools: {} } })
 
 server.setRequestHandler(ListToolsRequestSchema, async () => {
-  const caps = await loadCaps()
+  const caps = await loadCaps(true)
   return { tools: ALL.filter((t) => caps.tools.includes(t.name)).map((t) => t.define(caps)) }
 })
 

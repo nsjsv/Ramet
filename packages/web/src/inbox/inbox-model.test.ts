@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest'
 import type { InboxItem } from './inbox-api'
-import { attentionCount, dropByKey, dropDoneOf, groupOf, hasDoneOf, splitInbox } from './inbox-model'
+import { attentionCount, dropByKey, dropSeenOf, groupOf, hasSeenOf, newsCount, splitInbox } from './inbox-model'
 
 const approval = (key: string): InboxItem => ({
   type: 'approval', key, at: null, pageId: 'p1', pageTitle: 't', agentId: 'a', agentName: 'A', requestId: key, title: '运行命令', options: [], detail: {},
@@ -79,10 +79,68 @@ describe('评论', () => {
   })
 })
 
+const timerFailed = (id: string, at: string, paused = false): InboxItem => ({
+  type: 'timer_failed', key: `timer_failed:${id}`, at, eventId: id, timerId: 'tm', timerName: '早报', scheduledAt: at, reason: '目标页已经不在了', paused,
+})
+
+describe('定时器没能触发', () => {
+  test('进「新消息」与别的新消息按时间混排（新的在前），算进小点、不算进角标；乐观摘除按 timer_failed:<记录>', () => {
+    expect(groupOf('timer_failed')).toBe('news')
+    const groups = splitInbox([done('d1', 'p1', '2026-10-18T07:00:00Z'), timerFailed('e1', '2026-10-18T08:00:00Z', true), timerFailed('e2', '2026-10-18T06:00:00Z')])
+    expect(groups.news.map((i) => i.key)).toEqual(['timer_failed:e1', 'd1', 'timer_failed:e2'])
+    expect(groups.attention).toEqual([])
+    expect(newsCount([timerFailed('e1', 't'), running('x', 't')])).toBe(1)
+    expect(attentionCount([timerFailed('e1', 't')])).toBe(0)
+    expect(dropByKey([timerFailed('e1', 't'), timerFailed('e2', 't')], 'timer_failed:e1').map((i) => i.key)).toEqual(['timer_failed:e2'])
+  })
+})
+
+const automation = (id: string, at: string): InboxItem => ({
+  type: 'automation', key: `automation:${id}`, at, noticeId: id, ruleId: 'r1', ruleName: '周报提醒', text: '周报该写了', pageId: null, pageTitle: '',
+})
+
+describe('规则发来的通知', () => {
+  test('进「新消息」按时间混排（新的在前），算进小点、不算进角标；乐观摘除按 automation:<通知>', () => {
+    expect(groupOf('automation')).toBe('news')
+    const groups = splitInbox([done('d1', 'p1', '2026-10-18T07:00:00Z'), automation('n1', '2026-10-18T08:00:00Z'), approval('a')])
+    expect(groups.news.map((i) => i.key)).toEqual(['automation:n1', 'd1'])
+    expect(groups.attention.map((i) => i.key)).toEqual(['a'])
+    expect(newsCount([automation('n1', 't'), running('x', 't')])).toBe(1)
+    expect(attentionCount([automation('n1', 't')])).toBe(0)
+    expect(dropByKey([automation('n1', 't'), automation('n2', 't')], 'automation:n1').map((i) => i.key)).toEqual(['automation:n2'])
+  })
+})
+
+const docMention = (pageId: string, at: string): InboxItem => ({
+  type: 'doc_mention', key: `doc_mention:${pageId}`, at, pageId, pageTitle: '周报', blockId: 'b1', actor: { id: 'u', name: 'bob' }, excerpt: '@alice 看看这段',
+})
+
+describe('正文里 @了你', () => {
+  test('进「新消息」按时间混排（新的在前），算进小点、不算进角标', () => {
+    expect(groupOf('doc_mention')).toBe('news')
+    const groups = splitInbox([done('d1', 'p1', '2026-10-18T07:00:00Z'), docMention('p2', '2026-10-18T08:00:00Z'), approval('a')])
+    expect(groups.news.map((i) => i.key)).toEqual(['doc_mention:p2', 'd1'])
+    expect(newsCount([docMention('p2', 't'), running('x', 't')])).toBe(1)
+    expect(attentionCount([docMention('p2', 't')])).toBe(0)
+  })
+
+  test('打开那一页就消掉（与「做完」一起），别的页的不动', () => {
+    const items = [docMention('p1', 't'), done('d1', 'p1', 't'), docMention('p2', 't'), comment('t1', 't')]
+    expect(hasSeenOf(items, 'p2')).toBe(true)
+    expect(dropSeenOf(items, 'p1').map((i) => i.key)).toEqual(['doc_mention:p2', 'comment:t1'])
+    expect(dropSeenOf(items, 'p2').map((i) => i.key)).toEqual(['doc_mention:p1', 'd1', 'comment:t1'])
+  })
+})
+
 describe('角标', () => {
   test('只数需要你处理的', () => {
     expect(attentionCount([approval('a'), pending('c', 't'), request('r', 't'), done('d', 'p', 't'), running('x', 't'), firstUse('f', 't')])).toBe(3)
     expect(attentionCount([])).toBe(0)
+  })
+
+  test('小点数新消息（做完、首次使用、评论），在跑的不算', () => {
+    expect(newsCount([done('d', 'p', 't'), firstUse('f', 't'), comment('t1', 't'), running('x', 't'), approval('a')])).toBe(3)
+    expect(newsCount([running('x', 't')])).toBe(0)
   })
 })
 
@@ -95,9 +153,9 @@ describe('乐观摘除', () => {
 
   test('打开对话页：摘掉它的「做完」，别的页的、别的类型的不动', () => {
     const items = [done('d1', 'p1', 't'), done('d2', 'p2', 't'), running('x', 't')]
-    expect(hasDoneOf(items, 'p1')).toBe(true)
-    expect(hasDoneOf(items, 'p3')).toBe(false)
-    expect(dropDoneOf(items, 'p1').map((i) => i.key)).toEqual(['d2', 'x'])
-    expect(dropDoneOf(items, 'p3')).toBe(items)
+    expect(hasSeenOf(items, 'p1')).toBe(true)
+    expect(hasSeenOf(items, 'p3')).toBe(false)
+    expect(dropSeenOf(items, 'p1').map((i) => i.key)).toEqual(['d2', 'x'])
+    expect(dropSeenOf(items, 'p3')).toBe(items)
   })
 })

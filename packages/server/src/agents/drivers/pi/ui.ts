@@ -6,7 +6,7 @@
 //   其它 select（pi 的 select 一律是这种：pi 没有内置审批） → 单选提问
 //   input / editor                                       → 文字提问
 //   ask（omp rpc-ui 的提问工具）                          → 每题一个选择字段 + 一个「其他」文本框
-// 没人作答就被收掉 → {cancelled: true}（两家都当拒绝 / 跳过处理）。受限会话（随手 AI）一律拒绝，不发事件。
+// 没人作答就被收掉 → {cancelled: true}（两家都当拒绝 / 跳过处理）。受限会话（⌘J）一律拒绝，不发事件。
 
 import { ASK_OPTIONS } from '../../ask-form.js'
 import type { AskContent, AskField, AskForm, PermissionEvent, PermissionOption, StepKind } from '../../types.js'

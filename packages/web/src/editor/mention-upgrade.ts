@@ -4,7 +4,9 @@
  *   mdast 链接形态（toMarkdown 的输出）：文本恰为 `@名字`，单个 link mark，href 恰为 `page:<id>` / `agent:<id>` / `user:<id>`；
  *   纯文本形态：`@[名字](page:<id>)` / `@[名字](page:<页>#<块>)`（块引用）/ `@[名字](agent:<id>)` / `@[名字](user:<id>)`。
  *   对话输入框（composer-input.tsx）对外传的是纯文本形态：框内、发送、回到文档时都在这里升成 chip。
- * 纯文本形态按收口锚（`](page:` / `](agent:` / `](user:`）定位，不用第一个 `]` 切名字：标题里可能带 `]`
+ *   对话输入框里的图片与文件引用也走纯文本形态：`@[图片](image:<文件 uuid>)` → 本站图片节点（别的地址不升），
+ *   `@[文件名](file:<编码路径>)` → file_mention（编码见 file-mention.ts；链接形态 `[@路径](file:…)` 同样升）。
+ * 纯文本形态按收口锚（`](page:` / `](agent:` / `](user:` / …）定位，不用第一个 `]` 切名字：标题里可能带 `]`
  * （如 `@[[开源内测]什么？…](page:…)`），用第一个 `]` 会切出半个标题、整条都升不回来。代码块 / 行内码里的原文不动。
  * 对 Transaction 原地操作（调用方各自组进单事务，即单个撤销步）；先收集后按 pos 降序替换。
  * 幂等：升过的节点不再是文本，重跑零 diff；协同多端同时跑也自然收敛。 */
@@ -15,16 +17,21 @@ import { Plugin } from '@milkdown/kit/prose/state'
 import type { EditorState, Transaction } from '@milkdown/kit/prose/state'
 import type { EditorView } from '@milkdown/kit/prose/view'
 import { $prose } from '@milkdown/kit/utils'
+import { ySyncPluginKey } from 'y-prosemirror'
+import { fileOfTarget } from './file-mention'
+import { FILE_URL_RE } from './media'
 
-type Kind = 'page' | 'agent' | 'user'
-type Types = { page?: NodeType; agent?: NodeType; user?: NodeType; blockRef?: NodeType }
+type Kind = 'page' | 'agent' | 'user' | 'image' | 'file'
+type Types = { page?: NodeType; agent?: NodeType; user?: NodeType; blockRef?: NodeType; image?: NodeType; file?: NodeType }
 
-const LINK_HREF_RE = /^(page|agent|user):([^\s)]+)$/
+const LINK_HREF_RE = /^(page|agent|user|file):([^\s)]+)$/
 const OPEN = '@['
 const ANCHORS: ReadonlyArray<readonly [Kind, string]> = [
   ['page', '](page:'],
   ['agent', '](agent:'],
   ['user', '](user:'],
+  ['image', '](image:'],
+  ['file', '](file:'],
 ]
 
 interface Repl {
@@ -37,6 +44,11 @@ interface Repl {
 function chipOf(kind: Kind, target: string, label: string, types: Types): ProsemirrorNode | null {
   if (kind === 'agent') return types.agent ? types.agent.create({ agentId: target, label }) : null
   if (kind === 'user') return types.user ? types.user.create({ userId: target, name: label }) : null
+  if (kind === 'image') {
+    const src = `/api/files/${target}`
+    return types.image && FILE_URL_RE.test(src) ? types.image.create({ src }) : null
+  }
+  if (kind === 'file') return types.file ? types.file.create({ path: fileOfTarget(target) }) : null
   // `page:<页>#<块>` = 块引用（对话输入框里的「引用」落成这种记号，发送时升成 block_ref chip）；没有 `#` = 页面提及
   const hash = target.indexOf('#')
   if (hash > 0 && hash < target.length - 1 && types.blockRef) {
@@ -79,8 +91,15 @@ function collectPlain(node: ProsemirrorNode, pos: number, types: Types, codeBloc
 
 export function upgradeMentions(tr: Transaction): boolean {
   const nodes = tr.doc.type.schema.nodes
-  const types: Types = { page: nodes.page_mention, agent: nodes.agent_mention, user: nodes.user_mention, blockRef: nodes.block_ref }
-  if (!types.page && !types.agent && !types.user) return false
+  const types: Types = {
+    page: nodes.page_mention,
+    agent: nodes.agent_mention,
+    user: nodes.user_mention,
+    blockRef: nodes.block_ref,
+    image: nodes.image,
+    file: nodes.file_mention,
+  }
+  if (!Object.values(types).some(Boolean)) return false
   const repls: Repl[] = []
   tr.doc.descendants((node, pos, parent) => {
     if (!node.isText || !node.text) return
@@ -112,14 +131,23 @@ function upgradeTr(state: { tr: Transaction }): Transaction | null {
   return upgradeMentions(tr) ? tr : null
 }
 
+/** 协同把远端改动灌进来的那一笔（插件为它追加的事务也算：追到根事务看） */
+function isRemote(tr: Transaction): boolean {
+  const root = (tr.getMeta('appendedTransaction') as Transaction | undefined) ?? tr
+  return !!(root.getMeta(ySyncPluginKey) as { isChangeOrigin?: boolean } | undefined)?.isChangeOrigin
+}
+
 /**
- * 打开页那次转换是 500ms 定时器，远端正文经常在它跑完之后才进编辑器，原文就永远留着。
- * 这里跟每一次文档变化走（含协同把正文装进来的那一笔），并且视图挂上时再扫一遍已经在手里的文档。
+ * 跟文档变化走：本端改动（粘贴、手打、对话输入框、源码写回）里出现的记号当场升成 chip，视图挂上时再扫一遍已经在手里的文档。
+ * remote = 远端灌进来的改动也升，只给只读宿主（公开页）用：它不往回写，升只是为了画对。可写的编辑器不能这么做——
+ * 协同同步那一笔里追加的改动，y-prosemirror 不写回 Yjs，只停在这一个编辑器里（同一文档的别的视图、别的端都看不到，
+ * 要等它下一次本地编辑才连带写回，几个端各写一颗还会多出 chip）。远端来的内容由写入方落成 chip
+ * （agent 回复经 @ramet/shared/markdown-blocks），老数据由打开页的转换 pass（editor-session.ts）升，那是一笔本端事务。
  */
-export function mentionUpgradePlugin(): Plugin {
+export function mentionUpgradePlugin(opts: { remote?: boolean } = {}): Plugin {
   return new Plugin({
     appendTransaction(transactions: readonly Transaction[], _old: EditorState, state: EditorState) {
-      if (!transactions.some((tr) => tr.docChanged)) return null
+      if (!transactions.some((tr) => tr.docChanged && (opts.remote === true || !isRemote(tr)))) return null
       return upgradeTr(state)
     },
     view(view: EditorView) {
@@ -134,3 +162,6 @@ export function mentionUpgradePlugin(): Plugin {
 }
 
 export const mentionUpgrade = $prose(() => mentionUpgradePlugin())
+
+/** 只读宿主（公开页）：远端灌进来的记号也升成 chip 来画（不写回） */
+export const mentionDisplay = $prose(() => mentionUpgradePlugin({ remote: true }))

@@ -3,7 +3,7 @@
 // 改配置（POST /agent-config）、选 agent 时预备会话（POST /agent-prepare）。
 // 需要 manager 状态的部分（广播 / 适配器池 / agent 解析）经 ManagerHost 拿，同 remote-run.ts 的 RemoteRunHost。
 import { recordMachineUse } from './machine-grants.js'
-import { NoSessionError, UnknownAgentError, type AdapterEntry, type ManagerHost } from './manager-types.js'
+import { credentialOf, loadedUsable, loadedWith, NoSessionError, UnknownAgentError, type AdapterEntry, type ManagerHost } from './manager-types.js'
 import { authorize } from './posture.js'
 import type { RunState } from './run-state.js'
 import { effectiveCwd, loadConfigs, loadOwnSession, loadSessionState, loadToolProfile, persistConfigs, persistSession } from './session-store.js'
@@ -91,7 +91,7 @@ export async function setSessionConfig(
   body: { agent: string; configId: string; value: string },
   user: { id: string; role: string },
 ): Promise<ConfigOption[]> {
-  const agent = await host.resolve(body.agent, user)
+  const agent = await host.resolve(body.agent, user, pageId)
   if (!agent) throw new UnknownAgentError()
   let entry: AdapterEntry | undefined
   let sessionId: string | null = null
@@ -105,15 +105,17 @@ export async function setSessionConfig(
     if (!saved) throw new NoSessionError()
     entry = host.ensureAdapter(agent)
     sessionId = saved.sessionId
-    if (!entry.loaded.has(sessionId)) {
+    // 改配置不交付新工具：会话加载着、手里的凭证还用得上就直接改；没加载过或凭证不能用了，才按自己的凭证重新加载
+    if (!loadedUsable(entry, sessionId)) {
+      // 按这个会话原来的档位交付工具（改配置不改档位）
+      const tools = host.pageReadTools(entry, user, agent, pageId, toolProfileOf(saved.tools))
       try {
-        // 按这个会话原来的档位交付工具（改配置不改档位）
-        await entry.adapter.loadSession(sessionId, saved.cwd, host.pageReadTools(entry, user, agent, pageId, toolProfileOf(saved.tools)))
+        await entry.adapter.loadSession(sessionId, saved.cwd, tools)
       } catch {
         // agent 侧 session 已不在，改配置无从谈起
         throw new NoSessionError()
       }
-      entry.loaded.add(sessionId)
+      entry.loaded.set(sessionId, credentialOf(tools))
       // 会话的 MCP 现在拿的是这个人的凭证：记录跟着改，原来的人下一轮就不会接着用它（SavedSession.userId）
       await persistSession(host.pool, pageId, agent.id, sessionId, saved.cwd, saved.seen ?? null, user.id, toolProfileOf(saved.tools), saved.lastSyncedHash)
     }
@@ -147,7 +149,7 @@ export async function prepareSession(
   agentId: string,
   user: { id: string; role: string },
 ): Promise<void> {
-  const agent = await host.resolve(agentId, user)
+  const agent = await host.resolve(agentId, user, pageId)
   if (!agent) throw new UnknownAgentError()
   const entry = host.ensureAdapter(agent)
   const cwd = await effectiveCwd(host.pool, pageId, agent)
@@ -161,13 +163,13 @@ export async function prepareSession(
   const reusable = saved != null && saved.cwd === cwd && toolProfileOf(saved.tools) === profile
   let sessionId = reusable ? saved.sessionId : ''
   let options: ConfigOption[] = []
-  if (sessionId && entry.loaded.has(sessionId)) {
-    // 本进程已加载过：直接给已知选项，不打扰 agent
+  if (sessionId && loadedWith(entry, sessionId, tools)) {
+    // 本进程用这一份凭证加载过：直接给已知选项，不打扰 agent
     options = entry.adapter.sessionState(sessionId).configs
   } else if (sessionId) {
     try {
       options = (await entry.adapter.loadSession(sessionId, cwd, tools)).configOptions
-      entry.loaded.add(sessionId)
+      entry.loaded.set(sessionId, credentialOf(tools))
     } catch {
       // agent 侧已没有这个会话：当作没有，重新建一个
       sessionId = ''
@@ -177,7 +179,7 @@ export async function prepareSession(
     const created = await entry.adapter.newSession(cwd, tools)
     sessionId = created.sessionId
     options = created.configOptions
-    entry.loaded.add(sessionId)
+    entry.loaded.set(sessionId, credentialOf(tools))
     await persistSession(host.pool, pageId, agent.id, sessionId, cwd, null, user.id, profile)
   }
   await applyConfigs(host, pageId, agent.id, entry, sessionId, options)

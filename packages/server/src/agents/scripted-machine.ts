@@ -3,7 +3,7 @@
  * 配对、连上、hello/welcome；之后 new / load / ls / config 立刻应答，项目面板的帧（tree / read / files / git-* / write）
  * 回固定内容（caps 缺省声明 project，不含 write；要测写文件传 ['project','write']，传 [] 模拟老 connector，终端的 pty 帧要声明 terminal），
  * prompt 默认立刻回一句话并结束（hold = true 时挂住不回，用来测停止 / 收回即断；收到 cancel 才以 cancelled 收尾）。
- * 随手 AI 的 quick 帧：回 quickDeltas 里的文本增量再 res（quickHold = true 时挂住，收到 quick-cancel 才回 err 已取消）。
+ * ⌘J 的 quick 帧：回 quickDeltas 里的文本增量再 res（quickHold = true 时挂住，收到 quick-cancel 才回 err 已取消）。
  * 和 test-kit 一样依赖起一份真服务的副作用（import 即起服），只给机器授权相关的测试文件用。
  */
 import { afterEach } from 'vitest'

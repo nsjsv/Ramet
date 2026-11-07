@@ -1,5 +1,5 @@
-/* ---------- 随手 AI 本地通道：connector 侧的受限会话（QuickRunner + 真 Claude 驱动 + 假 claude）----------
- * 红线：随手 AI 在别人（或自己）的机器上跑 agent，只做一次文本改写，不许借它读写页面 / 跑工具 / 免审批执行。
+/* ---------- ⌘J 本地通道：connector 侧的受限会话（QuickRunner + 真 Claude 驱动 + 假 claude）----------
+ * 红线：⌘J 在别人（或自己）的机器上跑 agent，只做一次文本改写，不许借它读写页面 / 跑工具 / 免审批执行。
  * 受限会话由驱动起（不给工具、不给 MCP、固定在不提权的模式，审批一律拒绝且不发事件，见 drivers/claude/session.ts）；
  * 这里验 QuickRunner 这一层：临时 cwd 与清理、受限会话不对中心露面、一调工具就中止、名额与超时。 */
 import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs'

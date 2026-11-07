@@ -12,7 +12,7 @@ import { AccountPane, AgentPane, AppearancePane, EditorPane, ShortcutsPane } fro
 /* ---------- 主设置弹窗 ----------
  * 入口：侧栏底部「空间切换」右边的 ⚙（常驻）。左侧分组导航（带图标），右侧标题 + 说明 + 卡片式设置行：
  *   个人   账户（头像 / 修改密码 / 登出）· 外观（明暗）· 编辑器（编辑方式 / 新页面默认打开方式）· 默认 Agent
- *          · 随手 AI（⌘J 用的模型连接）
+ *          · ⌘J（⌘J 用的模型连接）
  *   空间   成员与空间（成员 / 邀请 / 改名 / 退出 / 删除）· 连接器（本地 connector 配对 / 列表 / 撤销）
  *          · 机器（谁能用接入的机器：授权 / 申请 / 使用记录）
  * 空间组：无选中空间时不出现；连接器是写入口，只读成员不出现（成员能接入自己的机器，批准要空间所有者）；
@@ -28,7 +28,7 @@ const TABS: Record<TabId, { label: string; icon: IconName; desc: string }> = {
   editor: { label: '编辑器', icon: 'edit', desc: '编辑体验与新页面的默认打开方式' },
   keys: { label: '快捷键', icon: 'keyboard', desc: '键盘快捷键与 Markdown 输入写法' },
   agent: { label: '默认 Agent', icon: 'bot', desc: '聊天输入框与 /命令 默认使用的 agent' },
-  quick: { label: COPY.quickSettings.tab, icon: 'sparkle', desc: COPY.quickSettings.desc },
+  quick: { label: COPY.quickSettings.tab, icon: 'genet', desc: COPY.quickSettings.desc },
   space: { label: '成员与空间', icon: 'users', desc: '成员、邀请链接与空间管理' },
   connectors: { label: '连接器', icon: 'plug', desc: '让 agent 跑在你自己的机器上，经出站连接接到这里' },
   machines: { label: COPY.machines.tab, icon: 'terminal', desc: COPY.machines.desc },
@@ -56,7 +56,7 @@ export default function SettingsModal({
   onAvatarChange: (avatar: string | null) => void
   /** 侧栏的页面列表（机器使用记录里把页面 id 显示成标题）；可缺 */
   pages?: readonly Page[] | null
-  /** 打开时直接落在这一页（编辑器里随手 AI 的「去设置」） */
+  /** 打开时直接落在这一页（编辑器里 ⌘J 的「去设置」） */
   initialTab?: TabId
 }) {
   // 空间组：成员（含只读成员）都能看成员列表；无选中空间不出现

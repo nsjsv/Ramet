@@ -1,4 +1,5 @@
 /* ---------- 筛选菜单：多个条件同时满足（没有「或」条件组） ----------
+ * 条件列表本身是受控的 ConditionsEditor：视图筛选写进集合文档，自动化「属性改成满足这些条件」写进规则的配置，同一套界面。
  * 条件的形状与一个属性能用的运算见 @ramet/shared/collection-model（filterOps / opNeedsValue；汇总、公式按输出类型给运算）；
  * 值没填完的条件照样存着（界面要能接着编辑），只是不参与筛选。文字类的值失焦 / Enter 才写。
  * 关联的比较值是对方集合的一行：用行选择器的单选形态选。 */
@@ -147,12 +148,30 @@ function ValueInput({ prop, cond, spaceId, onValue }: { prop: CollectionProp; co
 }
 
 export function FilterMenu({ doc, schema, view, spaceId }: { doc: Y.Doc; schema: CollectionSchema; view: CollectionView; spaceId: string | null }) {
-  const props = [TITLE_PROP, ...schema.props]
-  const conds = view.filter.all
-  const write = (next: Condition[]): void => setFilter(doc, view.id, { all: next })
-  const replace = (i: number, cond: Condition): void => write(conds.map((c, j) => (j === i ? cond : c)))
   return (
     <div className="cl-menu cl-filter">
+      <ConditionsEditor schema={schema} conds={view.filter.all} spaceId={spaceId} onChange={(next) => setFilter(doc, view.id, { all: next })} />
+    </div>
+  )
+}
+
+/** 条件列表（同时满足）：增删、换属性 / 运算 / 值。写到哪里由 onChange 决定 */
+export function ConditionsEditor({
+  schema,
+  conds,
+  spaceId,
+  onChange: write,
+}: {
+  schema: CollectionSchema
+  conds: readonly Condition[]
+  spaceId: string | null
+  onChange: (next: Condition[]) => void
+}) {
+  // 没有筛选运算的属性（按钮）不进属性下拉
+  const props = [TITLE_PROP, ...schema.props].filter((p) => filterOps(p).length > 0)
+  const replace = (i: number, cond: Condition): void => write(conds.map((c, j) => (j === i ? cond : c)))
+  return (
+    <>
       {conds.length === 0 && <div className="cl-hint">{C.filter.empty}</div>}
       {conds.map((cond, i) => {
         const prop = findProp(schema, cond.prop) ?? TITLE_PROP
@@ -194,6 +213,6 @@ export function FilterMenu({ doc, schema, view, spaceId }: { doc: Y.Doc; schema:
         <Icon name="plus" size={14} />
         {C.filter.add}
       </button>
-    </div>
+    </>
   )
 }

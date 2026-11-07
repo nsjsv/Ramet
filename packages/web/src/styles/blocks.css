@@ -158,6 +158,64 @@
   color: var(--ink-3);
 }
 
+/* 按钮块：一颗按钮，能编辑时悬停出「设置」齿轮 */
+.btn-block {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0.5em 0;
+}
+
+.btn-block-btn {
+  padding: 5px 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--t-sm);
+  cursor: pointer;
+}
+
+.btn-block-btn:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.btn-block-btn:disabled {
+  color: var(--ink-3);
+  cursor: default;
+}
+
+.btn-block-btn.is-unset {
+  border-style: dashed;
+  color: var(--ink-3);
+}
+
+.btn-block-btn.is-busy {
+  opacity: 0.6;
+}
+
+.btn-block-set {
+  display: inline-flex;
+  padding: 4px;
+  border: none;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--ink-3);
+  cursor: pointer;
+  opacity: 0;
+}
+
+.btn-block:hover .btn-block-set,
+.btn-block-set:focus-visible {
+  opacity: 1;
+}
+
+.btn-block-set:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
 .toc-row {
   display: block;
   padding: 3px 0;
@@ -433,4 +491,106 @@
 .ProseMirror .link-mention.ProseMirror-selectednode a {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
+}
+
+/* 摸不到悬停的设备：齿轮一直显示 */
+@media (hover: none) {
+  .btn-block-set {
+    opacity: 1;
+  }
+}
+
+/* AI 块：块头（提示词、生成、状态、自动更新）+ 块身（普通正文块） */
+.ai-gen {
+  margin: 0.6em 0;
+  padding: 6px 12px 8px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--r-md);
+}
+
+.ai-gen.is-running .ai-gen-body {
+  opacity: 0.5;
+}
+
+.ai-gen-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 4px;
+  border-bottom: 1px dashed var(--line);
+  color: var(--ink-3);
+  font-size: var(--t-sm);
+}
+
+.ai-gen-ic {
+  display: inline-flex;
+  color: var(--accent);
+}
+
+.ai-gen-prompt {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 4px;
+  border: none;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  outline: none;
+}
+
+.ai-gen-prompt:focus {
+  background: var(--hover);
+}
+
+.ai-gen-prompt-text {
+  color: var(--ink-2);
+}
+
+.ai-gen-run,
+.ai-gen-auto {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--bg);
+  color: var(--ink-2);
+  font: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.ai-gen-run:hover:not(:disabled),
+.ai-gen-auto:hover {
+  background: var(--hover);
+}
+
+.ai-gen-run:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.ai-gen-auto {
+  border-color: transparent;
+}
+
+.ai-gen-auto.is-on {
+  color: var(--accent);
+}
+
+.ai-gen-status {
+  white-space: nowrap;
+}
+
+.ai-gen-status.is-failed {
+  color: var(--danger);
+  white-space: normal;
+}
+
+.ai-gen-auto-menu {
+  position: fixed;
+  z-index: 60;
 }

@@ -127,6 +127,7 @@ export function parseCell(prop: CollectionProp, text: string, ctx: ParseCtx): Pr
   if (t === '') return null
   let value: unknown
   switch (prop.type) {
+    case 'ai':
     case 'text':
       value = [...text].slice(0, TEXT_MAX).join('')
       break

@@ -11,6 +11,7 @@ export function editorKind(prop: CollectionProp): EditorKind {
   if (prop.type === 'relation') return 'popover'
   if (isComputedProp(prop)) return 'none'
   switch (prop.type) {
+    case 'ai':
     case 'text':
     case 'number':
     case 'url':
@@ -33,6 +34,7 @@ export function editorKind(prop: CollectionProp): EditorKind {
     case 'unique_id':
     case 'rollup':
     case 'formula':
+    case 'button':
       return 'none'
   }
 }

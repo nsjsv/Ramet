@@ -39,7 +39,7 @@ export default function ProjectPanel({
   const [info, setInfo] = useState<InfoState>({ status: 'loading' })
   const [branch, setBranch] = useState<Pick<StatusResult, 'branch' | 'detached' | 'ahead' | 'behind'> | null>(null)
   const [tick, setTick] = useState(0)
-  // 随手 AI 写过文件的次数：只让改动分页刷新（文件查看器自己已经拿到了新内容，不必再读一遍，主人的审计里也不该多一条读文件）
+  // ⌘J 写过文件的次数：只让改动分页刷新（文件查看器自己已经拿到了新内容，不必再读一遍，主人的审计里也不该多一条读文件）
   const [writes, setWrites] = useState(0)
   const [openPath, setOpenPath] = useState<string | null>(null)
   const [diffPath, setDiffPath] = useState<string | null>(null)

@@ -1,6 +1,5 @@
 /* ---------- 带队「开工」：写一条用户消息，再 POST /continue {team} ----------
- * 计划卡是 widget / 聊天气泡里的 DOM，拿不到编辑器。编辑器会话建好后在这里登记怎么取这页的主编辑器视图
- * （同 memory/remember.ts 的 bindPageSpace），开工时按页取。
+ * 计划卡是 widget / 聊天气泡里的 DOM，拿不到编辑器：开工时按页取主编辑器视图（editor/page-views.ts）。
  * 顺序：先写一条「开工：<计划标题>」的用户消息（发起人身份进文档，组长的提示词里就有这一句），再 continue。
  *   - 写之前先 GET 一次最新计划并本地过一遍 startBlocker：别人刚取消了或负责人刚被收回，就不要在文档里留一条没用的消息；
  *   - continue 被服务端明确拒绝（4xx）时把刚写的那条消息撤掉（只撤文字完全一致、且之后没有回复的那一条），不留孤儿消息；
@@ -12,6 +11,7 @@ import { COPY } from '../copy'
 import { agentList } from '../default-agent'
 import { agentStateFor, appendUserMessage } from '../editor/agent-bar'
 import { findBlockIdPos } from '../editor/block-id'
+import { pageView } from '../editor/page-views'
 import { deleteBlockRange } from '../editor/block-delete'
 import { draftIdOf } from '../editor/doc-send'
 import { teamApi, planStore } from './team-api'
@@ -20,19 +20,10 @@ import { startBlocker } from './team-model'
 
 const T = COPY.team.plan
 
-const views = new Map<string, () => EditorView | undefined>()
-
-/** 登记这页主编辑器视图的取法，返回注销函数（重复登记时旧的注销不会误删新的） */
-export function bindPageView(pageId: string, get: () => EditorView | undefined): () => void {
-  views.set(pageId, get)
-  return () => {
-    if (views.get(pageId) === get) views.delete(pageId)
-  }
-}
-
-function pageView(pageId: string): EditorView | undefined {
-  const view = views.get(pageId)?.()
-  return view && !view.isDestroyed ? view : undefined
+/** 能往里写开工消息的那页主编辑器视图（只读成员的视图不算：服务端本来也会丢掉它的写入） */
+function writableView(pageId: string): EditorView | undefined {
+  const view = pageView(pageId)
+  return view?.editable ? view : undefined
 }
 
 /** continue 被拒后撤掉刚写的开工消息，只撤最后一条、还没有回复、文字完全一致的那条 */
@@ -49,7 +40,7 @@ const leaderLabel = (id: string): string => agentList().find((a) => a.id === id)
 
 /** 开工。失败抛 Error，message 是给人看的（计划卡就地显示） */
 export async function startTeamPlan(pageId: string, planId: string): Promise<void> {
-  const view = pageView(pageId)
+  const view = writableView(pageId)
   if (!view) throw new Error(T.noEditor)
   const plan = await teamApi.get(pageId, planId)
   planStore.put(plan)

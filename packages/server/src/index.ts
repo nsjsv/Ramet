@@ -1,4 +1,10 @@
 import { rametToolRoutes } from './routes/ramet-tools.js'
+import { hookRoutes } from './routes/hooks.js'
+import { aiGenRoutes } from './routes/ai-gen.js'
+import { runAiGen, type AiGenDeps } from './ai-gen.js'
+import { fillRow } from './ai-prop.js'
+import { createPiStream } from './pi-models.js'
+import { loadSecretKeyFromEnv } from './secret-box.js'
 import { memoryRoutes } from './routes/memories.js'
 import { skillRoutes } from './routes/skills.js'
 import { favoriteRoutes } from './routes/favorites.js'
@@ -29,7 +35,7 @@ import { searchRoutes } from './routes/search.js'
 import { linkPreviewRoutes } from './routes/link-preview.js'
 import { createLinkPreview, type LinkPreview } from './link-preview.js'
 import { adminRoutes, authRoutes, userFromRequest, type AuthEnv } from './auth.js'
-import { createDocWriter, createHocuspocus, drainDocWrites, loadDocFromDb, notifyAgentsChanged, notifyInboxChanged, notifyBoardsChanged, notifyMemoriesChanged, notifyPagesChanged, notifyPreviewsChanged } from './collab.js'
+import { createDocWriter, createHocuspocus, drainDocWrites, loadDocForRead, loadDocFromDb, notifyAgentsChanged, notifyInboxChanged, notifyBoardsChanged, notifyMemoriesChanged, notifyPagesChanged, notifyPreviewsChanged } from './collab.js'
 import { loadAgents } from './agents/registry.js'
 import { AgentManager } from './agents/manager.js'
 import { ConnectorHub } from './agents/hub.js'
@@ -57,9 +63,23 @@ import { debugRoutes } from './routes/debug.js'
 import { runsRoutes } from './routes/runs.js'
 import { pageReadRoutes } from './page-read.js'
 import { quickRoutes, type QuickDeps } from './routes/quick.js'
+import { assistantRoutes } from './routes/assistant.js'
+import type { AssistantDeps } from './agents/drivers/assistant/driver.js'
 import { dropOuterClaudeSession } from './claude-session-env.js'
 import { isHttpsRequest } from './request-proto.js'
 import { createImgbedSync, type ImgbedSync } from './imgbed-sync.js'
+import { TriggerHub } from './triggers/hub.js'
+import type { AgentNameHost } from './agents/agent-names.js'
+import { timerRoutes } from './routes/timers.js'
+import { automationRoutes } from './routes/automations.js'
+import { Consent } from './routes/ramet-consent.js'
+import { isAssistantId, isAssistantPage } from './agents/assistant-agent.js'
+import { createSafeFetch, type SafeFetch } from './endpoint-guard.js'
+import { commentPosted, type PostedComment } from './triggers/sources/comment.js'
+import { GenetCalls } from './comments/genet-call.js'
+import { mentionWatch } from './triggers/sources/mention.js'
+import { PageWatch, type PageWatchDeps } from './triggers/sources/page-watch.js'
+import { rowChanged, rowsAdded, type CollectionEventDeps } from './triggers/sources/collection.js'
 
 /** 关停时等在跑的 run 收尾（回复写进文档、过程归档）的上限 */
 const SHUTDOWN_RUNS_MS = 5000
@@ -88,14 +108,18 @@ export type PreviewOptions = { port: number; origin?: string; ticketTtlMs?: numb
 
 /** 启动选项，只给测试用，生产全走默认 */
 export type ServerOptions = {
-  /** 随手 AI：模型调用 / 主密钥 / DNS 解析可注入，测试里不真的打模型 */
+  /** ⌘J：模型调用 / 主密钥 / DNS 解析可注入，测试里不真的打模型 */
   quick?: QuickDeps
+  /** Genet：同上（它用的也是用户自己的模型连接） */
+  assistant?: Omit<AssistantDeps, 'pool'>
   /** 端口预览：不传看环境变量 RAMET_PREVIEW_PORT / RAMET_PREVIEW_ORIGIN（没设即关闭）；null 明确关闭 */
   preview?: PreviewOptions | null
   /** 图床镜像：不传看环境变量 RAMET_IMGBED_*（没设即关闭）；测试注入自己建的实例 */
   imgbed?: ImgbedSync
   /** 网页书签元信息抓取：测试注入（放行本机地址）；缺省生产实现 */
   linkPreview?: LinkPreview
+  /** 触发器（规则）的时钟与向外 webhook 的出站 fetch：测试注入；缺省真实时间、防护版 fetch（允许 http） */
+  triggers?: { now?: () => Date; fetch?: SafeFetch }
 }
 
 /** RAMET_PREVIEW_PORT / RAMET_PREVIEW_ORIGIN → 预览配置；没设或写坏了返回 undefined（预览关闭） */
@@ -122,7 +146,13 @@ export function startServer(
   pool: Pool,
   port = 0,
   options: ServerOptions = {},
-): Promise<{ port: number; previewPort: number | null; close: () => Promise<void>; sweepGrants: () => Promise<number> }> {
+): Promise<{
+  port: number
+  previewPort: number | null
+  close: () => Promise<void>
+  sweepGrants: () => Promise<number>
+  triggers: Pick<TriggerHub, 'tick' | 'emit' | 'causedBy' | 'touched'>
+}> {
   const app = new Hono<AuthEnv>()
   app.use('*', cors({ origin: 'http://localhost:5173' }))
   // CSRF：改数据的 /api 请求，浏览器自报的来源必须是 Ramet 自己（预览源与 Ramet 同站不同源，里面的脚本不可信）。
@@ -146,6 +176,8 @@ export function startServer(
     ),
   )
   app.route('/', linkPreviewRoutes(pool, linkPreview))
+  // 收到外部请求（routes/hooks.ts）：不登录、只认地址里的密钥，同样挂在 requireAuth 子应用之前；触发器后建好，惰性取
+  app.route('/', hookRoutes({ pool, hub: () => triggers }))
   app.route('/', authRoutes(pool))
   // 删号连带删掉他接入的机器：断开在线连接并让目录重拉（hub 在后面才建好，箭头函数请求到达时才求值）
   app.route(
@@ -176,20 +208,43 @@ export function startServer(
   // 增量只发给正连着集合文档的连接。找集合文档惰性取，hocuspocus 随后才建好。
   // 扇出（collections/fanout.ts）登记加载着的集合文档：增量发出前补关联 / 汇总的计算值，并让依赖它的集合跟着重算
   const fanout = createFanout(pool, (name) => hocuspocus.documents.get(name), () => projector)
-  const projector = createProjector(pool, (name) => hocuspocus.documents.get(name), fanout.enrich)
+  // 行属性改了交给自动化「属性改了」（triggers/sources/collection.ts）：触发器后建好，惰性取，后台跑
+  const collectionEvents = (): CollectionEventDeps => ({ pool, hub: triggers, getLiveDoc: (name) => hocuspocus.documents.get(name) })
+  const projector = createProjector(pool, (name) => hocuspocus.documents.get(name), fanout.enrich, (change) =>
+    triggers.background(() => rowChanged(collectionEvents(), change)),
+  )
+  // 有页建在 / 挪到某页下：那一页是合集就按「新增了一行」触发（建行的各条写路径都调它）
+  const rowsAddedTo = (parentId: string | null, ids: readonly string[], actorId: string): void => {
+    if (parentId) triggers.background(() => rowsAdded(collectionEvents(), parentId, ids, actorId))
+  }
   // AI 按行读页面 / 取图 / 写回文档（凭证走 Authorization: Bearer，不是 cookie）：必须挂在
   // files/search/pages 这些 `use('*', requireAuth)` 的子应用之前，否则请求先到它们就被 401 了。
   // 活文档查找与 blocksRoutes 一样用惰性引用
-  const hocuspocus = createHocuspocus(pool, [projector.extension, fanout.extension])
+  // 正文 @我（triggers/sources/mention.ts）：每次存盘之后对一遍正文里的 @，新 @ 到的人进收件箱、按他的规则触发。触发器后建好，惰性取。
+  // 盯页面（triggers/sources/page-watch.ts）：每次存盘记下别人的改动攒着，到点由触发器的时钟收走汇报
+  const pageWatch: PageWatch = new PageWatch((): PageWatchDeps => ({ pool, hub: triggers, getLiveDoc: (name) => hocuspocus.documents.get(name) }))
+  const hocuspocus = createHocuspocus(pool, [
+    projector.extension,
+    fanout.extension,
+    mentionWatch(() => ({ pool, hub: triggers, poke: () => inbox.poke() })),
+    pageWatch.extension(),
+  ])
   // 收件箱刷新信号：300ms 去抖合并，经 control:global 广播 'inbox'（不带内容，前端收到后重拉 GET /api/inbox）
   const inbox = new InboxPoke(() => notifyInboxChanged(hocuspocus))
   const offFirstUse = onMachineFirstUse(() => inbox.poke())
+  // 外来事件之后 Genet 动手前先问主人（routes/ramet-consent.ts）：读 Genet 页的活文档判，审批挂在 Ramet 自己的审批上（agentManager 后建，惰性取）
+  const consent = new Consent({
+    pool,
+    genetHome: async (g) => (isAssistantId(g.ctx.agentId) && g.ctx.pageId && (await isAssistantPage(pool, g.user.id, g.ctx.pageId)) ? g.ctx.pageId : null),
+    fragment: async (pageId) => (await loadDocForRead(pool, `page:${pageId}`, (name) => hocuspocus.documents.get(name))).getXmlFragment('prosemirror'),
+    approvals: () => agentManager.toolHost().approvals,
+  })
   // AI 写回文档走 hocuspocus 自己的直连会话：写入内核（DocWriter）由此落盘（onChange 增量 + onStoreDocument 快照 / 正文索引）。
   // 第三个入参是活文档查找：read_page 与 edit_page 必须看同一份文档（内存有活文档就用那份），
   // 否则读到的原文拿去做 old 会在还没落盘的活文档上对不上
   app.route(
     '/',
-    pageReadRoutes(pool, createDocWriter(() => hocuspocus), (name) => hocuspocus.documents.get(name)),
+    pageReadRoutes(pool, createDocWriter(() => hocuspocus), (name) => hocuspocus.documents.get(name), consent),
   )
   // Ramet 工具的中心端点（知识中枢 / run_agent，同样走 Bearer 凭证）：同一条挂载序理由。
   // agentManager 在后面才建好，这里惰性取
@@ -201,6 +256,16 @@ export function startServer(
       () => notifyPagesChanged(hocuspocus),
       (name) => hocuspocus.documents.get(name),
       () => notifyMemoriesChanged(hocuspocus),
+      // 触发器在 agentManager 之后才建好，同上
+      () => triggers,
+      // Genet 代发的评论（reply_comment）与界面上的回复走同一条：广播 + 收件箱 + 「评论找我」的触发（下面的 commentsChanged / posted，惰性取）
+      {
+        consent,
+        write: createDocWriter(() => hocuspocus),
+        comments: { changed: (pageId) => commentsChanged(pageId), posted: (c) => posted(c), calls: () => genetCalls },
+        names: () => agentNameHost,
+        created: rowsAddedTo,
+      },
     ),
   )
   // 空间 skill 库的 REST（只管 /api/skills 一族，自带 requireAuth）。正文写回走同一个 DocWriter，
@@ -233,6 +298,7 @@ export function startServer(
       (name) => hocuspocus.documents.get(name),
       () => notifyBoardsChanged(hocuspocus),
       createDocWriter(() => hocuspocus),
+      rowsAddedTo,
     ),
   )
   // 块文本端点（提及快照）：同样活文档优先，补 id 插件刚写入的块 id 立即可读
@@ -270,6 +336,7 @@ export function startServer(
       getLiveDoc: (name) => hocuspocus.documents.get(name),
       notify: () => notifyPagesChanged(hocuspocus),
       projector,
+      rowsAdded: rowsAddedTo,
     }),
   )
   // 关联的定义（跨两份集合文档）、单行取数、属性定义：同样每条路由各自挂 requireAuth
@@ -314,31 +381,93 @@ export function startServer(
     notifyInbox: () => inbox.poke(),
     // 排队消息派发时以排队的人的身份写进文档（同 AI 写回的直连会话，记成用户自己的编辑）
     writeDoc: createDocWriter(() => hocuspocus),
+    assistant: options.assistant,
   })
   // hello.inflight 对上 open_runs：还在跑的续上同一块回复，进程已经不跑的才收尸
   hub.setHelloHandler((id, inflight) => agentManager.resumeRemote(id, inflight))
   app.route('/', agentsRoutes(pool, agentManager))
   // 带队计划（GET / PATCH / cancel，开工走上面的 continue）：每条路由自带 requireAuth
   app.route('/', teamRoutes(pool, agentManager))
+  // Genet 页（POST /api/me/assistant）与任务状态（GET /api/pages/run-status）：每条路由自带 requireAuth。
+  // 任务状态读正文活文档优先（与 read_page 同口径），在飞 / 待批问 agentManager
+  app.route(
+    '/',
+    assistantRoutes(pool, {
+      status: {
+        pool,
+        running: (pageId) => agentManager.running(pageId),
+        approvals: () => agentManager.pendingApprovals(),
+        fragment: async (pageId) => (await loadDocForRead(pool, `page:${pageId}`, (name) => hocuspocus.documents.get(name))).getXmlFragment('prosemirror'),
+      },
+      notifyPagesChanged: () => notifyPagesChanged(hocuspocus),
+    }),
+  )
+  // 触发器（定时器）：到点先落记录再派发（triggers/hub.ts）。依赖都从现成出口拿：排队发送、派发前的权限重判、任务回报的通知链；
+  // 目标是任务页时走排队发送，观察者把排队项的结局写回触发记录。时钟在监听成功后才起
+  const toolHost = agentManager.toolHost()
+  // agent 显示名的原料（agents/agent-names.ts）：触发器的回报抬头与收件箱共用
+  const agentNameHost: AgentNameHost = {
+    localAgents: () => agentManager.agents().map((a) => ({ id: a.id, label: a.label })),
+    onlineAgents: (connectorId) => hub.get(connectorId)?.agents,
+  }
+  // AI 块的生成：模型请求同 Genet（测试注入假的），主密钥同 Genet
+  const aiGenDeps: AiGenDeps = {
+    pool,
+    write: createDocWriter(() => hocuspocus),
+    getLiveDoc: (name) => hocuspocus.documents.get(name),
+    stream: options.assistant?.stream ?? createPiStream(),
+    secretKey: options.assistant?.secretKey === undefined ? loadSecretKeyFromEnv() : options.assistant.secretKey,
+  }
+  const triggers = new TriggerHub({
+    pool,
+    ...(options.triggers?.now ? { now: options.triggers.now } : {}),
+    queue: agentManager.queue,
+    host: toolHost.dispatch,
+    names: agentNameHost,
+    tasks: toolHost.tasks,
+    poke: () => inbox.poke(),
+    // 动作：外来事件叫 agent 前的审批、改属性 / 新建页行（写文档 + 等副本落库）、向外 webhook（出站防护，内网地址拒绝）
+    approvals: toolHost.approvals,
+    write: createDocWriter(() => hocuspocus),
+    getLiveDoc: (name) => hocuspocus.documents.get(name),
+    projector,
+    fetch: options.triggers?.fetch ?? createSafeFetch({ allowHttp: true }),
+    pagesChanged: () => notifyPagesChanged(hocuspocus),
+    rowsAdded: rowsAddedTo,
+    aiGen: (user, pageId, blockId) => runAiGen(aiGenDeps, user, pageId, blockId),
+    aiProp: (user, collectionId, propId, rowId) => fillRow({ ...aiGenDeps, projector }, user, collectionId, propId, rowId),
+    watch: pageWatch,
+  })
+  agentManager.queue.observe(triggers.queueObserver)
+  // AI 页「自动」分页（规则）、老的「定时」别名与时区上报（每条路由自带 requireAuth）
+  app.route('/', timerRoutes(pool, triggers))
+  app.route('/', automationRoutes({ pool, clock: triggers, names: agentNameHost, getLiveDoc: (name) => hocuspocus.documents.get(name), hub: triggers }))
+  // AI 块（ai-gen.ts）：页面上点「生成」；规则的「刷新 AI 块」动作经触发器的 aiGen 走同一份
+  app.route('/', aiGenRoutes({ ...aiGenDeps, projector, background: (work) => triggers.background(work) }))
   // 收件箱（每条路由自带 requireAuth）：聚合审批 / 机器接入 / 使用申请 / 做完待看 / 在跑，只是视图
   app.route(
     '/',
     inboxRoutes(pool, {
       approvals: () => agentManager.pendingApprovals(),
       runs: () => agentManager.activeRuns(),
-      localAgents: () => agentManager.agents().map((a) => ({ id: a.id, label: a.label })),
-      onlineAgents: (connectorId) => hub.get(connectorId)?.agents,
+      ...agentNameHost,
     }),
   )
   // 页面评论（每条路由自带 requireAuth）。写成功后：页面文档上广播 {t:'comments'}（同页在线的人重拉评论，
   // 只有连着这一页的人收得到，不经全员的 control 通道），收件箱也刷新（回复 / @ / 新开串都可能给别人添条目）
-  app.route(
-    '/',
-    commentRoutes(pool, (pageId) => {
-      hocuspocus.documents.get(`page:${pageId}`)?.broadcastStateless(JSON.stringify({ t: 'comments' }))
-      inbox.poke()
-    }),
-  )
+  // 新串 / 回复另交给「评论找我」的触发（triggers/sources/comment.ts）：后台跑，评论接口不等它
+  const commentsChanged = (pageId: string): void => {
+    hocuspocus.documents.get(`page:${pageId}`)?.broadcastStateless(JSON.stringify({ t: 'comments' }))
+    inbox.poke()
+  }
+  // 评论里 @Genet（comments/genet-call.ts）：与任务回报同一条写 Genet 页的链；Genet 页上一轮结束时给呼叫收尾
+  const genetCalls = new GenetCalls({ pool, notify: toolHost.tasks.notify, changed: commentsChanged })
+  toolHost.tasks.onEnd((pageId, outcome, error, startedAt) => genetCalls.runEnded(pageId, outcome, error, startedAt))
+  const posted = (c: PostedComment): void => {
+    triggers.background(() => commentPosted({ pool, hub: triggers }, c))
+    triggers.background(() => genetCalls.posted(c))
+  }
+  app.route('/', commentRoutes(pool, commentsChanged, posted))
   // 过程页 record（只读视图）
   app.route('/', runsRoutes(pool))
   // connector：浏览器确认配对 + 列表 + 批准 / 拒绝 / 撤销
@@ -368,7 +497,7 @@ export function startServer(
     notifyPreviewsChanged(hocuspocus, ev.preview.pageId)
   }
   app.route('/', previewRoutes(pool, hub, previewAccess, previewRuntime))
-  // 随手 AI：用户的模型连接 + 单次调用（SSE）。requireAuth 限定在自己的路径，不用 '*'，挂载序无影响。
+  // ⌘J：用户的模型连接 + 单次调用（SSE）。requireAuth 限定在自己的路径，不用 '*'，挂载序无影响。
   // 本地通道（经 connector 在用户自己的机器上跑一次 agent）借 AgentManager 的 resolve（机器使用权的唯一判定）与 catalog
   app.route(
     '/',
@@ -460,16 +589,26 @@ export function startServer(
       pruner.unref()
       // 存量补传 + 定时探测 / 扫描：监听成功后才起，失败只记日志
       imgbed.start()
+      triggers.start()
       resolve({
         port: actual,
         previewPort,
         // 立刻跑一次到期清扫，测试用
         sweepGrants: () => sweepGrants(pool, disconnect),
+        // 立刻扫一次到期的触发器，测试用（配合注入的时钟）
+        triggers: {
+          tick: () => triggers.tick(),
+          emit: (e) => triggers.emit(e),
+          causedBy: (pageId) => triggers.causedBy(pageId),
+          touched: (pageId, depth) => triggers.touched(pageId, depth),
+        },
         close: async () => {
           if (closed) return
           closed = true
           clearInterval(sweeper)
           clearInterval(pruner)
+          // 先停时钟、等在派发的那一趟做完（派发要写文档，必须在 hocuspocus.destroy 之前）
+          await triggers.dispose()
           await imgbed.dispose()
           inbox.dispose()
           offFirstUse()

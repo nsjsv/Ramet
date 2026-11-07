@@ -37,16 +37,21 @@ export type UnitMap = Map<string, HTMLElement>
 
 const COMPOSER = 'composer'
 
+/** 参与这次变形的那一页的容器（EditorPage 的 .editor-page）在切换期间挂这个属性。命名的选择器、样式表里单独成组的
+ *  输入区（styles/chat.css）都只认它里面的元素：别处嵌着的另一个对话（右下角 Genet 浮窗）不参与，否则同名两份，整次变形作废 */
+const SCOPE_ATTR = 'data-view-morph-scope'
+
 const isMessage = (node: ProsemirrorNode): boolean => node.type.name === 'user_message' || node.type.name === 'agent_reply'
 const hasText = (el: Element): boolean => Boolean(el.textContent?.trim())
 
-let chatUnitsSource: (() => UnitMap) | null = null
+/** 各页 ChatView 的单元来源。按页面分：别处嵌着的另一页的对话视图不能让这一页以为自己正在对话视图里 */
+const chatUnitsSources = new Map<string, () => UnitMap>()
 
-/** ChatView 建视图时登记自己的单元来源（chatUnits），销毁时注销（同一时刻只有一个 ChatView） */
-export function registerChatUnits(source: () => UnitMap): () => void {
-  chatUnitsSource = source
+/** ChatView 建视图时登记这一页的单元来源（chatUnits），销毁时注销（只摘自己） */
+export function registerChatUnits(pageId: string, source: () => UnitMap): () => void {
+  chatUnitsSources.set(pageId, source)
   return () => {
-    if (chatUnitsSource === source) chatUnitsSource = null
+    if (chatUnitsSources.get(pageId) === source) chatUnitsSources.delete(pageId)
   }
 }
 
@@ -75,8 +80,8 @@ function docUnits(view: EditorView): UnitMap {
 }
 
 /** 对话视图的单元：普通块取节点 DOM；消息块取气泡正文里的 [data-part] 元素（chat-view.tsx 的 buildBubble 标的）；
- *  输入框有字时算 composer。host 是只读视图的挂载点 */
-export function chatUnits(view: EditorView, host: HTMLElement): UnitMap {
+ *  输入框有字时算 composer。host 是只读视图的挂载点，composer 是同一个 ChatView 的输入框根元素 */
+export function chatUnits(view: EditorView, host: HTMLElement, composer: HTMLElement | null): UnitMap {
   const bubbles = new Map<string, HTMLElement>()
   const heads = new Map<string, HTMLElement>()
   for (const row of host.querySelectorAll<HTMLElement>('.chat-msg[data-blk]')) {
@@ -103,15 +108,15 @@ export function chatUnits(view: EditorView, host: HTMLElement): UnitMap {
     }
   })
   // 输入框是迷你 ProseMirror（composer-input.tsx）：空框根上挂着 data-empty
-  const input = document.querySelector<HTMLElement>('.chat-composer .chat-input')
-  if (input && !input.hasAttribute('data-empty') && input.textContent?.trim()) out.set(COMPOSER, input)
+  if (composer && !composer.hasAttribute('data-empty') && composer.textContent?.trim()) out.set(COMPOSER, composer)
   return out
 }
 
-/** 当前可见视图的单元：有对话来源登记就是对话视图，否则文档视图；只留渲染出来的元素 */
-function visibleUnits(docView: () => EditorView | undefined): UnitMap {
+/** 这一页当前可见视图的单元：有对话来源登记就是对话视图，否则文档视图；只留渲染出来的元素 */
+function visibleUnits(pageId: string, docView: () => EditorView | undefined): UnitMap {
   const view = docView()
-  const all = chatUnitsSource ? chatUnitsSource() : view && !view.isDestroyed ? docUnits(view) : new Map<string, HTMLElement>()
+  const chat = chatUnitsSources.get(pageId)
+  const all = chat ? chat() : view && !view.isDestroyed ? docUnits(view) : new Map<string, HTMLElement>()
   for (const [key, el] of all) if (el.offsetParent === null) all.delete(key)
   return all
 }
@@ -146,7 +151,7 @@ function restore(anchors: Anchor[], units: UnitMap, scroller: HTMLElement): stri
   return `anchor=none of ${anchors.length}`
 }
 
-/** 编辑器 / 对话视图里元素的唯一选择器：从挂载点（.editor-root 是 .editor-page 的直接孩子、.chat-root 只有一个）
+/** 编辑器 / 对话视图里元素的唯一选择器：从挂载点（.editor-root 是变形范围的直接孩子、范围里只有一个 .chat-root）
  *  一路 :nth-child 下去。挂载点不在 PM 的观察范围内；视图外的元素返回 null */
 function pathSelector(el: HTMLElement): string | null {
   const anchor = el.closest<HTMLElement>('.editor-root, .chat-root')
@@ -158,7 +163,7 @@ function pathSelector(el: HTMLElement): string | null {
     steps.unshift(`:nth-child(${Array.prototype.indexOf.call(parent.children, n) + 1})`)
     n = parent
   }
-  const base = anchor.classList.contains('chat-root') ? '.editor-page .chat-root' : '.editor-page > .editor-root'
+  const base = anchor.classList.contains('chat-root') ? `[${SCOPE_ATTR}] .chat-root` : `[${SCOPE_ATTR}] > .editor-root`
   return `${base} > ${steps.join(' > ')}`
 }
 
@@ -226,20 +231,26 @@ function createNamer() {
   }
 }
 
-/** change = 切换（React 状态 + 搬输入）；after = 切完、新视图已在 DOM 里之后要做的事（如落光标）；
- *  docView = 文档模式的正文视图（滚动口与文档侧的单元都从它取）。
+/** pageId = 切换的是哪一页；scope = 这一页的容器（变形只在它里面配对，见 SCOPE_ATTR）；change = 切换（React 状态 + 搬输入）；
+ *  after = 切完、新视图已在 DOM 里之后要做的事（如落光标）；docView = 文档模式的正文视图（滚动口与文档侧的单元都从它取）。
  *  两条路径都 flushSync(change)，之后先把阅读位置放回、再 after()：after 看到的永远是切完、位置已复原的 DOM */
-export function morphViewMode(opts: { change: () => void; after?: () => void; docView: () => EditorView | undefined }): void {
-  const { change, after, docView } = opts
+export function morphViewMode(opts: {
+  pageId: string
+  scope: HTMLElement | null
+  change: () => void
+  after?: () => void
+  docView: () => EditorView | undefined
+}): void {
+  const { pageId, scope, change, after, docView } = opts
   const scroller = docView()?.dom.closest<HTMLElement>('.main') ?? null
-  const oldUnits = visibleUnits(docView)
+  const oldUnits = visibleUnits(pageId, docView)
   const anchors = scroller ? anchorsOf(oldUnits, scroller) : []
   // 诊断日志（?diag=1 才记，debug-log.ts）
-  const dir = chatUnitsSource ? 'chat→doc' : 'doc→chat'
+  const dir = chatUnitsSources.has(pageId) ? 'chat→doc' : 'doc→chat'
   let placed = ''
   const run = (): void => {
     flushSync(change)
-    if (scroller) placed = restore(anchors, visibleUnits(docView), scroller)
+    if (scroller) placed = restore(anchors, visibleUnits(pageId, docView), scroller)
     after?.()
   }
   const start = (document as ViewTransitionDoc).startViewTransition?.bind(document)
@@ -251,17 +262,19 @@ export function morphViewMode(opts: { change: () => void; after?: () => void; do
   }
   const root = document.documentElement
   const namer = createNamer()
+  scope?.setAttribute(SCOPE_ATTR, '') // 命名之前挂上：旧画面的选择器就以它为根
   const oldKeys = namer.nameOld(oldUnits)
   root.dataset.viewMorph = '' // 切换期间才挂：styles/chat.css 的平移 / 淡入规则只作用于这次切换
   const done = (): void => {
     namer.clear()
     delete root.dataset.viewMorph
+    scope?.removeAttribute(SCOPE_ATTR)
   }
   try {
     const transition = start(() => {
       namer.clear() // 旧画面已经拍好：先摘旧名字，免得和新视图里的同名元素撞上
       run()
-      const newUnits = visibleUnits(docView)
+      const newUnits = visibleUnits(pageId, docView)
       const paired = namer.nameNew(newUnits, oldKeys)
       diagLog(`morph ${dir} units=${oldUnits.size}->${newUnits.size} named=${oldKeys.size} paired=${paired} ${placed} vh=${window.innerHeight}`)
     })

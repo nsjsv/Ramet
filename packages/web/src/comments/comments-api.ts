@@ -2,6 +2,7 @@
  * 评论是页面的附属数据，不进 Y.Doc：写成功后服务端在 page:<id> 文档上广播 stateless `{"t":"comments"}`，各端据此重拉。 */
 
 import { request } from '../api'
+import { ASSISTANT_AGENT, ASSISTANT_ID } from '../assistant/identity'
 
 /** null = 已注销用户。公开接口只给名字（没有 id） */
 export type CommentAuthor = { id?: string; name: string } | null
@@ -15,7 +16,22 @@ export type Comment = {
   editedAt: string | null
   /** 首条被删但串里还有回复：留占位，body 为空 */
   deleted: boolean
+  /** 'genet' = Genet 以作者的名义代发（作者批过原文，或作者在串里叫了它）；本人写的没有这个键 */
+  via?: 'genet'
+  /** 这条评论 @了 Genet 的处理状态：waiting 人人看得到；没回成（done = 看过了没回在这里、failed）只给叫的人。回了 / 公开接口没有这个键 */
+  call?: GenetCall
 }
+
+export type GenetCall = { state: 'waiting' | 'done' | 'failed'; reason: string }
+
+/** 叫 Genet 的记号（评论框里的 Genet chip；服务端 comments/store.ts 同口径）：发出去就叫写评论的人自己的 Genet 处理这个串 */
+export const GENET_MARK = `@[${ASSISTANT_AGENT.label}](agent:${ASSISTANT_ID})`
+
+/** 正文里的提及记号：成员 `@[名字](user:<id>)` 与 Genet。名字里可能带 `]`：按收口的 `](` 定位（同服务端解析口径） */
+export const MENTION_MARK = new RegExp(String.raw`@\[([^\n]*?)\]\((user:[A-Za-z0-9_-]{1,64}|agent:${ASSISTANT_ID})\)`, 'g')
+
+/** 记号只留名字（摘要用） */
+export const plainBody = (body: string): string => body.replace(MENTION_MARK, '@$1')
 
 /** 划词评论的锚点：from / to 是 base64 编码的 Yjs 相对位置（to 指向被评论文字的最后一个字），
  *  blockId / text / n 是文字兜底（同 editor/text-anchor.ts 的 TextAnchor） */

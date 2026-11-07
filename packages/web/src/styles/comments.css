@@ -1,9 +1,9 @@
 /* ---------- 评论（comments/）----------
- * 正文高亮 .comment-mark（comment-anchor.ts 的装饰，编辑页与公开页同款）、划词浮层 .cm-pop、
- * 讨论串 .cm-thread（浮层 / 抽屉 / 整页讨论共用）、输入框 .cm-composer、抽屉 .cm-drawer（外壳是 history.css 的 .hd-drawer）、
+ * 正文高亮 .comment-mark（comment-anchor.ts 的装饰，编辑页与公开页同款）、划词浮层 .cm-pop（窄屏）、
+ * 右侧评论栏 .cm-margin / .cm-card（宽屏）、讨论串 .cm-thread（浮层 / 卡片 / 抽屉 / 整页讨论共用）、输入框 .cm-composer、抽屉 .cm-drawer（外壳是 history.css 的 .hd-drawer）、
  * 整页讨论 .cm-discussion、顶栏按钮角标。颜色全用令牌，暗色主题跟着令牌走。 */
 
-/* 正文里被评论的字：淡黄底 + 下划线；激活的串（浮层开着）加深 */
+/* 正文里被评论的字：淡黄底 + 下划线；激活的串（浮层 / 卡片展开）与指针停在它卡片上时加深 */
 .comment-mark {
   background: color-mix(in srgb, var(--warn) 14%, transparent);
   border-bottom: 2px solid color-mix(in srgb, var(--warn) 45%, transparent);
@@ -12,6 +12,7 @@
 }
 
 .comment-mark:hover,
+.comment-mark.is-hover,
 .comment-mark.is-active {
   background: color-mix(in srgb, var(--warn) 30%, transparent);
 }
@@ -66,6 +67,108 @@
   overflow-y: auto;
 }
 
+/* ---------- 右侧评论栏（comments/CommentMargin.tsx）----------
+ * 卡片贴画面右缘（宿主滚动口 .main / .public-page 的内容盒右缘，编辑页再让开右轨），不跟着正文列走。
+ * 尺寸与 comments/margin-layout.ts 同口径：卡片 280、与正文至少隔 48。
+ * --cm-right = 卡片右缘到画面右缘：编辑页 72（让开贴右缘约 66px 的右轨触发区）、公开页 24；
+ * --cm-reserve = 画面右侧要留给评论栏的宽度（--cm-right + 280 + 48）。
+ * 正文列带 data-cm-margin（CommentMargin 写：放得下且有卡片可画）时，右缘不越过评论栏左边 48px：
+ * 居中时本来就够远就不动，不够就往左让（margin-right 取两者大者，margin-left auto 吃掉剩下的），正文宽度不变、只在实在挤时变窄。 */
+.main {
+  --cm-right: 72px;
+  --cm-reserve: calc(var(--cm-right) + 328px);
+}
+
+.public-page {
+  --cm-right: 24px;
+  --cm-reserve: calc(var(--cm-right) + 328px);
+}
+
+/* 编辑页列宽 856 = 720 正文 + 40 gutter + 左右各 48：列右缘离画面右缘至少 reserve − 48（列自己的右内边距 48 也是空白） */
+.editor-page[data-cm-margin]:not(.full-width) {
+  margin-right: max(calc((100% - 856px) / 2), calc(var(--cm-reserve) - 48px));
+  margin-left: auto;
+}
+
+/* 公开页列宽 720 = 正文 672 + 左右各 24；它在 flex 列里写死了 width:100%，宽度要跟着扣掉右侧留白 */
+.public-main[data-cm-margin]:not(.full-width) {
+  --cm-mr: max(calc((100% - 720px) / 2), calc(var(--cm-reserve) - 24px));
+  width: calc(100% - var(--cm-mr));
+  margin-right: var(--cm-mr);
+  margin-left: auto;
+}
+
+/* 全宽列本来就铺满：右内边距至少留出评论栏（压过 editor.css / public.css 里全宽的 padding-right） */
+.editor-page.full-width[data-cm-margin],
+.public-main.full-width[data-cm-margin] {
+  padding-right: max(96px, var(--cm-reserve));
+}
+
+/* 宿主滚动口里流内 0 高、铺满内容盒宽的包含块（紧挨正文列之前）；卡片 absolute 挂在里面，随正文滚 */
+.cm-margin {
+  position: relative;
+  height: 0;
+}
+
+@keyframes cm-card-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* 收起的卡片：底色 + 一圈描边（悬停描边加深）；激活的再浮起阴影（同 .pop-card）。两种内边距一样，展开时字不跳 */
+.cm-card {
+  position: absolute;
+  top: 0;
+  right: var(--cm-right);
+  z-index: 1;
+  width: 280px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px; /* padding-top 同 margin-layout.ts 的 CARD_PAD */
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  cursor: pointer;
+  /* 位置走 transform（CommentMargin 写 translateY）：挪动有过渡；新卡挂上时直接在位，只淡入 */
+  transition: transform var(--d-2) var(--ease-out), border-color var(--d-1), box-shadow var(--d-2);
+  animation: cm-card-in var(--d-2) var(--ease-out);
+}
+
+.cm-card:not(.is-active):hover {
+  border-color: var(--line-strong);
+}
+
+.cm-card:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 50%, transparent);
+  outline-offset: 1px;
+}
+
+/* 激活的压过相邻卡片；仍在面包屑(5) / 顶栏(6) 之下（滚动时从顶栏下面过） */
+.cm-card.is-active {
+  z-index: 4;
+  box-shadow: var(--shadow-2);
+  cursor: default;
+}
+
+.cm-card:not(.is-active) .cm-body {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.cm-card.is-active .cm-list {
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+.cm-card-replies {
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+}
+
 /* ---------- 讨论串 ---------- */
 .cm-thread {
   display: flex;
@@ -110,6 +213,39 @@
 .cm-time {
   flex: none;
   color: var(--ink-3);
+}
+
+/* Genet 代发的回复：时间后面的小标 */
+.cm-via {
+  flex: none;
+  padding: 0 6px;
+  border-radius: var(--r-pill);
+  background: var(--accent-tint);
+  color: var(--accent);
+  font-size: 11px;
+  line-height: 17px;
+  white-space: nowrap;
+}
+
+/* @了 Genet 的评论下面的处理状态：等着时呼吸，没回成的原因 + 链接 */
+.cm-call {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin-top: 4px;
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+}
+
+.cm-call.is-waiting {
+  color: var(--accent);
+  animation: run-breathe 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cm-call.is-waiting {
+    animation: none;
+  }
 }
 
 .cm-item-acts {

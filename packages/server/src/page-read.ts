@@ -26,6 +26,7 @@ import { fragmentSpans } from './updates.js'
 import { editPageForUser, parseOps } from './page-write.js'
 import { findBlockElement } from './block-ids.js'
 import { standaloneMarkdown } from './agents/refs.js'
+import type { Consent, Outcome } from './routes/ramet-consent.js'
 
 /** 端点路径与环境变量名的契约在本文件（MCP 进程不 import 这里，工具名在 mcp/tools/*.mjs） */
 export const READ_PAGE_PATH = '/api/pages/:id/text'
@@ -150,6 +151,20 @@ export function isMinimalGrant(token: string): boolean {
   return grant !== undefined && grant.expiresAt > Date.now() && grant.ctx.profile === 'minimal'
 }
 
+/** 这把凭证还能接着交给 agent 用：没过期，且剩下的寿命不少于 TTL 的一半。一轮可能跑很久，快到期的凭证交出去，
+ *  agent 跑到一半就会 401；缓存里的凭证（manager.pageReadTools）只在这时复用，否则签新的 */
+export function grantUsable(token: string): boolean {
+  const grant = grants.get(token)
+  return grant !== undefined && grant.expiresAt - Date.now() >= ttlMs() / 2
+}
+
+/** 凭证是谁的（只查内存，不碰库）：只认签给 scope 这个适配器、还没过期的。中心自己跑的 Genet 凭交给它的凭证认出会话属于谁
+ *  （drivers/assistant/driver.ts），身份不另传，也就冒充不了别人 */
+export function grantUser(token: string, scope: string): string | null {
+  const grant = grants.get(token)
+  return grant && grant.scope === scope && grant.expiresAt > Date.now() ? grant.userId : null
+}
+
 /** 凭证 → 请求者 + 会话上下文。坏凭证 / 过期凭证 / 账号已删一律 null（调用方转 401，不透露任何页面信息） */
 export async function pageGrantOf(
   pool: Pool,
@@ -228,6 +243,8 @@ export function pageReadRoutes(
   pool: Pool,
   write?: DocWriter,
   getLiveDoc?: (docName: string) => Y.Doc | undefined,
+  /** 外来事件之后 Genet 改页面先问主人（routes/ramet-consent.ts）；不给 = 不问 */
+  consent?: Consent,
 ) {
   const app = new Hono()
 
@@ -264,8 +281,10 @@ export function pageReadRoutes(
   // AI 写回文档：ops 在一个 Yjs 事务里，失败不改文档（见 page-write.ts）。
   // 权限沿用 pages.ts 的 writable：非成员 / 不存在 404，viewer 403
   app.post(EDIT_PAGE_PATH, async (c) => {
-    const user = await bearerUser(c)
-    if (!user) return c.json({ error: 'unauthorized' }, 401)
+    const header = c.req.header('authorization') ?? ''
+    const token = header.startsWith('Bearer ') ? header.slice(7).trim() : ''
+    const g = token ? await pageGrantOf(pool, token) : null
+    if (!g) return c.json({ error: 'unauthorized' }, 401)
     const body = await c.req.json().catch(() => null)
     if (!body || typeof body !== 'object' || !('ops' in body)) return c.json({ error: 'body 需要 ops 数组' }, 400)
     let ops
@@ -274,8 +293,18 @@ export function pageReadRoutes(
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 400)
     }
-    const outcome = await editPageForUser(pool, user, c.req.param('id'), ops, write ?? unavailableWriter)
-    return 'ok' in outcome ? c.json({ ok: true }) : c.json({ error: outcome.error }, outcome.status)
+    const pageId = c.req.param('id')
+    const run = async (): Promise<Outcome> => {
+      const outcome = await editPageForUser(pool, g.user, pageId, ops, write ?? unavailableWriter)
+      return 'ok' in outcome ? { status: 200, body: { ok: true } } : { status: outcome.status, body: { error: outcome.error } }
+    }
+    if (consent) {
+      const title = (await pool.query<{ title: string }>(SELECT_READABLE, [pageId, g.user.id])).rows[0]?.title
+      // 看不到的页先照常 404（不为它弹审批）
+      if (title !== undefined) return consent.guarded(c, g, `改页面《${title || '无标题'}》`, run)
+    }
+    const out = await run()
+    return c.json(out.body, out.status)
   })
 
   return app

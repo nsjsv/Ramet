@@ -308,8 +308,8 @@ export async function revokedUsersOf(pool: Pool, connectorId: string): Promise<s
 /** files = 项目面板（打开面板、读文件、看 diff；文件树与清单只是导航，不记）；
  *  terminal = 终端（打开 / 关闭，detail.op；每一行输入不记，太多）；
  *  preview = 端口预览（共享 / 停止共享，detail.op = share / stop；预览请求本身不记，太多）；
- *  quick = 随手 AI 的本地通道（用这台机器上的 agent 做一次改写，detail.kind = 任务类型；不记正文）；
- *  write = 写文件（项目面板代码查看器里收下随手 AI 的改写，detail.path；不记内容） */
+ *  quick = ⌘J 的本地通道（用这台机器上的 agent 做一次改写，detail.kind = 任务类型；不记正文）；
+ *  write = 写文件（项目面板代码查看器里收下 ⌘J 的改写，detail.path；不记内容） */
 export type UsageAction = 'run' | 'answer' | 'config' | 'files' | 'terminal' | 'preview' | 'quick' | 'write'
 
 const INSERT_USAGE = `INSERT INTO machine_usage_log (connector_id, user_id, action, page_id, detail) VALUES ($1, $2, $3, $4, $5::jsonb)`

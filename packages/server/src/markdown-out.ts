@@ -140,6 +140,19 @@ function block(el: Y.XmlElement): string {
       if (kind === 'video' || kind === 'audio') return `<${kind} src="${src}" controls preload="none"></${kind}>`
       return `<iframe src="${src}" loading="lazy" allowfullscreen></iframe>`
     }
+    case 'ai_gen': {
+      // 与编辑器 toMarkdown 同写法（方言 AI_GEN）：提示词与自动更新的规则跟着走，状态不进 markdown
+      const attr = (v: unknown): string => String(v ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      const rule = String(el.getAttribute('rule') ?? '').replace(/[^0-9a-f-]/g, '')
+      const head = `<!-- ai prompt="${attr(el.getAttribute('prompt'))}"${rule ? ` rule="${rule}"` : ''} -->`
+      return [head, ...children(el).map(block).filter((md) => md.trim()), '<!-- /ai -->'].join('\n\n')
+    }
+    case 'button_block': {
+      // 与编辑器 toMarkdown 同写法（方言 BUTTON）：规则 id 带着走，agent 改写这一页时按钮还绑着原来的规则
+      const rule = String(el.getAttribute('rule') ?? '').replace(/[^0-9a-f-]/g, '')
+      const label = String(el.getAttribute('label') ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;') || '按钮'
+      return `<button data-rule="${rule}">${label}</button>`
+    }
     case 'bookmark': {
       // 与编辑器 toMarkdown 同写法（方言 BOOKMARK）：别处渲染成普通链接
       const url = String(el.getAttribute('url') ?? '')
@@ -152,11 +165,11 @@ function block(el: Y.XmlElement): string {
   }
 }
 
-/** 整页正文 → markdown（块之间空一行，首尾去空白） */
-export function fragmentToMarkdown(fragment: Y.XmlFragment): string {
+/** 整页正文 → markdown（块之间空一行，首尾去空白）。skip = 不写这个顶层块（AI 块生成时的上下文不含它自己） */
+export function fragmentToMarkdown(fragment: Y.XmlFragment, skip?: Y.XmlElement): string {
   const out: string[] = []
   fragment.forEach((node) => {
-    if (node instanceof Y.XmlElement) {
+    if (node instanceof Y.XmlElement && node !== skip) {
       const md = block(node)
       if (md.trim()) out.push(md)
     }

@@ -2,7 +2,8 @@
  * 一次只服务一个页面（编辑页或公开页）：bindCommentsPage 换页即换，拆除时清空。
  * 服务端状态就是 GET /api/pages/:id/comments 的整份结果（量级小，不做增量）：写完先按响应改本地，
  * 别人的写入靠 page:<id> 文档上的 stateless `{"t":"comments"}`（editor-session.ts 转到 commentsChanged）重拉。
- * 浮层 / 抽屉开着哪个串也放这里：划词菜单（非 React）、顶栏按钮、高亮点击、收件箱深链都要能打开它。 */
+ * 激活的串 / 抽屉开着哪个串也放这里：划词菜单（非 React）、顶栏按钮、高亮点击、收件箱深链都要能打开它。
+ * 激活的串怎么呈现看 wide（CommentMargin 量出来的）：放得下右侧评论栏是栏里展开的卡片，放不下是浮层。 */
 
 import { useSyncExternalStore } from 'react'
 import { listenControl } from '../control'
@@ -10,8 +11,11 @@ import { dropInboxItem } from '../inbox/inbox-store'
 import { selfId } from '../people'
 import { commentsApi, type Anchor, type Comment, type Thread } from './comments-api'
 
-/** 浮层：看一个已有的串，或给刚选中的字写第一条评论（还没有串） */
+/** 激活的串：看一个已有的串，或给刚选中的字写第一条评论（还没有串）。宽屏是右侧展开的卡片，窄屏是浮层 */
 export type Popover = { kind: 'thread'; threadId: string } | { kind: 'draft'; anchor: Anchor }
+
+/** 草稿（还没有串）在高亮与右侧卡片里用的 id */
+export const DRAFT_ID = '__draft'
 
 type State = {
   pageId: string | null
@@ -21,12 +25,16 @@ type State = {
   loaded: boolean
   failed: boolean
   popover: Popover | null
+  /** 正文右侧放得下评论栏（CommentMargin 量）：true 时激活的串画成卡片，不弹浮层 */
+  wide: boolean
+  /** 指针停在哪张卡片上：它在正文里的高亮跟着加深 */
+  hover: string | null
   drawer: boolean
   /** 抽屉里展开的串 */
   expanded: string | null
 }
 
-const EMPTY: State = { pageId: null, mode: 'auth', threads: [], loaded: false, failed: false, popover: null, drawer: false, expanded: null }
+const EMPTY: State = { pageId: null, mode: 'auth', threads: [], loaded: false, failed: false, popover: null, wide: false, hover: null, drawer: false, expanded: null }
 let state: State = EMPTY
 const listeners = new Set<() => void>()
 
@@ -76,7 +84,7 @@ export function bindCommentsPage(pageId: string, mode: 'auth' | 'public'): () =>
   const gen = generation
   inflight = false
   again = false
-  set({ ...EMPTY, pageId, mode })
+  set({ ...EMPTY, pageId, mode, wide: state.wide }) // wide 是版面的事，不随换页清
   void refreshComments()
   const off = mode === 'auth' ? listenControl((ev) => ev === 'sync' && scheduleRefresh()) : () => undefined
   return () => {
@@ -172,17 +180,26 @@ export function markThreadRead(threadId: string): void {
   void commentsApi.read(threadId).catch((err: unknown) => console.error(err))
 }
 
+// 激活串 / 写草稿顺手关抽屉：抽屉盖在右侧，会挡住评论栏；窄屏上它占满全宽，浮层也只能叠在它上面
 export function openThread(threadId: string): void {
-  set({ popover: { kind: 'thread', threadId } })
+  set({ popover: { kind: 'thread', threadId }, drawer: false, expanded: null })
   markThreadRead(threadId)
 }
 
 export function openDraft(anchor: Anchor): void {
-  set({ popover: { kind: 'draft', anchor } })
+  set({ popover: { kind: 'draft', anchor }, drawer: false, expanded: null })
 }
 
 export function closePopover(): void {
   if (state.popover) set({ popover: null })
+}
+
+export function setWide(wide: boolean): void {
+  if (state.wide !== wide) set({ wide })
+}
+
+export function hoverThread(threadId: string | null): void {
+  if (state.hover !== threadId) set({ hover: threadId })
 }
 
 export function openDrawer(expanded: string | null = null): void {

@@ -1,4 +1,4 @@
-// 随手 AI 的客户端（对应 server routes/quick.ts）：设置 / 连接的 REST 与单次调用的 SSE 流。
+// ⌘J 的客户端（对应 server routes/quick.ts）：设置 / 连接的 REST 与单次调用的 SSE 流。
 // 模型连接归用户自己（key 加密存在服务端，这里只拿到后四位），站点不提供共用 key。
 // 开流前的失败是普通 JSON 错误（400/409/429），模型侧的任何失败（含 key 无效）都在流里以 error 事件给出，
 // 所以统一折成 QuickOutcome，调用方只看 ok / code / message。
@@ -9,9 +9,6 @@ import { COPY } from './copy'
 export type QuickKind = 'rewrite' | 'draft' | 'composer' | 'code' | 'command'
 export type Protocol = 'anthropic' | 'openai'
 export type Channel = 'site' | 'local'
-
-/** 官方 Anthropic 地址下可选的三个模型（服务端同表） */
-export const ANTHROPIC_MODELS = ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'] as const
 
 export interface AiConnection {
   id: string
@@ -43,6 +40,21 @@ export interface ConnectionInput {
 
 export type TestResult = { ok: true; reply: string } | { ok: false; code: string; message: string }
 
+/** 服务商模型列表里的一项：id 是调用时用的模型名，name 是展示名（没有就同 id） */
+export interface ModelInfo {
+  id: string
+  name: string
+}
+
+export type ModelListResult = { ok: true; models: ModelInfo[] } | { ok: false; code: string; message: string }
+
+/** 模型在公开模型目录里的规格 + Genet 会给的思考档（含「默认」；空 = 不能调）。catalog=false 是目录暂时拉不到 */
+export interface ModelSpecView {
+  catalog: boolean
+  match: { exact: boolean; context?: number; output?: number } | null
+  thinking: Array<{ value: string; name: string }>
+}
+
 /** 一次调用的结果：ok = 完整收到；否则 code 是短码（auth / rate_limit / refusal / max_tokens / empty / no connection …），message 是人话 */
 export type QuickOutcome = { ok: true } | { ok: false; code: string; message: string }
 
@@ -66,8 +78,19 @@ const jsonInit = (method: string, body: unknown): RequestInit => ({ method, body
 const SETTINGS_TTL_MS = 30_000
 let cached: { at: number; value: AiSettings } | null = null
 
+const settingsListeners = new Set<() => void>()
+
 export function forgetAiSettings(): void {
   cached = null
+  settingsListeners.forEach((l) => l())
+}
+
+/** 设置改过了（连接增删改、换当前连接）：依赖它的提示（Genet 浮窗的「还没有模型」）据此重查，不用刷新页面 */
+export function subscribeAiSettings(cb: () => void): () => void {
+  settingsListeners.add(cb)
+  return () => {
+    settingsListeners.delete(cb)
+  }
 }
 
 export async function getAiSettings(fresh = false): Promise<AiSettings> {
@@ -77,7 +100,7 @@ export async function getAiSettings(fresh = false): Promise<AiSettings> {
   return value
 }
 
-/** 随手 AI 现在能不能直接用；不能时给出原因（弹层里显示）。取设置失败不拦（让真正的请求去报错） */
+/** ⌘J 现在能不能直接用；不能时给出原因（弹层里显示）。取设置失败不拦（让真正的请求去报错） */
 export async function quickReadiness(): Promise<{ ok: true } | { ok: false; message: string }> {
   let settings: AiSettings
   try {
@@ -124,6 +147,12 @@ export const quickApi = {
   /** 测试连接：已保存的带 id（key 用库里的，表单里改过的字段覆盖）；没保存的带 protocol + apiKey。地址不合法抛 ApiError(400) */
   testConnection: (body: Partial<ConnectionInput> & { id?: string; protocol?: Protocol }) =>
     request<TestResult>('/api/me/ai-connections/test', jsonInit('POST', body)),
+  /** 拉服务商的模型列表（模型只能从这里选）。入参同测试连接，不要 model */
+  listModels: (body: { id?: string; protocol?: Protocol; baseUrl?: string; apiKey?: string }) =>
+    request<ModelListResult>('/api/me/ai-connections/models', jsonInit('POST', body)),
+  /** 设置页模型框下面那一行。表单没保存也能问；地址不合法抛 ApiError(400) */
+  modelSpec: (q: { protocol: Protocol; baseUrl: string; model: string }) =>
+    request<ModelSpecView>(`/api/me/model-spec?${new URLSearchParams(q)}`),
 }
 
 function parseBlock(block: string): { event: string; data: unknown } | null {
@@ -141,7 +170,7 @@ function parseBlock(block: string): { event: string; data: unknown } | null {
   }
 }
 
-/** 发起一次随手 AI 调用并把增量交给 onDelta。signal 取消 = 断开连接（服务端随之中止上游）；取消不算失败（code 'aborted'） */
+/** 发起一次 ⌘J 调用并把增量交给 onDelta。signal 取消 = 断开连接（服务端随之中止上游）；取消不算失败（code 'aborted'） */
 export async function streamQuick(body: QuickBody, onDelta: (text: string) => void, signal: AbortSignal): Promise<QuickOutcome> {
   const aborted: QuickOutcome = { ok: false, code: 'aborted', message: '' }
   let res: Response
@@ -182,7 +211,7 @@ export async function streamQuick(body: QuickBody, onDelta: (text: string) => vo
         const data = ev.data as { text?: string; code?: string; message?: string }
         if (ev.event === 'delta' && typeof data.text === 'string') onDelta(data.text)
         else if (ev.event === 'done') return { ok: true }
-        else if (ev.event === 'error') return { ok: false, code: data.code ?? 'error', message: data.message ?? '随手 AI 出错了' }
+        else if (ev.event === 'error') return { ok: false, code: data.code ?? 'error', message: data.message ?? '⌘J 出错了' }
       }
     }
   } catch {

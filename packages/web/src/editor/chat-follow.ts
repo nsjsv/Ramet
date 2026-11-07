@@ -8,9 +8,12 @@ import { reducedMotion } from '../motion'
 
 const STICK_PX = 40
 
-/** 滚动口是页面主滚动口 .main（与文档模式同一个，滚动条贴画面右缘） */
+/** 宿主自己滚的对话视图（别处嵌着的对话，如 Genet 浮窗）在滚动口上挂这个属性 */
+export const CHAT_SCROLLER_ATTR = 'data-chat-scroller'
+
+/** 滚动口：宿主标了自己的滚动口就用它，否则是页面主滚动口 .main（与文档模式同一个，滚动条贴画面右缘） */
 function pageScroller(content: HTMLElement | null): HTMLElement | null {
-  return content?.closest<HTMLElement>('.main') ?? null
+  return content?.closest<HTMLElement>(`[${CHAT_SCROLLER_ATTR}]`) ?? content?.closest<HTMLElement>('.main') ?? null
 }
 
 export function useChatFollow(

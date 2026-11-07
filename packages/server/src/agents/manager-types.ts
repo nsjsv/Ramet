@@ -5,7 +5,7 @@ import type * as Y from 'yjs'
 import { toolOf } from '@ramet/shared/reply-stats'
 import type { Pool } from 'pg'
 import type { DocWriter } from '../collab.js'
-import type { PageTool } from '../page-read.js'
+import { grantUsable, type PageTool } from '../page-read.js'
 import type { MachinePass } from './machine-access.js'
 import type { RunState } from './run-state.js'
 import type { AgentPosture } from './posture.js'
@@ -14,6 +14,7 @@ import type { SessionSync } from './session-sync.js'
 import type { TeamRoundHost } from './team.js'
 import type { ToolProfile } from './tool-profile.js'
 import type { AgentAdapter, AgentConfig, AgentEvent, PermissionEvent } from './types.js'
+import type { AgentNameHost } from './agent-names.js'
 
 export class BusyError extends Error {
   constructor() {
@@ -126,6 +127,9 @@ export type ResolvedAgent = {
   local?: AgentConfig
   /** ownerId = 配对人（connectors.owner_id），这台机器的主人；老 connector 为 null */
   remote?: { connectorId: string; agentId: string; defaultCwd: string; ownerId: string | null }
+  /** 中心自己跑的 Genet（assistant-agent.ts）：不在任何机器上，没有工作区（cwd 恒为空）、不记机器使用、不搬会话；
+   *  只在发起人自己的 Genet 页上才解析得出来 */
+  assistant?: true
 }
 
 /** 这一轮的执行目标（resolveRun / resolveRedo 的产物）：agent + 生效 cwd + 消息级配置覆盖。
@@ -157,12 +161,31 @@ export type PageState = {
   run: RunState | null
 }
 
+/** 会话交付工具时带的凭证（多份按序拼起来；没有工具 = ''）：AdapterEntry.loaded 记的就是它 */
+export function credentialOf(tools: PageTool[]): string {
+  return tools.map((t) => t.mcp.token).join(',')
+}
+
+/** 这个会话在本进程里加载过、且加载时交付的就是这一份凭证：可以直接接着用。凭证换了（过期签了新的）就得重新加载，
+ *  agent 侧的 MCP 进程才会拿到新凭证；拿着死凭证接着用，它的每次工具调用都是 401 */
+export function loadedWith(entry: Pick<AdapterEntry, 'loaded'>, sessionId: string, tools: PageTool[]): boolean {
+  return entry.loaded.get(sessionId) === credentialOf(tools)
+}
+
+/** 这个会话在本进程里加载着，手里的凭证（不管是谁的）也还用得上：改配置这类不交付新工具的操作可以直接用它，
+ *  不必换成自己的凭证重新加载 */
+export function loadedUsable(entry: Pick<AdapterEntry, 'loaded'>, sessionId: string): boolean {
+  const cred = entry.loaded.get(sessionId)
+  return typeof cred === 'string' && cred.split(',').filter(Boolean).every(grantUsable)
+}
+
 /** 适配器池条目的操作人视图：adapter 绑定了发起这次调用的人的凭据（远端：帧里的 actor 取自它），
  *  其余成员（loaded / key / pageTokens）与池里的条目共享引用。池里的原始适配器不对外，见 manager.ts 的 PoolEntry */
 export type AdapterEntry = {
   adapter: AgentAdapter
-  /** 本进程内已 loadSession 的会话(进程被回收后重 load) */
-  loaded: Set<string>
+  /** 本进程内已 loadSession / newSession 的会话 → 那时交付的凭证（credentialOf）；null = 不知道（认领回来的回合，
+   *  凭证是上一个中心进程签的，已经作废）。进程被回收后清空、重新 load；凭证对不上也重新 load（loadedWith） */
+  loaded: Map<string, string | null>
   /** 本适配器的 key（= agent id）：签发/撤销 read_page 凭证的 scope（见 page-read.ts） */
   key: string
   /** 交给 AI 的 Ramet MCP 凭证，按「用户 + 页面」各一把（凭证绑着页面：新建页默认放当前页下、审批弹在当前页、
@@ -180,7 +203,8 @@ export type ManagerHost = {
   notifyPagesChanged?: () => void
   getLiveDoc(docName: string): Y.Doc | undefined
   broadcast(pageId: string, ev: AgentEvent): void
-  resolve(agentId: string, user: { id: string; role: string }): Promise<ResolvedAgent | null>
+  /** pageId = 在哪一页上用（Genet 只在发起人自己的 Genet 页上解析得出来，见 manager.resolve） */
+  resolve(agentId: string, user: { id: string; role: string }, pageId?: string): Promise<ResolvedAgent | null>
   ensureAdapter(agent: ResolvedAgent): AdapterEntry
   /** 适配器池里已有的条目（不创建），绑定到 pass 的操作人；key = agent id（catalog id） */
   adapterOf(key: string, pass: MachinePass): AdapterEntry | undefined
@@ -199,8 +223,8 @@ export type ManagerHost = {
   sessions: SessionSync
   /** 这个人此刻能用的 agent 目录（续跑时原机器不在线，找同一工具的另一台） */
   catalog(user: { id: string; role: string }): Promise<CatalogAgent[]>
-  /** 本机 agent 的显示名（补发内容里给别的 agent 的回复署名用）；不是本机 agent 返回 undefined */
-  agentLabel(agentId: string): string | undefined
+  /** agent 显示名的原料（补发内容里给别的 agent 的回复署名用，agent-names.ts） */
+  agentNames: AgentNameHost
   /** 以某人身份写文档（collab.ts 的 createDocWriter）：续跑收尾往原过程页补步骤块。测试桩可以不给 */
   writeDoc?: DocWriter
 }

@@ -40,7 +40,7 @@ type RequestPending = {
   timer?: NodeJS.Timeout
   /** 应答帧到达的那一刻、resolve 之前同步调用：要「按到达顺序」落地的副作用放这里（见 RemoteAgent.seed） */
   onReply?: (msg: ConnMsg) => void
-  /** 流式增量（quick-delta 的文本）：随手 AI 本地通道，应答（res / err）之前陆续到达 */
+  /** 流式增量（quick-delta 的文本）：⌘J 本地通道，应答（res / err）之前陆续到达 */
   onStream?: (text: string) => void
 }
 
@@ -94,7 +94,7 @@ export class ConnectorHub {
   readonly ptys = new PtyBridge(this)
   /** 端口预览：共享登记 + HTTP / WebSocket 经 connector 转发（预览源的监听在 preview-server.ts，用的是这里的登记） */
   readonly previews = new PreviewBridge(this)
-  /** 在飞的随手 AI 本地通道调用：授权收回 / 收窄时按「机器 + 人」当场取消（manager.endAgentAccess） */
+  /** 在飞的 ⌘J 本地通道调用：授权收回 / 收窄时按「机器 + 人」当场取消（manager.endAgentAccess） */
   private quickRuns = new Set<{ connectorId: string; userId: string; cancel: (reason: string) => void }>()
 
   /** onAgentsChanged = 在线清单变了（上线/下线）时通知客户端失效 agent 目录缓存
@@ -399,7 +399,7 @@ export class ConnectorHub {
     }
   }
 
-  /** 停掉一次随手 AI 本地通道调用（按 rid）。刻意不要 MachinePass：非驱动帧，只会让机器停下来（同 cancel） */
+  /** 停掉一次 ⌘J 本地通道调用（按 rid）。刻意不要 MachinePass：非驱动帧，只会让机器停下来（同 cancel） */
   cancelQuick(connectorId: string, rid: string): boolean {
     return this.sendTo(connectorId, { t: 'quick-cancel', rid })
   }

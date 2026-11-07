@@ -1,4 +1,4 @@
-/* ---------- 划词评论的浮层 ----------
+/* ---------- 划词评论的浮层（窄屏；放得下右侧评论栏时画成卡片，见 CommentMargin）----------
  * 锚在被评论的那段字下方（下面放不下翻到上方），fixed 定位、滚动 / 窗口变化时按锚点重新求位置。
  * 两种内容：已有的串（CommentThread）；刚选中的字写第一条评论（引用原文 + 输入框，发出后变成那个串）。
  * 点浮层外面 / Esc 收起；点到别的高亮不先收（高亮的点击会直接换成那个串）。锚定的字没了（被删）浮层自己收起。 */
@@ -8,10 +8,10 @@ import type { EditorView } from '@milkdown/kit/prose/view'
 import { COPY } from '../copy'
 import { Icon } from '../icons'
 import { commentRange } from './comment-anchor'
-import CommentComposer from './CommentComposer'
-import CommentThread, { type CommentCtx } from './CommentThread'
+import CommentThread, { DraftComposer, type CommentCtx } from './CommentThread'
 import type { Thread } from './comments-api'
-import { closePopover, createThread, openThread, type Popover } from './comments-store'
+import { closePopover, type Popover } from './comments-store'
+import { useDismiss } from './use-dismiss'
 
 const C = COPY.comments
 const GAP = 8
@@ -50,26 +50,14 @@ export default function CommentPopover({ popover, threads, getView, ctx }: Props
 
   useEffect(() => {
     const onScroll = (): void => place()
-    const onDown = (e: MouseEvent): void => {
-      const target = e.target as Element | null
-      if (!target || boxRef.current?.contains(target)) return
-      if (target.closest?.('.comment-mark, .selection-menu')) return
-      closePopover()
-    }
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape' && !e.defaultPrevented) closePopover()
-    }
     window.addEventListener('scroll', onScroll, true)
     window.addEventListener('resize', onScroll)
-    document.addEventListener('mousedown', onDown, true)
-    document.addEventListener('keydown', onKey)
     return () => {
       window.removeEventListener('scroll', onScroll, true)
       window.removeEventListener('resize', onScroll)
-      document.removeEventListener('mousedown', onDown, true)
-      document.removeEventListener('keydown', onKey)
     }
   }, [place])
+  useDismiss(true, (target) => !!boxRef.current?.contains(target))
 
   // 串被删了 / 不在列表里了（别人删光了评论）：收起
   useEffect(() => {
@@ -92,22 +80,9 @@ export default function CommentPopover({ popover, threads, getView, ctx }: Props
         </button>
       </div>
       {thread ? (
-        <CommentThread thread={thread} ctx={ctx} />
+        <CommentThread thread={thread} ctx={ctx} onEscape={closePopover} />
       ) : (
-        !ctx.readOnly && (
-          <CommentComposer
-            getSchema={ctx.getSchema}
-            tick={ctx.tick}
-            spaceId={ctx.spaceId}
-            placeholder={C.placeholder}
-            autoFocus
-            onCancel={closePopover}
-            onSubmit={async (text) => {
-              const created = await createThread('inline', text, anchor)
-              openThread(created.id)
-            }}
-          />
-        )
+        !ctx.readOnly && <DraftComposer anchor={anchor} ctx={ctx} />
       )}
     </div>
   )

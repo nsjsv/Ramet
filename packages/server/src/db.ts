@@ -3,6 +3,8 @@ import { COVER_COLUMNS } from './page-cover.js'
 import { API_PAGE_FIELDS } from './page-icon.js'
 import { COMMENT_SWITCHES_DDL, COMMENTS_DDL } from './comments/schema.js'
 import { COLLECTION_NUMBERS_DDL } from './collections/schema.js'
+import { ASSISTANT_DDL } from './agents/drivers/assistant/schema.js'
+import { TRIGGERS_DDL } from './triggers/schema.js'
 
 // 页面变更日志（page-sync.ts）的 UPDATE 触发列：对外字段（API_PAGE_FIELDS，含 position）+ 图标两列 + 封面三列 + deleted_at。
 // 由白名单拼出，不另抄一份列清单，对外字段加列时触发条件跟着变。content_text / agent_session /
@@ -408,7 +410,7 @@ CREATE TABLE IF NOT EXISTS machine_access_requests (
   resolved_at TIMESTAMPTZ
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_machine_requests_open ON machine_access_requests(connector_id, user_id) WHERE resolved_at IS NULL;
--- 随手 AI：用户自己的模型连接。站点不提供共用 key，key 是用户自己填的，AES-256-GCM 加密后落库
+-- ⌘J：用户自己的模型连接。站点不提供共用 key，key 是用户自己填的，AES-256-GCM 加密后落库
 -- （主密钥来自环境变量 RAMET_SECRET_KEY，secret-box.ts；密文绑定 user_id 做 AAD）。key 永不出现在任何响应 / 日志里，只回后四位。
 -- protocol: anthropic | openai（OpenAI 兼容）；base_url：anthropic 空 = 官方地址，openai 必填，已规范化且过了 SSRF 校验
 -- （endpoint-guard.ts，每次请求时还会再校验）。model：anthropic + 官方地址只允许三个已知模型，其它自由填
@@ -434,7 +436,7 @@ CREATE TABLE IF NOT EXISTS user_ai_settings (
 );
 -- 本地通道用哪台机器上的哪个 agent（目录里的 catalog id：c:<connectorId>:<agentId>）；不设外键：机器被撤销后调用时再校验
 ALTER TABLE user_ai_settings ADD COLUMN IF NOT EXISTS local_agent TEXT;
--- 随手 AI 在项目面板的代码查看器里改写并落盘的文件（write 帧成功后记一行）：改动页据此把这个文件标成「你（随手 AI）」而不是「你」。
+-- ⌘J 在项目面板的代码查看器里改写并落盘的文件（write 帧成功后记一行）：改动页据此把这个文件标成「你（⌘J）」而不是「你」。
 -- root + path 是执行端的工作区与相对路径；不设 user_id 外键（同 machine_usage_log：删号不改写历史）
 CREATE TABLE IF NOT EXISTS quick_writes (
   id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -629,6 +631,10 @@ CREATE TABLE IF NOT EXISTS agent_session_files (
   PRIMARY KEY (page_id, tool, name)
 );
 ${COLLECTION_NUMBERS_DDL}
+${ASSISTANT_DDL}
+-- 排队消息发送时用户正在看的页面(Genet 浮窗:「这页」指它,派发时写进 user_message 的 ctx 属性);空 = 没有
+ALTER TABLE send_queue ADD COLUMN IF NOT EXISTS ctx TEXT NOT NULL DEFAULT '';
+${TRIGGERS_DDL}
 `
 
 // 存量数据迁移(幂等,可重复执行):

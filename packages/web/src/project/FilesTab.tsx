@@ -11,7 +11,7 @@ const C = COPY.project.files
 /** 改动标记的配色类（颜色在 project.css；标记字母本身也显示，不只靠颜色） */
 const markClass = (m: GitMark): string => (m === 'A' || m === '?' ? 'is-add' : m === 'D' ? 'is-del' : m === 'U' ? 'is-conflict' : 'is-mod')
 
-/* ---------- 文件分页：懒加载的文件树 + 查看器（只读；选中几行 ⌘J 随手 AI 改写除外）----------
+/* ---------- 文件分页：懒加载的文件树 + 查看器（只读；选中几行 ⌘J ⌘J 改写除外）----------
  * 树按目录懒加载：打开分页拉根目录，点开哪个目录才拉哪个；刷新信号（点刷新 / 本页一轮结束）来了才重拉
  * 根目录和已展开的目录（旧内容先留着，新内容到了再换，不闪）。分页不可见时不请求、不轮询。
  * 点文件进查看器（同一个分页里换一屏，带返回），文件路径由父面板持有（⌘P 找文件也要打开它）。 */
@@ -36,7 +36,7 @@ export default function FilesTab({
   onOpen: (path: string | null) => void
   /** 页面可写：查看器里的 ⌘J 才能把改写写回文件 */
   canWrite: boolean
-  /** 随手 AI 写了文件：改动分页刷新 */
+  /** ⌘J 写了文件：改动分页刷新 */
   onWritten: () => void
 }) {
   const [dirs, setDirs] = useState<ReadonlyMap<string, DirState>>(new Map())

@@ -13,6 +13,9 @@ const GROUP: Record<InboxItem['type'], InboxGroup> = {
   first_use: 'news',
   done: 'news',
   comment: 'news',
+  timer_failed: 'news',
+  automation: 'news',
+  doc_mention: 'news',
   running: 'running',
 }
 
@@ -46,17 +49,24 @@ export function attentionCount(items: readonly InboxItem[]): number {
   return items.filter((item) => GROUP[item.type] === 'attention').length
 }
 
+/** 小点 = 新消息的条数（服务端只给没看过的：没看过的完成 / 正文 @、没读过的评论、没点「知道了」的首次使用 / 规则失败 / 规则发来的通知）。
+ *  只在没有要处理的事时才显示，有的话数字角标已经够醒目 */
+export function newsCount(items: readonly InboxItem[]): number {
+  return items.filter((item) => GROUP[item.type] === 'news').length
+}
+
 export function dropByKey(items: readonly InboxItem[], key: string): InboxItem[] {
   return items.some((item) => item.key === key) ? items.filter((item) => item.key !== key) : (items as InboxItem[])
 }
 
-/** 打开某个对话页后，它的「做完待你看」就算看过了 */
-export function dropDoneOf(items: readonly InboxItem[], pageId: string): InboxItem[] {
-  return items.some((item) => item.type === 'done' && item.pageId === pageId)
-    ? items.filter((item) => !(item.type === 'done' && item.pageId === pageId))
-    : (items as InboxItem[])
+/** 打开这一页就算看过的条目：「做完待你看」与「正文里 @了你」（服务端同一张 inbox_seen） */
+const seenByOpening = (item: InboxItem, pageId: string): boolean => (item.type === 'done' || item.type === 'doc_mention') && item.pageId === pageId
+
+/** 打开某一页后，它的「做完待你看」「正文里 @了你」就算看过了 */
+export function dropSeenOf(items: readonly InboxItem[], pageId: string): InboxItem[] {
+  return items.some((item) => seenByOpening(item, pageId)) ? items.filter((item) => !seenByOpening(item, pageId)) : (items as InboxItem[])
 }
 
-export function hasDoneOf(items: readonly InboxItem[], pageId: string): boolean {
-  return items.some((item) => item.type === 'done' && item.pageId === pageId)
+export function hasSeenOf(items: readonly InboxItem[], pageId: string): boolean {
+  return items.some((item) => seenByOpening(item, pageId))
 }

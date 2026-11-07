@@ -461,13 +461,14 @@
   }
 }
 
-/* @ 提及 chip（页面 page-mention.ts / 块引用 block-ref.ts / agent agent-mention.ts / 成员 user-mention.ts）。
-   四种提及同一形体：浅底胶囊，同高同字号、单行、无边框；颜色区分叫的是谁，agent 强调蓝、成员「你」绿、页面 / 块引用中性灰。
-   打头的记号：agent / 成员是文字里自带的 `@`，页面 / 块引用是文档轮廓图标（--page-icon，mask 上色）。颜色只改各类的 --mention-fg / --mention-bg。
+/* @ 提及 chip（页面 page-mention.ts / 块引用 block-ref.ts / agent agent-mention.ts / 成员 user-mention.ts / 文件 file-mention.ts）。
+   几种提及同一形体：浅底胶囊，同高同字号、单行、无边框；颜色区分叫的是谁，agent 强调蓝、成员「你」绿、页面 / 块引用 / 文件中性灰。
+   打头的记号：agent / 成员是文字里自带的 `@`，页面 / 块引用是文档轮廓图标（--page-icon），文件是代码文件图标（--file-glyph），都是 mask 上色。颜色只改各类的 --mention-fg / --mention-bg。
    选择器不带 .ProseMirror 前缀：聊天气泡把文档节点序列化成 DOM 直接塞进去，没有 .ProseMirror 祖先，带了就画不出来。
    overflow 用 clip 不用 hidden：hidden 会让行内盒的基线掉到底边，chip 跟正文对不齐。 */
 .page-mention,
 .block-ref,
+.file-mention,
 .agent-mention,
 .user-mention {
   display: inline-flex;
@@ -485,7 +486,8 @@
   position: relative;
 }
 .page-mention,
-.block-ref {
+.block-ref,
+.file-mention {
   --mention-fg: var(--ink);
   --mention-bg: var(--press);
 }
@@ -505,7 +507,8 @@
   cursor: pointer;
 }
 .page-mention::before,
-.block-ref::before {
+.block-ref::before,
+.file-mention::before {
   content: '';
   position: absolute;
   left: 7px;
@@ -516,6 +519,14 @@
   background: var(--ink-3);
   -webkit-mask: var(--page-icon) center / contain no-repeat;
   mask: var(--page-icon) center / contain no-repeat;
+}
+/* 文件引用：不可点（路径在悬停提示里），图标换成代码文件 */
+.file-mention {
+  padding-left: 21px;
+}
+.file-mention::before {
+  -webkit-mask-image: var(--file-glyph);
+  mask-image: var(--file-glyph);
 }
 .page-mention:hover,
 .block-ref:hover {

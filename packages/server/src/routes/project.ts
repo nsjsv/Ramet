@@ -15,7 +15,7 @@
 //         没有 machine 授权 403（文案带主人名）；机器不在线 409；connector 版本太旧 409 { error:'connector outdated' }；
 //         connector 的第二道闸拒绝 403；路径越界 / 不存在 / 不是文件等 400（message 是人话）。
 // 除 write 外全部只读。终端在 routes/project-pty.ts（同一个守卫）。
-// 写文件（随手 AI 在代码查看器里收下改写）同样走 machine 范围，另加三条：页面可写（viewer 403，在 machine 授权之前判）、
+// 写文件（⌘J 在代码查看器里收下改写）同样走 machine 范围，另加三条：页面可写（viewer 403，在 machine 授权之前判）、
 // 非主人先留痕（action 'write'）再发帧、connector 没有 write 能力（老版本）409 connector outdated 且不发帧。
 // 409 conflict = 文件已不是你读到的那一版（baseHash 不符）。成功后记一行 quick_writes，git-status 的 by 据此给 'quick'。
 
@@ -111,7 +111,7 @@ export function projectRoutes(pool: Pool, hub: ConnectorHub) {
     if (g instanceof Response) return g
     try {
       const { op: _op, ...reply } = await askProject(hub, g.ctx, 'git-status', (rid, actor) => ({ t: 'git-status', rid, actor, root: g.ctx.root }))
-      // 谁改的：本页各轮 run 记录里 agent 改过的文件标上 agent；随手 AI 写的（比 agent 那一轮更近）标 'quick'；其余是用户自己改的（前端标「你」）
+      // 谁改的：本页各轮 run 记录里 agent 改过的文件标上 agent；⌘J 写的（比 agent 那一轮更近）标 'quick'；其余是用户自己改的（前端标「你」）
       if (reply.files.length === 0) return c.json(reply)
       const [touched, quick] = await Promise.all([
         touchedByAgents(pool, g.pageId, g.ctx.root),
@@ -171,7 +171,7 @@ export function projectRoutes(pool: Pool, hub: ConnectorHub) {
         }))
         // 文件已经写下去了：标记失败不该让这次写入看起来失败（顶多改动页把它标成「你」）
         await recordQuickWrite(pool, g.pageId, g.ctx.machine.id, g.ctx.root, reply.path, userId).catch((err: unknown) =>
-          console.error('[project] 记录随手 AI 写入失败', err),
+          console.error('[project] 记录 ⌘J 写入失败', err),
         )
         return c.json(reply)
       } catch (err) {

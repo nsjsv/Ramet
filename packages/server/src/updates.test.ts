@@ -216,3 +216,17 @@ describe('summarizeChange', () => {
     ])
   })
 })
+
+describe('textOf 文件引用', () => {
+  test('给 AI / 搜索的是 `@完整路径`（画面上只有文件名）', () => {
+    const doc = new Y.Doc()
+    const p = new Y.XmlElement('paragraph')
+    const t = new Y.XmlText()
+    t.insert(0, '看 ')
+    const file = new Y.XmlElement('file_mention')
+    file.setAttribute('path', 'packages/web/src/Sidebar.tsx')
+    p.insert(0, [t, file])
+    doc.getXmlFragment('prosemirror').insert(0, [p])
+    expect(textOf(doc.getXmlFragment('prosemirror'))).toBe('看 @packages/web/src/Sidebar.tsx')
+  })
+})

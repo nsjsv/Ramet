@@ -1,7 +1,7 @@
 /* ---------- 运行中排队发送（真库 + 假 agent，agents/send-queue.ts）----------
  * 排着的消息存在服务端；这一轮正常结束后服务端以排队的人的身份写进文档并发起下一轮。
  * 出错 / 手动停止 → 暂停不发；立即发送 = 插队（停下当前这一轮后马上发）；页面空着时入队直接发；
- * 撤回 / 立即发送只有排的人自己能做；排的人失权 → 派发时丢掉并广播原因。
+ * 撤回 / 立即发送只有排的人自己能做；排的人失权 → 派发时丢掉并广播原因；continue 轮到时已经没有没回复的消息 → 丢掉不跑。
  * 「慢慢来」让假 agent 跑约 1.5 秒（10 片），够在它跑着时入队。 */
 import { expect, test } from 'vitest'
 import { base, connectDoc, continuePage, docText, joinPageSpace, postJson, setupPage, SSECollector, userMessage, waitFor } from './agents/test-kit.js'
@@ -35,6 +35,30 @@ test('跑着时入队：不进文档；这一轮正常结束后服务端写进�
   await waitFor(() => docText(a).includes('>> 排着的那句话'))
   await waitFor(() => sse.events.filter((e) => e.type === 'status' && e.state === 'done').length >= 2, 20_000)
   expect(lastQueue(sse)?.items).toEqual([])
+  sse.stop()
+  a.destroy()
+})
+
+test('continue 轮到时文档里没有没回复的消息就丢掉（不重答最后一条）；有新消息照常跑', async () => {
+  const { cookie, pageId } = await setupPage()
+  const a = await connectDoc(pageId, cookie)
+  const sse = new SSECollector()
+  await sse.start(pageId, cookie)
+  const done = (): number => sse.events.filter((e) => e.type === 'status' && e.state === 'done').length
+  await startSlow(pageId, cookie, sse, a.document)
+  expect((await queue(pageId, cookie, { agent: 'fake', kind: 'continue' })).status).toBe(201)
+  await waitFor(() => done() >= 1)
+  await sse.wait((ev) => ev.type === 'queue' && ev.items.length === 0)
+  await new Promise((r) => setTimeout(r, 500))
+  expect(done()).toBe(1)
+
+  // 第二轮：SSE 里攒着第一轮的事件，要等到第二轮自己吐字
+  userMessage(a.document, '慢慢来')
+  expect(await continuePage(pageId, cookie)).toBe(202)
+  await waitFor(() => sse.events.filter((e) => e.type === 'reply' && e.d.includes('piece0')).length >= 2)
+  userMessage(a.document, '跑着时写的')
+  expect((await queue(pageId, cookie, { agent: 'fake', kind: 'continue' })).status).toBe(201)
+  await waitFor(() => done() >= 3, 20_000)
   sse.stop()
   a.destroy()
 })

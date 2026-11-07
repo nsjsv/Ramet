@@ -729,8 +729,9 @@ export const blockHandle = $prose(() => {
   })
 })
 
-/** Editor.tsx 在 configBlock 里创建 provider 后塞进这里，插件 view 工厂取用（$prose 工厂
- * 拿不到 React 组件闭包，经模块级引用传递；同一时刻只有一个正文编辑器，不会串） */
+/** 编辑器会话在 configBlock 里创建 provider 后塞进这里，插件 view 工厂取用（$prose 工厂
+ * 拿不到 React 组件闭包，经模块级引用传递）。只有页面编辑器装块手柄（editor-session 的页面档），
+ * 别处给对话视图当底座的隐藏编辑器不装，所以同一时刻只有一份，不会串 */
 export let blockHandleProviderRef: BlockHandleProvider = new BlockHandleProvider({
   content: document.createElement('div'),
 })
@@ -738,7 +739,7 @@ export function setBlockHandleProvider(provider: BlockHandleProvider): void {
   blockHandleProviderRef = provider
 }
 
-/** 插件视图重建钩子：Editor.tsx 的块菜单 bind/destroy 要跟着 PM 插件视图生命周期走
+/** 插件视图重建钩子：页面编辑器的块菜单 bind/destroy 要跟着 PM 插件视图生命周期走
  * （collab 初始化会销毁重建插件视图，destroy 摘过的监听必须补挂） */
 let viewHooks: { onView?: () => void; onViewDestroy?: () => void } = {}
 export function setBlockHandleViewHooks(hooks: { onView?: () => void; onViewDestroy?: () => void }): void {

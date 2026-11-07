@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
+import { useNavigate } from 'react-router-dom'
 import type * as Y from 'yjs'
 import type { Editor } from '@milkdown/kit/core'
 import { editorViewCtx } from '@milkdown/kit/core'
@@ -22,11 +23,16 @@ import { buildDock } from '../hud/dock'
 import { buildFailStrip, buildStoppedStrip, isFailedReply, isStoppedReply } from './reply-fail'
 import { buildActs, bubbleActsFor, type BubbleActs } from './chat-acts'
 import { hydrateRich } from './rich-render'
-import { clearCarried, peekCarried, registerComposer } from './composer-bridge'
+import { autoTag, buildNoticeCard, isNotice } from './task-notice'
+import { quietDecorations } from './quiet-fold'
+import { clearCarried, imageMark, peekCarried, registerComposer } from './composer-bridge'
 import { useRemember } from '../memory/use-remember'
 import { RunErrorBar, agentCommandsFor, appendUserMessage, runAgent, sendAgentMessage, setAgentRunError, setPageTools, type AgentState } from './agent-bar'
 import { ContextRing, contextFor, repliesOf } from './context-ring'
-import { AttachStrip, useAttachments } from './composer-attach'
+import { AttachTray, useAttachments } from './composer-attach'
+import { attCard, attItemsOf, attLabels } from './att-cards'
+import { wireAttHover } from './att-hover'
+import { attachLayout, onAttachLayout, useAttachLayout, type AttachLayout } from './attach-layout'
 import { QueueList } from './queue-list'
 
 /** 在跑时的发送钮：排队（服务端保存，这一轮正常结束后自动发） */
@@ -48,6 +54,8 @@ import { chatUnits, registerChatUnits } from './view-morph'
 import { flyFrom } from '../motion'
 import { lastReply, redoableUserIds, resumableReply, resumes } from './reply-target'
 import { avatarKey, fillAvatar, personOf, subscribePeople, type Person } from '../people'
+import { isAssistantPage } from '../assistant/identity'
+import { useTaskMarks } from '../assistant/task-status'
 
 /* ---------- 传统（聊天）模式视图 ----------
  * 文档按消息块渲染成聊天气泡流（节点定义见 message-blocks.ts）：顶层 user_message 是用户气泡（靠右），
@@ -70,12 +78,17 @@ export interface PageMeta {
   ownerId: string
 }
 
-/** 气泡正文直接用文档节点的 DOM（agent 回复的 markdown 就是被落成这些节点的）。serializer 按 schema 缓存 */
-let cached: { schema: Schema; serializer: DOMSerializer } | null = null
+/** 气泡正文直接用文档节点的 DOM（agent 回复的 markdown 就是被落成这些节点的）。serializer 按 schema 缓存：
+ *  同时在场的两个对话各有自己编辑器的 schema，只缓存一份的话两边交替重算时每个气泡都要重建一次 serializer */
+const serializers = new WeakMap<Schema, DOMSerializer>()
 
 function contentSerializer(schema: Schema): DOMSerializer {
-  if (cached?.schema !== schema) cached = { schema, serializer: DOMSerializer.fromSchema(schema) }
-  return cached.serializer
+  let serializer = serializers.get(schema)
+  if (!serializer) {
+    serializer = DOMSerializer.fromSchema(schema)
+    serializers.set(schema, serializer)
+  }
+  return serializer
 }
 
 /** 气泡 widget 的 key 用节点身份：PM 与 y-prosemirror 都复用没变的节点对象，所以节点变了（内容 / 属性）key 才变。
@@ -110,6 +123,8 @@ function buildBubble(
   redo: boolean,
   /** 用户消息的发言人（AI 回复不用） */
   author: Person | null,
+  /** 附件摆法：托盘时用户消息的附件排成卡片放在气泡上方（attach-layout.ts） */
+  layout: AttachLayout,
 ): () => HTMLElement {
   return () => {
     const dom = document.createElement('div')
@@ -129,7 +144,10 @@ function buildBubble(
     const chip = kind === 'ai' ? buildDock({ id: a.id, agent: a.agent, stats: a.stats, plan: a.plan, run: a.run }, retry.pageId) : null
     // 气泡内纵向顺序：运行条、正文（运行条高度封顶，正文位置与步骤数无关）
     if (live) bubble.append(live.ctrl.strip)
-    else if (kind === 'ai') {
+    else if (kind === 'user') {
+      const tag = autoTag(node)
+      if (tag) bubble.append(tag)
+    } else if (kind === 'ai') {
       // 没有实时视图接管的失败 / 停止气泡：失败条或「已停止 · 继续」条放在运行条的位置，agent 的计划清单（回复块的 plan 属性）紧随其后
       if (isFailedReply(node.attrs.stats)) bubble.append(buildFailStrip({ ...retry, replyId: id, rest, resume: redo }))
       else if (redo && retry.canRetry && isStoppedReply(node.attrs.stats)) bubble.append(buildStoppedStrip(retry.pageId, id))
@@ -160,7 +178,19 @@ function buildBubble(
       const agentId: unknown = node.attrs.agent
       dom.append(buildReplyHead(typeof agentId === 'string' ? agentId : '', [row, chip]), bubble)
     } else {
-      dom.append(buildUserAvatar(author), bubble)
+      // 一条用户消息是附件悬停联动的一个单元（att-hover.ts）
+      dom.dataset.attUnit = ''
+      const items = layout === 'tray' ? attItemsOf(node) : []
+      if (items.length > 0) {
+        const labels = attLabels(items)
+        const cards = document.createElement('div')
+        cards.className = 'att-cards'
+        cards.append(...items.map((item, i) => attCard(item, labels[i]!)))
+        const col = document.createElement('div')
+        col.className = 'chat-user-col'
+        col.append(cards, bubble)
+        dom.append(buildUserAvatar(author), col)
+      } else dom.append(buildUserAvatar(author), bubble)
       if (row) dom.append(row)
     }
     return dom
@@ -177,18 +207,31 @@ function chatDecorations(
   retry: { pageId: string; canRetry: boolean },
   acts: BubbleActs | null,
   meta: PageMeta,
+  /** 展开过的任务通知（task-notice.ts）与「不用处理」折叠（quiet-fold.ts） */
+  expanded: Set<string>,
 ): DecorationSet {
-  const decos: Decoration[] = []
+  // Genet 标了「不用处理」的一轮：回复与它看过的通知折成一行，收起的块不画气泡（还在收尾动画里的先不折）
+  const quiet = quietDecorations(doc, expanded, 'chat', (node) => slot?.attach(node) != null)
+  const decos: Decoration[] = [...quiet.decos]
+  const layout = attachLayout()
   const redoable = redoableUserIds(doc)
   const last = lastReply(doc)
   for (const mark of landmarks(doc)) {
     const node = mark.node
+    if (quiet.hidden.has(mark.off)) continue
     if (mark.kind !== 'user' && mark.kind !== 'ai') {
       decos.push(
         Decoration.node(mark.off, mark.off + node.nodeSize, {
           'data-rail': String(mark.id),
         }),
       )
+      continue
+    }
+    // 任务通知不是谁说的话：画成通知卡，不是用户气泡
+    if (isNotice(node)) {
+      const card = buildNoticeCard(node, mark.id, contentSerializer(node.type.schema), enter, isOpen, expanded)
+      decos.push(Decoration.node(mark.off, mark.off + node.nodeSize, { style: 'display:none' }))
+      decos.push(Decoration.widget(mark.off, card, { side: 1, key: `n:${nodeKey(node)}` }))
       continue
     }
     const isAi = mark.kind === 'ai'
@@ -215,10 +258,10 @@ function chatDecorations(
     decos.push(
       Decoration.widget(
         mark.off,
-        buildBubble(mark.kind, node, mark.id, enter, isOpen, live, slot, retry, acts, rest, redo, author),
+        buildBubble(mark.kind, node, mark.id, enter, isOpen, live, slot, retry, acts, rest, redo, author, layout),
         {
           side: 1,
-          key: `m:${nodeKey(node)}:${iconKey}:${name}:${live?.phase ?? ''}:${rest}:${redo ? 'r' : ''}:${isAi ? '' : avatarKey(author)}`,
+          key: `m:${nodeKey(node)}:${iconKey}:${name}:${live?.phase ?? ''}:${rest}:${redo ? 'r' : ''}:${isAi ? '' : `${avatarKey(author)}:${layout}`}`,
           destroy: disposeTeamStrips, // 气泡里的带队卡有 React root，气泡被换掉时卸载
         },
       ),
@@ -239,11 +282,17 @@ function isEmptyDoc(doc: ProsemirrorNode): boolean {
   return only.type.name === 'paragraph' && only.content.size === 0
 }
 
-/** 空状态提示的开关：文档一变就重算 */
-function emptyWatchPlugin(onChange: (empty: boolean) => void): Plugin {
+/** 视图每次更新之后（气泡已在 DOM 里）通知宿主：空状态提示、Genet 页的任务状态标 */
+function updateWatchPlugin(onUpdate: (view: EditorView) => void): Plugin {
   return new Plugin({
-    view: () => ({ update: (view) => onChange(isEmptyDoc(view.state.doc)) }),
+    view: () => ({ update: onUpdate }),
   })
+}
+
+/** 气泡里点到的页面提及 chip 指向哪一页：气泡是静态 DOM，没有编辑器里的点击跳转 */
+function clickedPage(target: EventTarget | null): string | null {
+  const el = target instanceof Element ? target.closest<HTMLElement>('.chat-bubble [data-page-mention]') : null
+  return el?.dataset.pageMention || null
 }
 
 function chatDecoPlugin(
@@ -255,6 +304,7 @@ function chatDecoPlugin(
 ): Plugin {
   // 这条视图见过的消息 id。opened 在首帧之后才为真：打开时已经在的历史消息不入场，之后新来的才播
   const enter = new Set<string>()
+  const expanded = new Set<string>()
   let opened = false
   let arm = 0
   const isOpen = () => opened
@@ -264,8 +314,8 @@ function chatDecoPlugin(
   return new Plugin({
     key: chatDecoKey,
     state: {
-      init: (_, state) => chatDecorations(state.doc, enter, isOpen, slot, retry, acts, meta()),
-      apply: (_tr, _prev, _old, state) => chatDecorations(state.doc, enter, isOpen, slot, retry, acts, meta()),
+      init: (_, state) => chatDecorations(state.doc, enter, isOpen, slot, retry, acts, meta(), expanded),
+      apply: (_tr, _prev, _old, state) => chatDecorations(state.doc, enter, isOpen, slot, retry, acts, meta(), expanded),
     },
     props: { decorations: (state) => chatDecoKey.getState(state) },
     // agent 目录 / 默认 agent 变化时重算气泡 logo（没记 agent 的块回落默认 agent，会跟着变）
@@ -294,8 +344,9 @@ function chatDecoPlugin(
         refresh()
       })
       const offLogo = watchAgentLogo(view)
-      // 成员列表（发言人头像）到了或自己换了头像，重算气泡
+      // 成员列表（发言人头像）到了或自己换了头像、换了附件摆法，重算气泡
       const offPeople = subscribePeople(refresh)
+      const offLayout = onAttachLayout(refresh)
       return {
         destroy: () => {
           cancelAnimationFrame(arm)
@@ -303,6 +354,7 @@ function chatDecoPlugin(
           slot = null
           offLogo()
           offPeople()
+          offLayout()
         },
       }
     },
@@ -318,15 +370,33 @@ interface Props {
   onPagesChanged: () => void
   /** 活编辑器（换页拆建的窗口期是 undefined）：schema 来源 + 发送通道 */
   getEditor: () => Editor | undefined
-  /** 与主编辑器同一 Y.Doc（EditorPage 经 ref 暴露 provider.document） */
+  /** 与主编辑器同一 Y.Doc（usePageSession 的 getDoc） */
   getDoc: () => Y.Doc | undefined
   /** 编辑器建好 / 换页信号：chat 视图依赖其 schema，就绪后再建 */
   tick: number
   /** agent SSE 状态（Editor 的 useAgentEvents）：运行中 / 会话配置项 / cwd */
   agentState: AgentState
+  /** 空对话时中间的提示；不给就是对话页的那句（说到了右上角的文档模式，嵌在别处时不对） */
+  emptyHint?: string
+  /** 发消息时用户正在看的页面（Genet 浮窗：不往输入框里放当前页的 chip，记在消息的 ctx 上，「这页」就是它） */
+  focusPage?: string | null
+  /** 输入框占位文字；不给用默认的 */
+  placeholder?: string
 }
 
-export default function ChatView({ pageId, readOnly, pages, onPagesChanged, getEditor, getDoc, tick, agentState }: Props) {
+export default function ChatView({
+  pageId,
+  readOnly,
+  pages,
+  onPagesChanged,
+  getEditor,
+  getDoc,
+  tick,
+  agentState,
+  emptyHint,
+  focusPage,
+  placeholder = '输入消息，@ 提及，Enter 发送，Shift+Enter 换行…',
+}: Props) {
   // 引用提示列表：`@` 大菜单（Agent / 页面 / Skill / 成员），`[[` 提及或新建页面（规则与文档模式同一份，见 mention-query.ts），pages 未加载（null）时不弹。
   // 一次性触发（trigger-session.ts）：只有刚键入 `@` / `[[` 才开启会话，挪光标只会延续或结束它。
   // base 是查询所在段落在输入框文档里的起点（下标都相对这一段，见 ComposerInput.caret）
@@ -363,15 +433,23 @@ export default function ChatView({ pageId, readOnly, pages, onPagesChanged, getE
   }, [noMatch])
   const hostRef = useRef<HTMLDivElement>(null)
   const composerRef = useRef<ComposerInputHandle>(null)
+  // Genet 页：派出去的任务页链接后面挂运行状态（assistant/task-status.ts）
+  const { sync: syncTasks } = useTaskMarks(pageId, isAssistantPage(pageId, agentState), pages, hostRef)
+  const navigate = useNavigate()
+  const navigateRef = useRef(navigate)
+  navigateRef.current = navigate
   // 初始值是从文档模式带过来的草稿（composer-bridge：切换时没发出去的输入跟着走）
-  const [input, setInput] = useState(peekCarried)
+  const [input, setInput] = useState(() => peekCarried(pageId))
   const inputText = useRef(input)
   useEffect(() => {
     inputText.current = input
   }, [input])
   useEffect(() => {
-    clearCarried() // 已经落进输入框
-  }, [])
+    // 首次渲染之后才带来的也接住：右下角浮窗走到这页时收起，在 layout effect 里带字，晚于上面读初始值，不接就在这里被清掉
+    const late = peekCarried(pageId)
+    clearCarried(pageId) // 已经落进输入框
+    if (late && late !== inputText.current) setComposerText(late)
+  }, [pageId])
   // 空对话提示：聊天模式中间是只读气泡区，空页面一片空白，需要给出下一步动作
   const [empty, setEmpty] = useState(false)
   // 控制项（来源 / 模型 / 思考 / 路径）的事实源与写入路径在 agent-controls.tsx
@@ -384,9 +462,12 @@ export default function ChatView({ pageId, readOnly, pages, onPagesChanged, getE
     [getDoc, agent, liveRun, liveRun?.version, agentState.status, tick],
   )
   const canCompact = agentCommandsFor(pageId, agent).some((c) => c.name === 'compact')
-  // 图片附件（粘贴 / 拖入），上传中不能发
-  const attach = useAttachments(setAgentRunError)
-  const hasAttach = attach.items.some((a) => a.url)
+  // 图片附件（粘贴 / 拖入，插在框里），上传中不能发；摆法决定附件是行内 token 还是输入卡上方的托盘
+  const reportError = useCallback((message: string) => setAgentRunError(pageId, message), [pageId])
+  const attach = useAttachments(composerRef, reportError)
+  const layout = useAttachLayout()
+  const pageRef = useRef<HTMLDivElement>(null)
+  useEffect(() => (pageRef.current ? wireAttHover(pageRef.current) : undefined), [])
   // `/记住 内容` 是 Ramet 自己的命令，直接记进这个空间的公共记忆，不发给 agent（memory/remember.ts）
   const remember = useRemember(pages?.find((p) => p.id === pageId)?.space_id, !readOnly)
   // 气泡装饰按需读页面的空间 / 创建者（发言人头像），经 ref 取最新 pages，免得 pages 变化重建对话视图
@@ -415,13 +496,27 @@ export default function ChatView({ pageId, readOnly, pages, onPagesChanged, getE
         plugins: [
           ySyncPlugin(doc.getXmlFragment('prosemirror')),
           chatDecoPlugin(pageId, host, !readOnly, bubbleActsFor(pageId, getEditor), pageMeta),
-          emptyWatchPlugin(setEmpty),
+          updateWatchPlugin((v) => {
+            setEmpty(isEmptyDoc(v.state.doc))
+            syncTasks(host, v.state.doc)
+          }),
         ],
       }),
       editable: () => false,
       // 点击 / 复制 / 拖拽交给浏览器：PM 的处理器按它自己的选区行事（三击选段自己写选区，点图片建 NodeSelection，
-      // 复制和拖拽取 PM 选区的内容），而这里 PM 不持有用户看到的选区（见下）
-      handleDOMEvents: { mousedown: () => true, copy: () => true, dragstart: () => true },
+      // 复制和拖拽取 PM 选区的内容），而这里 PM 不持有用户看到的选区（见下）。
+      // 例外是点页面提及：跳过去（拖选结束时的那一下不算）
+      handleDOMEvents: {
+        mousedown: () => true,
+        copy: () => true,
+        dragstart: () => true,
+        click: (_v, event) => {
+          const target = clickedPage(event.target)
+          if (!target || event.button !== 0 || !(window.getSelection()?.isCollapsed ?? true)) return false
+          navigateRef.current(`/page/${target}`)
+          return true
+        },
+      },
     })
     // 选区不归 PM。气泡是 widget，PM 的选区表示不了气泡里的位置：拖选时它把 DOM 选区折算到气泡边界
     // （落进 display:none 的原消息块）再写回去，浏览器下一次 mousemove 又把选区拉出来，结果拖动时一直闪、松手什么也没选中。
@@ -430,13 +525,14 @@ export default function ChatView({ pageId, readOnly, pages, onPagesChanged, getE
     // 返回 null 是它本来就处理的情形（getSelection() 可以为 null），读写 DOM 选区的路径都就此跳过。升 prosemirror-view 时核对它还在
     Object.assign(view, { domSelection: () => null })
     setEmpty(isEmptyDoc(view.state.doc))
+    syncTasks(host, view.state.doc)
     // 文档 ⇄ 对话切换的文字单元来源（view-morph.ts）：普通块和气泡正文里的各段，气泡本身是壳，淡入淡出
-    const offBlocks = registerChatUnits(() => chatUnits(view, host))
+    const offBlocks = registerChatUnits(pageId, () => chatUnits(view, host, composerRef.current?.dom() ?? null))
     return () => {
       offBlocks()
       view.destroy()
     }
-  }, [getDoc, getEditor, tick, readOnly, pageMeta])
+  }, [getDoc, getEditor, tick, readOnly, pageMeta, syncTasks])
 
   /** 整框换成这段记号文字（框里升成 chip）；输入框还没建好时先记下，建好时灌进去 */
   const setComposerText = useCallback((text: string) => {
@@ -448,16 +544,22 @@ export default function ChatView({ pageId, readOnly, pages, onPagesChanged, getE
   // 输入框登记给桥：气泡的「引用」往里放记号，切回文档时取走没发出去的字
   useEffect(() => {
     if (readOnly) return
-    return registerComposer({
+    return registerComposer(pageId, {
       get: () => composerRef.current?.text() ?? inputText.current,
       set: setComposerText,
       insert: (text) => {
-        const prev = composerRef.current?.text() ?? inputText.current
-        setComposerText(`${prev}${prev && !/\s$/.test(prev) ? ' ' : ''}${text} `)
-        composerRef.current?.focus()
+        const composer = composerRef.current
+        const prev = composer?.text() ?? inputText.current
+        const add = `${prev && !/\s$/.test(prev) ? ' ' : ''}${text} `
+        // 接在末尾，不整框重建：框里还在上传的图没有记号，重建会把它丢掉
+        if (composer) composer.append(add)
+        else setComposerText(`${prev}${add}`)
+        composer?.focus()
       },
+      dom: () => composerRef.current?.dom() ?? null,
+      focus: () => composerRef.current?.focus(),
     })
-  }, [readOnly, setComposerText])
+  }, [pageId, readOnly, setComposerText])
 
   /** 输入框借主编辑器 schema 里的 chip 定义；编辑器换页拆建的窗口期取不到，等 tick */
   const getSchema = useCallback((): Schema | undefined => {
@@ -540,11 +642,11 @@ export default function ChatView({ pageId, readOnly, pages, onPagesChanged, getE
   /** jump = ⌘Enter：在跑时插队（停下当前这一轮后马上发） */
   function send(jump = false) {
     const text = (composerRef.current?.text() ?? input).trim()
-    if ((!text && !hasAttach) || attach.uploading) return
+    if (!text || attach.uploading) return
     // `/记住 …` 不是给 agent 的消息，不写进文档、不触发运行，记下了才清输入框
     if (text && remember.run(text, () => setComposerText(''))) return
     // 在跑时排到服务端（这一轮正常结束后由服务端写进文档并发起下一轮），不直接写进文档
-    if (running) return enqueue(text, attach.take(), jump)
+    if (running) return enqueue(text, jump)
     let main: EditorView | undefined
     getEditor()?.action((ctx) => {
       main = ctx.get(editorViewCtx)
@@ -552,7 +654,7 @@ export default function ChatView({ pageId, readOnly, pages, onPagesChanged, getE
     if (!main || main.isDestroyed) return
     const from = composerRef.current?.dom()?.getBoundingClientRect()
     controls.pin() // 用过的来源就是这页的来源：别的页再换来源，这页刷新也不跟着变
-    appendUserMessage(main, text, undefined, attach.take()) // 气泡随 Y 同步立即出现在只读视图里
+    appendUserMessage(main, text, undefined, focusPage ?? undefined) // 图片 / 文件引用是文字里的记号，落在原位；气泡随 Y 同步立即出现在只读视图里
     flushSync(() => setComposerText('')) // 输入框先缩回一行，飞行终点才不会漂
     follow.toLatest(true)
     // 消息从输入框飞到新气泡的位置，替代 rise 入场
@@ -567,28 +669,30 @@ export default function ChatView({ pageId, readOnly, pages, onPagesChanged, getE
   }
 
   /** 排队，失败了把文字放回输入框 */
-  function enqueue(text: string, images: string[], jump: boolean) {
+  function enqueue(text: string, jump: boolean) {
     controls.pin()
     if (text) flushSync(() => setComposerText(''))
     void api
-      .enqueue(pageId, { agent, kind: 'message', text, images })
+      .enqueue(pageId, { agent, kind: 'message', text, images: [], ...(focusPage ? { ctx: focusPage } : {}) })
       .then(({ item }) => (jump ? api.sendQueuedNow(pageId, item.id) : undefined))
       .catch((err: unknown) => {
         if (text) setComposerText(text)
-        setAgentRunError(err instanceof Error ? `排队失败：${err.message}` : '排队失败')
+        setAgentRunError(pageId, err instanceof Error ? `排队失败：${err.message}` : '排队失败')
       })
   }
 
-  /** 撤回的排队消息：文字接在输入框里已有的话后面，图片回到附件 */
+  /** 撤回的排队消息：文字（图片在里面，是记号）接在输入框里已有的话后面；老的排队项图片单列，接在它后面 */
   function restoreQueued(text: string, images: string[]) {
     const cur = (composerRef.current?.text() ?? input).trim()
-    if (text) setComposerText(cur ? `${cur}\n${text}` : text)
-    attach.restore(images)
+    const back = [text, images.map(imageMark).filter(Boolean).join(' ')].filter(Boolean).join('\n')
+    if (!back) return
+    if (composerRef.current) composerRef.current.append(cur ? `\n${back}` : back)
+    else setComposerText(cur ? `${cur}\n${back}` : back)
   }
 
   /** 压缩上下文就是发一条 `/compact`（agent 自带命令，走斜杠菜单的发送路径），在跑就排队 */
   function compact() {
-    if (running) return enqueue('/compact', [], false)
+    if (running) return enqueue('/compact', false)
     let main: EditorView | undefined
     getEditor()?.action((ctx) => {
       main = ctx.get(editorViewCtx)
@@ -600,29 +704,35 @@ export default function ChatView({ pageId, readOnly, pages, onPagesChanged, getE
 
   function stop() {
     void api.stopPage(pageId).catch((err: unknown) => {
-      setAgentRunError(err instanceof Error ? `停止失败：${err.message}` : '停止失败')
+      setAgentRunError(pageId, err instanceof Error ? `停止失败：${err.message}` : '停止失败')
     })
   }
 
   return (
-    <div className="chat-page">
+    <div className="chat-page" ref={pageRef} data-att-layout={layout}>
       <div className="chat-thread">
-        <RunErrorBar />
+        <RunErrorBar pageId={pageId} />
         {empty && (
           <div className="chat-empty">
-            这是空对话。在下方输入框发消息（Enter 发送）会以「&gt;&gt; 内容」写进文档并触发 agent；
-            输入框下面能切 agent、工作区、模型和思考程度；想直接写文档，点右上角「文档模式」。
+            {emptyHint ?? (
+              <>
+                这是空对话。在下方输入框发消息（Enter 发送）会以「&gt;&gt; 内容」写进文档并触发 agent；
+                输入框下面能切 agent、工作区、模型和思考程度；想直接写文档，点右上角「文档模式」。
+              </>
+            )}
           </div>
         )}
         <div className="chat-root" ref={hostRef} />
       </div>
-      <div className="chat-dock">
+      <div className="chat-dock" data-att-unit="">
         {follow.away && (
           <button className="chat-jump" onClick={() => follow.toLatest()}>
             回到最新
           </button>
         )}
         {!readOnly && <ModeHint pageId={pageId} agent={agent} pending={controls.opts} />}
+        {/* 托盘在输入卡外面、上方：附件不跟输入框挤在一起，框里只留占位符 */}
+        {!readOnly && layout === 'tray' && <AttachTray items={attach.items} onRemove={(i) => composerRef.current?.removeAtt(i)} />}
         {!readOnly && (
           <div className="chat-composer">
             {mention && pages && matches.length > 0 && (
@@ -642,14 +752,13 @@ export default function ChatView({ pageId, readOnly, pages, onPagesChanged, getE
               </div>
             )}
             <QueueList pageId={pageId} items={agentState.queue.items} paused={agentState.queue.paused} onWithdraw={restoreQueued} />
-            <AttachStrip items={attach.items} onRemove={attach.remove} />
             <div className="chat-composer-line">
               <ComposerInput
                 ref={composerRef}
                 getSchema={getSchema}
                 tick={tick}
                 initial={input}
-                placeholder="输入消息，@ 提及，Enter 发送，Shift+Enter 换行…"
+                placeholder={placeholder}
                 onChange={(text, typed) => {
                   const changed = text !== inputText.current
                   inputText.current = text
@@ -660,8 +769,9 @@ export default function ChatView({ pageId, readOnly, pages, onPagesChanged, getE
                 }}
                 onBlur={closeMention}
                 onFiles={attach.add}
+                onAtts={attach.onAtts}
                 onKeyDown={(e) => {
-                  // ⌘J 随手 AI：把输入框里的话写清楚，只改草稿不发送，一步 ⌘Z 回原文
+                  // ⌘J ⌘J：把输入框里的话写清楚，只改草稿不发送，一步 ⌘Z 回原文
                   if (isQuickKey(e)) {
                     rewriteDraft({
                       get: () => composerRef.current?.text() ?? '',
@@ -715,7 +825,7 @@ export default function ChatView({ pageId, readOnly, pages, onPagesChanged, getE
               />
               {agentState.message && <span className="agent-status-msg">{agentState.message}</span>}
               {ctx && <ContextRing info={ctx} canCompact={canCompact && !readOnly} onCompact={compact} />}
-              {running && (input.trim() || hasAttach) ? (
+              {running && input.trim() ? (
                 <button
                   type="button"
                   className="chat-send is-queue"
@@ -736,7 +846,7 @@ export default function ChatView({ pageId, readOnly, pages, onPagesChanged, getE
                   className="chat-send"
                   onClick={() => send()}
                   // 锁定的工具一台在线的都没有、又没 @ 别的 agent：发出去也只会被拒，提示在来源 chip 上
-                  disabled={(!input.trim() && !hasAttach) || attach.uploading || (agentState.lock !== '' && !agent && !input.includes('](agent:'))}
+                  disabled={!input.trim() || attach.uploading || (agentState.lock !== '' && !agent && !input.includes('](agent:'))}
                   aria-label={COPY.chips.send}
                 >
                   <Icon name="arrow-up" size={16} />

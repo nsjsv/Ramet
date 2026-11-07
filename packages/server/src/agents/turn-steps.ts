@@ -3,33 +3,34 @@
 // 两份必然漂移（比如一边忘了在 prompt 之前写 open_runs，进程死在发送之后就没有行可认领）。
 import type { Pool } from 'pg'
 import { loadAiImage, type PageTool } from '../page-read.js'
-import type { AdapterEntry, ManagerHost, ResolvedAgent } from './manager-types.js'
+import { credentialOf, loadedWith, type AdapterEntry, type ManagerHost, type ResolvedAgent } from './manager-types.js'
 import { authorize } from './posture.js'
 import { insertOpenRun, requestCancel } from './remote-run.js'
 import type { RunState } from './run-state.js'
 import { applyConfigs, applyMsgOpts } from './session-config.js'
 import type { ConfigOption, PromptBlock, PromptResult } from './types.js'
 
-/** 接着用 sessionId 指的会话：本进程加载过直接用，没有就加载；加载不上（agent 侧已不存在）或 sessionId 为空就新建。
- *  fresh = 新建的会话，它什么都没见过，调用方要发全文 */
+/** 接着用 sessionId 指的会话：本进程用这一份凭证加载过就直接用，没有（或凭证换了）就加载；加载不上（agent 侧已不存在）或
+ *  sessionId 为空就新建。fresh = 新建的会话，它什么都没见过，调用方要发全文 */
 export async function useSession(
   entry: AdapterEntry,
   sessionId: string | null,
   cwd: string,
   tools: PageTool[],
 ): Promise<{ sessionId: string; configOptions: ConfigOption[]; fresh: boolean }> {
-  if (sessionId && entry.loaded.has(sessionId)) return { sessionId, configOptions: [], fresh: false }
+  if (sessionId && loadedWith(entry, sessionId, tools)) return { sessionId, configOptions: [], fresh: false }
   if (sessionId) {
     try {
+      // 已加载过的会话再 load 一次就是换凭证：各驱动都会让 MCP 拿到新的（闲着的进程按新配置重起 / codex 卸载后 resume）
       const { configOptions } = await entry.adapter.loadSession(sessionId, cwd, tools)
-      entry.loaded.add(sessionId)
+      entry.loaded.set(sessionId, credentialOf(tools))
       return { sessionId, configOptions, fresh: false }
     } catch {
       // 降级为新建 + 全文重放：结果正确，只是丢了 agent 自己的上下文
     }
   }
   const created = await entry.adapter.newSession(cwd, tools)
-  entry.loaded.add(created.sessionId)
+  entry.loaded.set(created.sessionId, credentialOf(tools))
   return { sessionId: created.sessionId, configOptions: created.configOptions, fresh: true }
 }
 

@@ -76,7 +76,7 @@ export function usageText(u: Pick<MachineUsage, 'action' | 'detail'>): { verb: s
     return { verb: stopping ? C.use.previewStop : C.use.previewShare, detail: typeof d.port === 'number' ? `:${d.port}` : '', code: '' }
   }
   if (u.action === 'quick') {
-    // 随手 AI 的本地通道：只记任务类型，不记正文
+    // ⌘J 的本地通道：只记任务类型，不记正文
     return { verb: C.use.quick, detail: [nativeAgent(str(d.agent)), str(d.kind)].filter(Boolean).join(' · '), code: '' }
   }
   return { verb: C.use.unknown(String(u.action)), detail: '', code: '' }

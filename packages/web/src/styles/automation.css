@@ -1,0 +1,727 @@
+/* ---------- AI 页「自动」分页（ai/AutomationList.tsx）：行沿用定时分页的 .ai-timer，这里只补规则多出来的部分 ---------- */
+
+.ai-rule-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.ai-rule-top .ai-sub {
+  flex: 1;
+  min-width: 0;
+}
+
+.ai-rule-new {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.ai-rule-group + .ai-rule-group {
+  margin-top: 20px;
+}
+
+.ai-rule-group-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 4px;
+  padding: 0 8px;
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+  font-weight: 600;
+}
+
+.ai-rule-count {
+  font-weight: 400;
+}
+
+/* 动作摘要：一行一个，带序号；多了也不折叠（最多 10 个） */
+.ai-rule-actions {
+  margin: 2px 0 0;
+  padding-left: 1.4em;
+  color: var(--ink-2);
+  font-size: var(--t-sm);
+  overflow-wrap: anywhere;
+}
+
+.ai-rule-actions > li::marker {
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+}
+
+.ai-rule-results {
+  display: inline-flex;
+  gap: 3px;
+}
+
+/* 最近一次里每个动作的结局：序号小圆点，颜色 = 结局 */
+.ai-rule-result {
+  display: inline-grid;
+  place-items: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 3px;
+  border-radius: var(--r-pill);
+  background: var(--hover);
+  color: var(--ink-3);
+  font-size: 10px;
+  line-height: 1;
+}
+
+.ai-rule-result[data-status='done'] {
+  background: color-mix(in srgb, var(--ok) 16%, transparent);
+  color: var(--ok);
+}
+
+.ai-rule-result[data-status='failed'] {
+  background: var(--danger-tint);
+  color: var(--danger);
+}
+
+.ai-rule-result[data-status='queued'],
+.ai-rule-result[data-status='waiting'] {
+  background: var(--accent-tint);
+  color: var(--accent);
+}
+
+.ai-rule-edit:hover {
+  color: var(--ink);
+}
+
+/* 内置规则（评论找我 / 正文 @我）：名字后的小标；没有删除按钮，留出同宽的空位让开关与别的组对齐 */
+.ai-rule-tag {
+  align-self: center;
+  padding: 0 6px;
+  border-radius: var(--r-pill);
+  background: var(--hover);
+  color: var(--ink-3);
+  font-size: 11px;
+  line-height: 17px;
+  white-space: nowrap;
+}
+
+.ai-rule-del-gap {
+  flex: none;
+  width: 28px;
+}
+
+/* 内置规则还不能生效（没配模型连接 / 还没有 Genet 页）：整行灰着，原因后面跟补救按钮 */
+.ai-timer.is-dormant .ai-rule-actions {
+  color: var(--ink-3);
+}
+
+.ai-timer-state.is-dormant {
+  color: var(--ink-3);
+}
+
+.ai-rule-fix {
+  margin-left: 8px;
+}
+
+/* ---------- 规则编辑器（ai/rule-editor/RuleEditor.tsx）：弹窗本身不滚，正文滚 ---------- */
+
+.modal.rule-editor {
+  display: flex;
+  flex-direction: column;
+  width: 640px;
+  max-height: 88vh;
+  padding: 0;
+  overflow: hidden;
+}
+
+.rule-editor-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 20px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.rule-editor-head .modal-title {
+  flex: 1;
+}
+
+.rule-editor-ic {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--r-sm);
+  background: var(--accent-tint);
+  color: var(--accent);
+}
+
+.rule-editor-error {
+  margin: 12px 20px 0;
+}
+
+.rule-editor-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 16px 20px;
+}
+
+.rule-editor-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--line);
+}
+
+.rule-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.rule-section-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+  font-size: var(--t-sm);
+  font-weight: 600;
+}
+
+.rule-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+}
+
+.rule-field > .admin-field,
+.rule-text {
+  width: 100%;
+  color: var(--ink);
+}
+
+/* 只读（内置规则的名字）：看得出不能改 */
+.rule-text[readonly] {
+  background: var(--hover);
+  color: var(--ink-2);
+}
+
+textarea.rule-text {
+  resize: vertical;
+  min-height: 3.4em;
+  line-height: 1.5;
+}
+
+.rule-text.is-mono {
+  font-family: var(--mono);
+  font-size: 13px;
+}
+
+.rule-muted {
+  margin: 0;
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+  font-weight: 400;
+}
+
+.rule-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.rule-row2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+/* 定时：分段控件 + 下面一排字段 */
+.rule-timer {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.rule-timer-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+}
+
+.rule-time {
+  width: 90px;
+}
+
+.rule-minutes {
+  width: 100px;
+}
+
+.rule-date {
+  min-width: 200px;
+}
+
+.rule-days {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.rule-day,
+.rule-day-preset {
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  color: var(--ink-2);
+  font-size: var(--t-xs);
+}
+
+.rule-day {
+  width: 30px;
+  padding: 0;
+}
+
+.rule-day.is-on {
+  border-color: var(--accent);
+  background: var(--accent-tint);
+  color: var(--accent);
+}
+
+.rule-day-preset.is-on {
+  color: var(--accent);
+}
+
+.rule-day:hover,
+.rule-day-preset:hover {
+  border-color: var(--line-strong);
+}
+
+/* 评论 / 正文提及：命中原因的复选框、空间多选（沿用成员多选的胶囊） */
+.rule-event {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.rule-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  color: var(--ink);
+  font-size: var(--t-sm);
+}
+
+.rule-warn {
+  color: var(--danger);
+  font-size: var(--t-xs);
+}
+
+/* 收到外部请求：地址末 4 位 + 换地址；保存 / 换地址后只显示一次的完整地址 */
+.rule-hook-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.rule-reveal {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.rule-reveal-title {
+  margin: 0;
+  color: var(--ink);
+  font-size: var(--t-md);
+  font-weight: 600;
+}
+
+.rule-reveal-url {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--hover);
+}
+
+.rule-reveal-url code,
+.rule-reveal-curl {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--ink);
+  word-break: break-all;
+}
+
+.rule-reveal-url code {
+  flex: 1;
+  min-width: 0;
+  user-select: all;
+}
+
+.rule-reveal-curl {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  white-space: pre-wrap;
+}
+
+/* 动作卡片 */
+.rule-action-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rule-action {
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+
+.rule-action.is-error {
+  border-color: color-mix(in srgb, var(--danger) 50%, transparent);
+}
+
+.rule-action-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.rule-action-n {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--hover);
+  color: var(--ink-2);
+  font-size: var(--t-xs);
+}
+
+.rule-action-label {
+  font-weight: 600;
+}
+
+.rule-action-desc {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rule-action-tools {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.rule-action-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px;
+}
+
+.rule-action-error {
+  padding: 0 10px 10px;
+  color: var(--danger);
+  font-size: var(--t-xs);
+}
+
+.rule-icon-btn {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--r-sm);
+  color: var(--ink-3);
+}
+
+.rule-icon-btn:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.rule-icon-btn.is-danger:hover:not(:disabled) {
+  color: var(--danger);
+}
+
+.rule-icon-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.rule-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  align-self: flex-start;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--r-sm);
+  color: var(--ink-2);
+}
+
+.rule-add:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.rule-add:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.rule-add-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  width: 100%;
+}
+
+.rule-add-desc {
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+}
+
+/* 变量 chip：点了在光标处插 {{变量}} */
+.rule-var-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.rule-vars {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.rule-var {
+  padding: 0 6px;
+  border-radius: var(--r-sm);
+  background: var(--hover);
+  color: var(--ink-2);
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 20px;
+}
+
+.rule-var:hover {
+  background: var(--accent-tint);
+  color: var(--accent);
+}
+
+/* 选页按钮：像一个输入框 */
+.rule-page {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  padding: 5px 8px;
+  line-height: 21px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 14px;
+  text-align: left;
+}
+
+.rule-page:hover {
+  border-color: var(--line-strong);
+}
+
+.rule-page.is-empty {
+  color: var(--ink-3);
+}
+
+.rule-page-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rule-page-pop {
+  width: 320px;
+}
+
+.rule-page-row {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rule-select {
+  width: 100%;
+  line-height: 21px;
+}
+
+/* 「属性 → 值」 */
+.rule-pairs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rule-pair {
+  display: grid;
+  grid-template-columns: minmax(100px, 1fr) 2fr auto;
+  align-items: start;
+  gap: 6px;
+}
+
+.rule-pair-key {
+  width: 100%;
+}
+
+.rule-pair-value {
+  min-width: 0;
+}
+
+.rule-pair .rule-icon-btn {
+  margin-top: 4px;
+}
+
+.rule-link-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  align-self: flex-start;
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+}
+
+.rule-link-btn:hover {
+  color: var(--accent);
+}
+
+.rule-members {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.rule-member-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.rule-member {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  color: var(--ink-2);
+  font-size: var(--t-xs);
+}
+
+.rule-member.is-on {
+  border-color: var(--accent);
+  background: var(--accent-tint);
+  color: var(--accent);
+}
+
+/* 配置里记着、但我已经不在的空间：虚线，点一下去掉 */
+.rule-member.is-gone {
+  border-style: dashed;
+  border-color: var(--line-strong);
+  background: none;
+  color: var(--ink-3);
+}
+
+/* ---------- 「不用处理」折叠（editor/quiet-fold.ts）：一行灰字，点开看原文 ---------- */
+
+.quiet-fold {
+  margin: 10px 0;
+}
+
+.chat-msg.chat-quiet {
+  display: block;
+  margin: 14px 0;
+}
+
+.quiet-line {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  max-width: 100%;
+  padding: 2px 8px 2px 4px;
+  border-radius: var(--r-sm);
+  color: var(--ink-3);
+  font-size: var(--t-sm);
+  text-align: left;
+}
+
+.quiet-line:hover {
+  background: var(--hover);
+  color: var(--ink-2);
+}
+
+.quiet-ic {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  transform: translateY(1px);
+}
+
+.quiet-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.quiet-more {
+  flex: none;
+  font-size: var(--t-xs);
+  opacity: 0;
+  transition: opacity var(--d-1);
+}
+
+.quiet-line:hover .quiet-more,
+.quiet-line:focus-visible .quiet-more,
+.quiet-fold.is-open .quiet-more {
+  opacity: 1;
+}
+
+@media (max-width: 768px) {
+  .rule-row2 {
+    grid-template-columns: 1fr;
+  }
+
+  .rule-action-desc {
+    display: none;
+  }
+}

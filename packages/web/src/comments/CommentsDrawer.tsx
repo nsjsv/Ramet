@@ -9,13 +9,10 @@ import { Icon } from '../icons'
 import { relativeTime } from '../UpdatesFeed'
 import { commentRange, scrollToAnchor } from './comment-anchor'
 import CommentThread, { type CommentCtx } from './CommentThread'
-import type { Thread } from './comments-api'
+import { plainBody as plain, type Thread } from './comments-api'
 import { closeDrawer, expandThread, openThread } from './comments-store'
 
 const C = COPY.comments
-
-/** 摘要里的 @ 记号只留名字 */
-const plain = (body: string): string => body.replace(/@\[([^\n]*?)\]\(user:[A-Za-z0-9_-]{1,64}\)/g, '@$1')
 
 function Row({ thread, orphan, expanded, ctx, getView }: { thread: Thread; orphan: boolean; expanded: boolean; ctx: CommentCtx; getView: () => EditorView | undefined }) {
   const first = thread.comments[0]

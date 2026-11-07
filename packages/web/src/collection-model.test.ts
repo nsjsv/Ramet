@@ -508,9 +508,10 @@ describe('id、模板与小工具', () => {
     expect(pickView(parseCollection(null))).toMatchObject({ id: '', layout: 'table', filter: { all: [] } })
   })
 
-  test('FILTER_OPS / filterOps：每种类型都有运算，按属性取与按类型查表一致，名称按文本', () => {
+  test('FILTER_OPS / filterOps：除了按钮（没有值）每种类型都有运算，按属性取与按类型查表一致，名称按文本', () => {
     for (const type of PROP_TYPES) {
-      expect(FILTER_OPS[type].length).toBeGreaterThan(0)
+      if (type === 'button') expect(FILTER_OPS[type]).toEqual([])
+      else expect(FILTER_OPS[type].length).toBeGreaterThan(0)
       expect(filterOps(prop(type))).toEqual(FILTER_OPS[type])
     }
     expect(filterOps(TITLE_PROP)).toContain('contains')

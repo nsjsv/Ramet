@@ -1,4 +1,4 @@
-// ---------- 随手 AI 的本地通道（中心侧）----------
+// ---------- ⌘J 的本地通道（中心侧）----------
 // 用户在设置里选一台自己能用的机器上的 agent（user_ai_settings.local_agent，目录 id `c:<connectorId>:<agentId>`），
 // 请求经 connector 的 WSS 发到那台机器，在受限会话里让 agent 做一次改写（connector/quick.ts）。中心只做判定、转发、留痕：
 //   - 判定与机器上的其他入口同一处（manager.resolve → assertCanUse(…, 'agent')）：没有 agent 授权（只有 machine 授权、
@@ -29,7 +29,7 @@ export type LocalQuickHost = {
   catalog: (user: User) => Promise<CatalogAgent[]>
 }
 
-const BUSY_MESSAGE = '上一次本地随手 AI 还没结束，稍后再试'
+const BUSY_MESSAGE = '上一次本地 ⌘J 还没结束，稍后再试'
 
 const abortError = (): Error => Object.assign(new Error('aborted'), { name: 'AbortError' })
 
@@ -52,7 +52,7 @@ export async function prepareLocalQuick(
   prompt: string,
   kind: string,
 ): Promise<(signal: AbortSignal) => AsyncGenerator<ModelChunk>> {
-  if (!localAgent) throw new LocalQuickError('no local agent', '还没有选本地通道用哪台机器上的 agent，请先到设置 → 随手 AI 里选择')
+  if (!localAgent) throw new LocalQuickError('no local agent', '还没有选本地通道用哪台机器上的 agent，请先到设置 → Genet 里选择')
   if (!parseRemoteId(localAgent)) throw new LocalQuickError('local agent unavailable', '本地通道只能用接入的机器上的 agent，请到设置里重新选择')
   // 不是接入人、也没有有效 agent 授权会在这里抛 ForbiddenError（403）
   const agent = await host.resolve(localAgent, user)
@@ -61,7 +61,7 @@ export async function prepareLocalQuick(
   const conn = host.hub.get(connectorId)
   if (!conn) throw new LocalQuickError('local agent unavailable', '选中的机器现在不在线')
   if (!conn.caps.includes(QUICK_CAP)) {
-    throw new ConnectorOutdatedError('这台机器上的 connector 版本太旧，升级后才能把它用作随手 AI 的本地通道')
+    throw new ConnectorOutdatedError('这台机器上的 connector 版本太旧，升级后才能把它用作 ⌘J 的本地通道')
   }
   if (busy.has(user.id)) throw new LocalQuickError('quick busy', BUSY_MESSAGE)
   // 非主人用别人的机器：留痕写进审计才放行（主人自己用不记）

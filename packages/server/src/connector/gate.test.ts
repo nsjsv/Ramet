@@ -333,7 +333,7 @@ test('grant-revoked 取消此人在飞的 prompt（机器上的第二道闸，�
   await inboxHas(f, (m) => m.t === 'end' && m.runId === 'run-owner')
 })
 
-// ---------- 随手 AI 本地通道的 quick 帧（agent 范围）也过同一道闸 ----------
+// ---------- ⌘J 本地通道的 quick 帧（agent 范围）也过同一道闸 ----------
 // quick = 驱动这台机器上的 agent 跑一次。主人与本地名单里有 agent 范围的人通过；没带 actor、陌生人、只授权 machine 的、过期的
 // 都回 err(code: forbidden)，agent 一个都没被拉起（日志里没有 quick 的痕迹，也没有任何 quick-delta）。
 
@@ -356,7 +356,7 @@ test('quick 帧：没带 actor / 陌生人 / 只授权 machine / 过期 全部 f
     ['no-actor', undefined],
     ['empty', ''],
     ['stranger', 'stranger'],
-    ['machine-only', 'terminal-only'], // 只授权终端 / 文件：随手 AI 本地通道用的是 agent，不行
+    ['machine-only', 'terminal-only'], // 只授权终端 / 文件：⌘J 本地通道用的是 agent，不行
     ['expired', 'late'],
   ]
   for (const [rid, actor] of cases) {

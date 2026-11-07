@@ -34,7 +34,7 @@ export function QueueList({
   const fail = (err: unknown): void => {
     // 404 = 已经发出 / 撤回了（排队区随广播更新），不打扰
     if (err instanceof ApiError && err.status === 404) return
-    setAgentRunError(err instanceof Error ? err.message : C.failed)
+    setAgentRunError(pageId, err instanceof Error ? err.message : C.failed)
   }
   return (
     <div className="chat-queue" role="list" aria-label={C.title}>

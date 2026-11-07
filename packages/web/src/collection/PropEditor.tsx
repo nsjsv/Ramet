@@ -48,6 +48,8 @@ import {
   toggleShown,
   updateOption,
 } from './schema-ops'
+import { ButtonSettings } from './button-settings'
+import { AiPropSettings } from './ai-prop-settings'
 
 const C = COPY.collection
 const R = C.relation
@@ -227,7 +229,11 @@ export default function PropEditor({ doc, schema, prop, view, onClose }: Props) 
         <Icon name={TYPE_ICON[prop.type]} size={14} />
       </label>
       {prop.type === 'unique_id' && <PrefixField doc={doc} prop={prop} />}
-      {isComputedProp(prop) && prop.type !== 'relation' && prop.type !== 'rollup' && prop.type !== 'formula' && <div className="cl-hint">{C.prop.readonlyType}</div>}
+      {prop.type === 'button' && <ButtonSettings doc={doc} prop={prop} />}
+      {prop.type === 'ai' && <AiPropSettings doc={doc} prop={prop} />}
+      {isComputedProp(prop) && prop.type !== 'relation' && prop.type !== 'rollup' && prop.type !== 'formula' && prop.type !== 'button' && (
+        <div className="cl-hint">{C.prop.readonlyType}</div>
+      )}
       {prop.type === 'relation' && <RelationSettings prop={prop} schema={schema} />}
       {prop.type === 'rollup' && <RollupSettings doc={doc} schema={schema} prop={prop} />}
       {prop.type === 'formula' && <FormulaField doc={doc} schema={schema} prop={prop} view={view} />}

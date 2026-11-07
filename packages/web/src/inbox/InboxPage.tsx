@@ -1,5 +1,6 @@
 /* ---------- 收件箱（/inbox）----------
- * 汇总各页面里需要你处理的事：审批、待批准的机器接入、使用申请 / 首次使用提醒、做完待你看的回合、在跑的回合。
+ * 汇总各页面里需要你处理的事：审批、待批准的机器接入、使用申请 / 首次使用提醒、做完待你看的回合、在跑的回合、评论与正文里的 @、
+ * 没能触发的规则、规则发来的通知。
  * 数据来自 GET /api/inbox（已按权限筛过），这里只渲染，不带来新权限，按钮调的都是已有接口：
  *   - 审批选项 = api.respondPermission（页面里的审批卡同一个接口）；
  *   - 批准 / 拒绝机器接入 = api.approveConnector / rejectConnector（设置 → 连接器同一个接口）；
@@ -262,6 +263,54 @@ function PageTaskRow({ item }: { item: Of<'question'> | Of<'plan'> }) {
   )
 }
 
+/** 定时器 / 规则没能触发：点标题去 AI 页的「自动」分页看（那里能重新打开 / 删掉）；「知道了」消掉这一条 */
+function TimerFailedRow({ item }: { item: Of<'timer_failed'> }) {
+  const navigate = useNavigate()
+  const { busy, error, run } = useAct(item)
+  const timer = (item.source ?? 'timer') === 'timer'
+  return (
+    <Row
+      icon={timer ? 'clock' : 'bolt'}
+      head={timer ? C.timer.head(item.timerName, item.reason) : C.timer.ruleHead(item.timerName, item.reason)}
+      sub={timer ? C.timer.when(relativeTime(item.scheduledAt)) : C.timer.happened(relativeTime(item.scheduledAt))}
+      onOpen={() => navigate('/ai/automations')}
+      error={error}
+      actions={
+        <button className="inbox-btn" type="button" disabled={busy} onClick={() => void run(() => inboxApi.dismiss(item.key))}>
+          {C.timer.ack}
+        </button>
+      }
+    >
+      {item.paused && (
+        <div className="inbox-hint">
+          <span className="inbox-tag">{C.timer.paused}</span> {C.timer.pausedHint}
+        </div>
+      )}
+    </Row>
+  )
+}
+
+/** 规则发来的通知：有事件所在页就点进去；「知道了」消掉这一条 */
+function AutomationRow({ item }: { item: Of<'automation'> }) {
+  const navigate = useNavigate()
+  const { busy, error, run } = useAct(item)
+  const pageId = item.pageId
+  return (
+    <Row
+      icon="bolt"
+      head={C.automation.head(item.ruleName, item.text)}
+      sub={pageId ? `${C.automation.where(pageName(item.pageTitle))} · ${relativeTime(item.at)}` : relativeTime(item.at)}
+      {...(pageId ? { onOpen: () => navigate(`/page/${pageId}`) } : {})}
+      error={error}
+      actions={
+        <button className="inbox-btn" type="button" disabled={busy} onClick={() => void run(() => inboxApi.dismiss(item.key))}>
+          {C.automation.ack}
+        </button>
+      }
+    />
+  )
+}
+
 /** 评论：点进页面并打开那个串（页面里打开串即记为已读），先在本地摘掉 */
 function CommentRow({ item }: { item: Of<'comment'> }) {
   const navigate = useNavigate()
@@ -276,6 +325,20 @@ function CommentRow({ item }: { item: Of<'comment'> }) {
       sub={`${C.comment.where(pageName(item.pageTitle))} · ${relativeTime(item.at)}`}
       onOpen={open}
     >
+      {item.excerpt && <div className="inbox-detail-line inbox-excerpt">{item.excerpt}</div>}
+    </Row>
+  )
+}
+
+/** 正文里 @了你：点进页面并定位到那一块（打开那一页即算看过，服务端同「做完待你看」），先在本地摘掉 */
+function DocMentionRow({ item }: { item: Of<'doc_mention'> }) {
+  const navigate = useNavigate()
+  const open = (): void => {
+    dropInboxItem(item.key)
+    navigate(`/page/${item.pageId}${item.blockId ? `?block=${encodeURIComponent(item.blockId)}` : ''}`)
+  }
+  return (
+    <Row icon="at" head={C.docMention.head(item.actor.name, pageName(item.pageTitle))} sub={relativeTime(item.at)} onOpen={open}>
       {item.excerpt && <div className="inbox-detail-line inbox-excerpt">{item.excerpt}</div>}
     </Row>
   )
@@ -300,6 +363,12 @@ function ItemRow({ item }: { item: InboxItem }) {
       return <PageTaskRow item={item} />
     case 'comment':
       return <CommentRow item={item} />
+    case 'timer_failed':
+      return <TimerFailedRow item={item} />
+    case 'automation':
+      return <AutomationRow item={item} />
+    case 'doc_mention':
+      return <DocMentionRow item={item} />
   }
 }
 

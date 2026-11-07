@@ -131,7 +131,7 @@ export function sendLast(view: EditorView, pageId: string): boolean {
   // 在跑时消息已经在文档里，排一个「这一轮结束后继续」（服务端保存，见 send-queue.ts），不撞 409
   if (agentStateFor(pageId).status === 'running') {
     void api.enqueue(pageId, { agent, kind: 'continue' }).catch((err: unknown) => {
-      setAgentRunError(err instanceof Error ? `排队失败：${err.message}` : '排队失败')
+      setAgentRunError(pageId, err instanceof Error ? `排队失败：${err.message}` : '排队失败')
     })
     return true
   }
@@ -144,10 +144,10 @@ export function sendLast(view: EditorView, pageId: string): boolean {
 async function rememberDraft(view: EditorView, pageId: string, key: string, content: string): Promise<void> {
   const res = await remember(spaceOfPage(pageId), content)
   if (!res.ok) {
-    setAgentRunError(res.message)
+    setAgentRunError(pageId, res.message)
     return
   }
-  setAgentRunError(null)
+  setAgentRunError(pageId, null)
   if (view.isDestroyed) return
   const pos = findBlockIdPos(view.state.doc, key)
   const node = pos === null ? null : view.state.doc.nodeAt(pos)

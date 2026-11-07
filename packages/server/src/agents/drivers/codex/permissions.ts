@@ -7,7 +7,7 @@
 // 没人作答就被收掉（停止本轮、换会话、进程退出）按「拒绝」应答，不用 cancel：codex 的 cancel 是「拒绝并中断整轮」，
 // 停止这件事由停止按钮自己发 turn/interrupt，收掉一张卡不能顺带把别的东西停掉。
 // codex 给的「以后这类命令都允许」（execpolicy / 网络规则）会写进用户自己的 codex 配置，不摆。
-// 受限会话（随手 AI）一律拒绝，不发事件。
+// 受限会话（⌘J）一律拒绝，不发事件。
 
 import type { ToolView } from '@ramet/shared/run-model'
 import { ASK_OPTIONS, normalizeAskForm } from '../../ask-form.js'

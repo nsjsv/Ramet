@@ -10,13 +10,15 @@
  * 页面不存在 / 已在回收站 / 非成员 / 串或评论不属于可读页面 一律 404（不泄露存在性）；不是 doc 页（过程页 / skill / 集合）发不了，400。
  * 两种评论各有页面开关（pages.inline_comments / page_comments）：关掉的那种列表里不出，发、回复、解决、编辑都 403
  * （界面上已收起，不能绕过界面继续写）；删除照旧可用（清理自己的话不该被开关挡住），已读只动我自己的收件箱。
- * 每次写成功都通知调用方（index.ts 把它接到页面文档的 stateless 广播与收件箱刷新）。
+ * 每次写成功都通知调用方（index.ts 把它接到页面文档的 stateless 广播与收件箱刷新）；新串 / 回复另交给 posted
+ * （「评论找我」的触发，triggers/sources/comment.ts）：调用方不等它，评论接口不被派发拖慢。
  * 每条路由自带 requireAuth（路径限定），挂载顺序无影响。 */
 
 import { Hono, type Context } from 'hono'
 import type { Pool } from 'pg'
 import { requireAuth, type AuthEnv } from '../auth.js'
 import { pageAccess } from '../collab.js'
+import type { PostedComment } from '../triggers/sources/comment.js'
 import {
   addReply,
   commentContext,
@@ -41,7 +43,7 @@ async function readJson(c: Context<AuthEnv>): Promise<Record<string, unknown> | 
   return body && typeof body === 'object' && !Array.isArray(body) ? (body as Record<string, unknown>) : null
 }
 
-export function commentRoutes(pool: Pool, changed: (pageId: string) => void = () => {}) {
+export function commentRoutes(pool: Pool, changed: (pageId: string) => void = () => {}, posted: (c: PostedComment) => void = () => {}) {
   const app = new Hono<AuthEnv>()
   const auth = requireAuth(pool)
 
@@ -86,6 +88,8 @@ export function commentRoutes(pool: Pool, changed: (pageId: string) => void = ()
     if ('error' in parsed) return c.json(parsed, 400)
     const thread = await createThread(pool, { pageId: id, spaceId: page.space_id, userId: user.id, kind: input.kind, anchor, body: parsed.body })
     changed(id)
+    const first = thread.comments[0]
+    if (first) posted({ commentId: first.id, threadId: thread.id, pageId: id, authorId: user.id })
     return c.json({ thread }, 201)
   })
 
@@ -98,6 +102,7 @@ export function commentRoutes(pool: Pool, changed: (pageId: string) => void = ()
     if ('error' in parsed) return c.json(parsed, 400)
     const comment = await addReply(pool, { pageId: ctx.pageId, spaceId: ctx.spaceId, threadId: ctx.threadId, userId: c.get('user').id, body: parsed.body })
     changed(ctx.pageId)
+    posted({ commentId: comment.id, threadId: ctx.threadId, pageId: ctx.pageId, authorId: c.get('user').id })
     return c.json({ comment }, 201)
   })
 

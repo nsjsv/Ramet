@@ -154,7 +154,7 @@ export class ClaudeSession {
       settingSources: ['user', 'project', 'local'],
       ...(this.persisted ? { resume: this.id } : { sessionId: this.id }),
       ...this.prefOptions(),
-      // 受限会话（随手 AI）：不给任何内置工具、只认我们给的（空）MCP 表 —— 用户配置里的放行规则绕不过去
+      // 受限会话（⌘J）：不给任何内置工具、只认我们给的（空）MCP 表 —— 用户配置里的放行规则绕不过去
       ...(spec.restricted ? { tools: [], mcpServers: {}, strictMcpConfig: true } : { mcpServers: mcpServersOf(spec.tools) }),
       stderr: (data: string) => {
         this.stderrTail = (this.stderrTail + data).slice(-STDERR_TAIL)
@@ -165,7 +165,7 @@ export class ClaudeSession {
   }
 
   /** 用户在 Ramet 里选过的模型 / 模式 / 思考强度：进程（重）起时带上；没选过的不传，CLI 用它自己的配置。
-   *  受限会话（随手 AI）固定在逐步确认：用户配置里的免确认模式不能带进来 */
+   *  受限会话（⌘J）固定在逐步确认：用户配置里的免确认模式不能带进来 */
   private prefOptions(): Partial<Options> {
     if (this.spec.restricted) return { permissionMode: 'default' }
     const { model, mode, effort } = this.config.prefs

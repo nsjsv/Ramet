@@ -9,9 +9,10 @@
 //   · 表格（GFM）：table / table_header_row(table_header*) / table_row(table_cell*)，
 //     cell attrs 带 alignment（'left'|'center'|'right'），cell 内恰一个 paragraph（preset-gfm 的形状）
 //   · 行内 mark：strong/emphasis（带 marker）、inlineCode、link（带 href/title）、strike_through、underline
+//   · 页面提及：`[@名字](page:<页 id>)` 落成 page_mention 原子{pageId,title}（见 pageMentionOf），不留成链接
 //   · 待办：list_item 的 checked（true / false；普通条目不写，取 schema 默认 null）
 //   · 公式：math_inline（行内原子，attrs.latex）/ math_block（text 是 LaTeX 原文）
-//   · 方言块：callout{kind,fold,title} / toggle（首段是摘要）/ columns > column / toc / embed{kind,src,height}；
+//   · 方言块：callout{kind,fold,title} / toggle（首段是摘要）/ columns > column / toc / embed{kind,src,height} / button_block{rule,label} / ai_gen{prompt,rule}（带子块）；
 //     方言 mark：underline、text_color{color}、highlight{color}
 //   · 换行：markdown 的软换行落成 hardbreak 节点（文本抽取会把它还原成 '\n'，搜索 / 摘要 / agent 上下文都不丢行）
 //
@@ -21,7 +22,7 @@
 // 前端不会来改这些结构：list 拆分和有序续号只扫顶层 list（list-blocks.ts 的 appendTransaction
 // 与 renumberOrderedRuns 都是 doc.forEach），而这里写出的结构都在 agent_reply 内部。
 
-import { BOOKMARK, CALLOUT, COLUMN, COLUMNS, EMBED, LINK_MENTION, isRametMark, parseMarkdown, TOC, TOGGLE, type Md } from './md-dialect/index.js'
+import { AI_GEN, BOOKMARK, BUTTON, CALLOUT, COLUMN, COLUMNS, EMBED, LINK_MENTION, isRametMark, parseMarkdown, TOC, TOGGLE, type Md } from './md-dialect/index.js'
 
 export type Attrs = Record<string, unknown>
 export type MarkSpec = { name: string; attrs: Attrs }
@@ -47,6 +48,23 @@ function text(value: unknown): string {
   return typeof value === 'string' ? value : ''
 }
 
+/** 页面提及的 markdown 写法：编辑器 page_mention 的 toMarkdown 输出，也是 Genet 写任务页链接的写法
+ *  （web editor/mention-upgrade.ts 定义的链接形态：文字恰为 `@名字`、只有这一个链接、href 恰为 `page:<页 id>`）。
+ *  在这里一次落成原子：服务端收尾落块与前端实时渲染都经这一处，文档里存的就是 chip。不能留给打开着的编辑器事后去升——
+ *  远端写进来的内容在协同同步的那一笔里改，改动回不到 Yjs（只停在那一个编辑器里），几个端各自去改同一段还会抢出两颗 chip。
+ *  `page:<页>#<块>`（块引用）、带别的格式的、文字不是 @ 开头的照旧是链接 */
+const PAGE_MENTION_HREF = /^page:([0-9a-f-]{36})$/i
+
+function pageMentionOf(node: Md, marks: MarkSpec[]): Inline | null {
+  if (marks.length > 0) return null
+  const id = PAGE_MENTION_HREF.exec(text(node.url))?.[1]
+  const only = node.children?.length === 1 ? node.children[0] : undefined
+  const label = only?.type === 'text' ? text(only.value) : ''
+  if (!id || label.length < 2 || !label.startsWith('@')) return null
+  // 写入方在相邻的两个 `=` 之间垫零宽空格挡住 ==高亮== 方言（server agents/assistant-agent.ts 的 taskMention），标题里去掉
+  return { atom: 'page_mention', attrs: { pageId: id.toLowerCase(), title: label.slice(1).replace(/=\u200b(?==)/g, '=') } }
+}
+
 /** 行内内容转 Inline 列表（marks 沿树累积；嵌套同型 mark 不会出现，markdown 表达不了） */
 function inlineNodes(nodes: Md[], marks: MarkSpec[], out: Inline[], rich: Rich): void {
   for (const node of nodes) {
@@ -64,8 +82,13 @@ function inlineNodes(nodes: Md[], marks: MarkSpec[], out: Inline[], rich: Rich):
         rich.value = true
         pushText(text(node.value), [...marks, { name: 'inlineCode', attrs: {} }], out)
         break
-      case 'link':
+      case 'link': {
         rich.value = true
+        const mention = pageMentionOf(node, marks)
+        if (mention) {
+          out.push(mention)
+          break
+        }
         inlineNodes(
           node.children ?? [],
           [...marks, { name: 'link', attrs: { href: text(node.url), title: typeof node.title === 'string' ? node.title : null } }],
@@ -73,6 +96,7 @@ function inlineNodes(nodes: Md[], marks: MarkSpec[], out: Inline[], rich: Rich):
           rich,
         )
         break
+      }
       case 'image':
         rich.value = true
         out.push({
@@ -260,6 +284,14 @@ function blocksOf(nodes: Md[], rich: Rich): Block[] {
       case BOOKMARK:
         rich.value = true
         out.push({ name: 'bookmark', attrs: { url: text(node.url) } })
+        break
+      case BUTTON:
+        rich.value = true
+        out.push({ name: 'button_block', attrs: { rule: text(node.rule), label: text(node.label) } })
+        break
+      case AI_GEN:
+        rich.value = true
+        out.push({ name: 'ai_gen', attrs: { prompt: text(node.prompt), rule: text(node.rule) }, blocks: blocksOf(node.children ?? [], rich) })
         break
       case 'footnoteDefinition': {
         // 文档没有脚注节点：定义退成以 `[^名]: ` 开头的正文

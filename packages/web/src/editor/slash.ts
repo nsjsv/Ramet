@@ -15,7 +15,8 @@ import { $prose } from '@milkdown/kit/utils'
 import { api } from '../api'
 import { COPY } from '../copy'
 import { cachedSkills, loadSkills, type SkillSummary } from '../skill-api'
-import { agentCommandsFor, agentStateFor, pageAgent, sendAgentMessage } from './agent-bar'
+import { agentCommandsFor, agentStateFor, pageAgent, pageAgents, sendAgentMessage } from './agent-bar'
+import { capsOf } from '../assistant/identity'
 import { agentName } from './ai-block'
 import { REMEMBER_COMMAND } from '../memory/remember'
 import { startMessageDraft } from './doc-send'
@@ -48,6 +49,21 @@ function insertAtom(view: EditorView, name: string): void {
   const tr = view.state.tr
   if ($from.parent.type.name === 'paragraph' && $from.parent.content.size === 0 && $from.depth >= 1) tr.replaceWith($from.before(), $from.after(), type.create())
   else tr.insert($from.depth >= 1 ? $from.after() : view.state.selection.to, type.create())
+  view.dispatch(tr.scrollIntoView())
+  view.focus()
+}
+
+/** 插一个带内容的容器块（AI 块：块身先放一个空段落），光标放进去 */
+function insertContainer(view: EditorView, name: string): void {
+  const node = view.state.schema.nodes[name]?.createAndFill()
+  if (!node) return
+  const { $from } = view.state.selection
+  const tr = view.state.tr
+  const empty = $from.parent.type.name === 'paragraph' && $from.parent.content.size === 0 && $from.depth >= 1
+  const at = empty ? $from.before() : $from.depth >= 1 ? $from.after() : view.state.selection.to
+  if (empty) tr.replaceWith($from.before(), $from.after(), node)
+  else tr.insert(at, node)
+  tr.setSelection(TextSelection.near(tr.doc.resolve(at + 2)))
   view.dispatch(tr.scrollIntoView())
   view.focus()
 }
@@ -218,6 +234,8 @@ function blockItems(view: EditorView, actions: SlashActions): SlashItem[] {
     block('blocks', svg('callout-note'), ['callout', 'note', 'tip', 'warning', 'alert'])('提示框', H.callout, (v) => turnHere(v, 'callout')),
     block('blocks', svg('toggle'), ['toggle', 'details', 'collapse', 'fold'])('折叠块', H.toggle, (v) => turnHere(v, 'toggle')),
     block('blocks', svg('toc'), ['toc', 'outline', 'contents'])('目录', H.toc, (v) => insertAtom(v, 'toc')),
+    block('blocks', svg('bolt'), ['button', 'action', 'automation', 'anniu'])('按钮', H.button, (v) => insertAtom(v, 'button_block')),
+    block('blocks', svg('sparkle'), ['ai', 'gpt', 'generate', 'summary', 'shengcheng'])(COPY.ai.aiGen.label, COPY.ai.aiGen.slashHint, (v) => insertContainer(v, 'ai_gen')),
     block('blocks', svg('columns'), ['columns', 'column', 'layout', '2'])('两栏', H.columns2, (v) => insertColumns(v, 2)),
     block('blocks', svg('columns'), ['columns', 'column', 'layout', '3'])('三栏', H.columns3, (v) => insertColumns(v, 3)),
     block('blocks', { text: '$' }, ['inline math', 'latex', 'math'])('行内公式', H.mathInline, (v) => {
@@ -253,7 +271,7 @@ function agentItems(pageId: string, agent: string): SlashItem[] {
 /** Ramet 自己的命令（不属于哪个 agent）：「记住」「带队」。都是带参命令，和 agent 的带参命令一样起一条 `>>` 草稿，补完内容发送：
  *  - 记住：发送时由 doc-send.ts 的 sendLast 接手（直接记进空间的公共记忆，不发给 agent）；
  *  - 带队：就是一条普通消息，发给当前 agent（组长）；服务端认出 `/带队` 开头，这一轮让它出计划，计划卡里确认后才开工 */
-const rametItems = (full: boolean): SlashItem[] => {
+const rametItems = (full: boolean, team: boolean): SlashItem[] => {
   const items: SlashItem[] = [
     {
       label: COPY.memory.slash.label,
@@ -264,8 +282,9 @@ const rametItems = (full: boolean): SlashItem[] => {
       run: (v: EditorView) => startMessageDraft(v, `${REMEMBER_COMMAND} `),
     },
   ]
-  // 带队要的工具（submit_plan / send_back、组员的 run_agent）只有完整档才有：别的档不给入口（服务端也只在完整档认 `/带队`）
-  if (full) {
+  // 带队要的工具（submit_plan / send_back、组员的 run_agent）只有完整档才有：别的档不给入口（服务端也只在完整档认 `/带队`）；
+  // 当不了组长的 agent（中心里的 Genet 不能同步调别的 agent）也不给
+  if (full && team) {
     items.push({
       label: COPY.team.slash.label,
       hint: COPY.team.slash.hint,
@@ -412,7 +431,8 @@ function buildSlashMenu(
     const cmds = agent ? agentItems(actions.pageId, agent) : []
     // 工具档位（agent-bar 的 AgentState.tools）不是完整：没有 use_skill，点名 skill 也没用，同带队一起不给
     const full = agentStateFor(actions.pageId).tools === 'full'
-    all = [...blocks, ...cmds, ...rametItems(full), ...(full ? skillItems(skills) : [])]
+    const team = capsOf(pageAgents(actions.pageId).find((a) => a.id === agent)).team
+    all = [...blocks, ...cmds, ...rametItems(full, team), ...(full ? skillItems(skills) : [])]
     items = all.filter((item) => matches(item, query))
     agentTitle = COPY.slash.agent(agentName(agent) || agent)
     render()

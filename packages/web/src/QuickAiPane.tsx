@@ -3,19 +3,16 @@ import { api, type AgentInfo } from './api'
 import { COPY } from './copy'
 import { Card, ConfirmButton, Row, Segmented } from './ui/form-kit'
 import { Icon } from './icons'
+import { ModelSpecHint } from './ModelSpecHint'
 import { Select } from './ui/Select'
-import {
-  ANTHROPIC_MODELS,
-  quickApi,
-  type AiConnection,
-  type AiSettings,
-  type Protocol,
-} from './quick-api'
+import { quickApi, type AiConnection, type AiSettings, type ModelInfo, type Protocol } from './quick-api'
 
-/* ---------- 设置 → 随手 AI ----------
- * 选中文字按 ⌘J 用的模型连接。站点不提供共用 key：每个人存自己的连接（key 加密落库、只回后四位），
- * 可以存多套、选一套当「当前」。协议两种：Anthropic（不填地址 = 官方）/ OpenAI 兼容（地址必填）。
- * 地址校验（只允许 https、不能指向本机 / 内网）在服务端，保存和「测试连接」都会跑，报错就地显示。
+/* ---------- 设置 → Genet ----------
+ * Genet 与 ⌘J 用的模型供应商。站点不提供共用 key：每个人存自己的供应商（key 加密落库、只回后四位），
+ * 可以存多个、选一个当「当前」。类型两种：Anthropic（不填地址 = 官方）/ OpenAI 兼容（地址必填）。
+ * 模型不给手填：填好地址和 key 后从服务商的模型列表里选（手填的名字常常拼错，错了要到调用时才发现）；
+ * 编辑已有的供应商时自动拉一次。
+ * 地址校验（只允许 https、不能指向本机 / 内网）在服务端，保存、拉模型列表和「测试连接」都会跑，报错就地显示。
  * 通道「本地」= 经 connector 让自己（或别人授权给自己）的机器上的 agent 做一次改写：不需要 key，在这里选用哪个 agent
  * （候选来自 /api/agents，只含 connector 上、现在在线且自己能用的）。 */
 
@@ -37,7 +34,7 @@ const blank = (protocol: Protocol): Form => ({
   protocol,
   name: '',
   baseUrl: '',
-  model: protocol === 'anthropic' ? ANTHROPIC_MODELS[0] : '',
+  model: '',
   apiKey: '',
   keyLast4: '',
 })
@@ -52,9 +49,7 @@ const fromConnection = (c: AiConnection): Form => ({
   keyLast4: c.keyLast4,
 })
 
-const isKnownModel = (m: string): boolean => (ANTHROPIC_MODELS as readonly string[]).includes(m)
-
-/** 列表行的第二行：协议 · 模型 · 地址主机 · key 后四位 */
+/** 列表行的第二行：类型 · 模型 · 地址主机 · key 后四位 */
 function describe(c: AiConnection): string {
   let host = ''
   if (c.baseUrl) {
@@ -65,7 +60,7 @@ function describe(c: AiConnection): string {
     }
   }
   const proto = c.protocol === 'anthropic' ? C.protoAnthropic : C.protoOpenai
-  return [proto, C.models[c.model] ?? c.model, host, `••••${c.keyLast4}`].filter(Boolean).join(' · ')
+  return [proto, c.model, host, `••••${c.keyLast4}`].filter(Boolean).join(' · ')
 }
 
 export function QuickAiPane() {
@@ -178,6 +173,7 @@ export function QuickAiPane() {
 
       {form && (
         <ConnectionForm
+          key={form.id ?? 'new'}
           form={form}
           onChange={setForm}
           onCancel={() => setForm(null)}
@@ -202,40 +198,82 @@ function ConnectionForm({
   onCancel: () => void
   onSaved: () => void
 }) {
-  const [busy, setBusy] = useState<'save' | 'test' | null>(null)
+  const [busy, setBusy] = useState<'save' | 'test' | 'models' | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [test, setTest] = useState<{ ok: boolean; text: string } | null>(null)
+  /** 拉到的模型列表；null = 还没拉（或地址 / key 改过，旧列表作废） */
+  const [models, setModels] = useState<ModelInfo[] | null>(null)
+  const [listError, setListError] = useState<string | null>(null)
+  /** 地址 / key 改过后，之前发出的拉取回来也不认 */
+  const listSeq = useRef(0)
   const editing = form.id !== null
-  const official = form.protocol === 'anthropic' && !form.baseUrl.trim()
   const nameRef = useRef<HTMLInputElement>(null)
   const urlRef = useRef<HTMLInputElement>(null)
-  const modelRef = useRef<HTMLInputElement>(null)
   const keyRef = useRef<HTMLInputElement>(null)
+  const fetchRef = useRef<HTMLButtonElement>(null)
   const set = (patch: Partial<Form>) => {
     setTest(null)
     onChange({ ...form, ...patch })
   }
 
-  /** 地址清空 / 填上时，模型框的形态跟着换（官方 = 三选一；其它 = 自由填） */
-  function setBaseUrl(baseUrl: string) {
-    const nowOfficial = form.protocol === 'anthropic' && !baseUrl.trim()
-    set({ baseUrl, ...(nowOfficial && !isKnownModel(form.model) ? { model: ANTHROPIC_MODELS[0] } : {}) })
+  /** 地址 / key 一改，旧的模型列表就不算数了；新建时连选好的模型一起清掉（编辑时留着已保存的） */
+  function setEndpoint(patch: Partial<Form>) {
+    listSeq.current++
+    setModels(null)
+    setListError(null)
+    set({ ...patch, ...(editing ? {} : { model: '' }) })
   }
 
-  function body() {
+  function endpoint() {
     return {
       baseUrl: form.baseUrl.trim(),
-      model: form.model.trim(),
       ...(form.apiKey.trim() ? { apiKey: form.apiKey.trim() } : {}),
     }
   }
 
+  function body() {
+    return { ...endpoint(), model: form.model.trim() }
+  }
+
+  async function fetchModels() {
+    if (!editing && !form.apiKey.trim()) {
+      setListError(C.keyFirst)
+      keyRef.current?.focus()
+      return
+    }
+    if (form.protocol === 'openai' && !form.baseUrl.trim()) {
+      setListError(C.required(C.baseUrl))
+      urlRef.current?.focus()
+      return
+    }
+    const seq = ++listSeq.current
+    setBusy('models')
+    setListError(null)
+    try {
+      const res = await quickApi.listModels(editing ? { id: form.id!, ...endpoint() } : { protocol: form.protocol, ...endpoint() })
+      if (seq !== listSeq.current) return
+      if (res.ok) setModels(res.models)
+      else setListError(res.message)
+    } catch (err) {
+      if (seq === listSeq.current) setListError(err instanceof Error ? err.message : COPY.failed)
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  // 编辑已有的供应商：key 在服务端，打开就能拉
+  useEffect(() => {
+    if (editing) void fetchModels()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   async function runTest() {
-    setBusy('test')
     setError(null)
+    if (!editing && !form.apiKey.trim()) return setTest({ ok: false, text: C.keyFirst })
+    if (!form.model) return setTest({ ok: false, text: C.modelRequired })
+    setBusy('test')
     setTest(null)
     try {
-      if (!editing && !form.apiKey.trim()) throw new Error('先填 API key')
       const res = await quickApi.testConnection(editing ? { id: form.id!, ...body() } : { protocol: form.protocol, ...body() })
       setTest(res.ok ? { ok: true, text: C.testOk(res.reply) } : { ok: false, text: res.message })
     } catch (err) {
@@ -246,23 +284,23 @@ function ConnectionForm({
   }
 
   /** 第一个没填的必填项（不用 required：系统的校验气泡跟不了主题，位置也不在表单的错误条上） */
-  function firstMissing(): { label: string; input: HTMLInputElement | null } | null {
-    const checks: Array<[boolean, string, HTMLInputElement | null]> = [
-      [!form.name.trim(), C.name, nameRef.current],
-      [form.protocol === 'openai' && !form.baseUrl.trim(), C.baseUrl, urlRef.current],
-      [!official && !form.model.trim(), C.model, modelRef.current],
-      [!editing && !form.apiKey.trim(), C.apiKey, keyRef.current],
+  function firstMissing(): { message: string; focus: HTMLElement | null } | null {
+    const checks: Array<[boolean, string, HTMLElement | null]> = [
+      [!form.name.trim(), C.required(C.name), nameRef.current],
+      [form.protocol === 'openai' && !form.baseUrl.trim(), C.required(C.baseUrl), urlRef.current],
+      [!editing && !form.apiKey.trim(), C.required(C.apiKey), keyRef.current],
+      [!form.model, C.modelRequired, fetchRef.current],
     ]
     const hit = checks.find(([missing]) => missing)
-    return hit ? { label: hit[1], input: hit[2] } : null
+    return hit ? { message: hit[1], focus: hit[2] } : null
   }
 
   async function submit(e: FormEvent) {
     e.preventDefault()
     const missing = firstMissing()
     if (missing) {
-      setError(C.required(missing.label))
-      missing.input?.focus()
+      setError(missing.message)
+      missing.focus?.focus()
       return
     }
     setBusy('save')
@@ -278,11 +316,17 @@ function ConnectionForm({
     }
   }
 
+  // 已选的模型不在拉到的列表里（服务商下架了 / 列表还没拉）也照样显示，免得编辑时被悄悄换掉
+  const modelOptions = [
+    ...(form.model && !models?.some((m) => m.id === form.model) ? [{ value: form.model, label: models ? C.modelGone(form.model) : form.model }] : []),
+    ...(models ?? []).map((m) => ({ value: m.id, label: m.name, tip: m.name === m.id ? undefined : m.id })),
+  ]
+
   return (
     <Card title={editing ? C.formEdit : C.formNew}>
       <form className="quick-set-form" noValidate onSubmit={(e) => void submit(e)}>
         {!editing && (
-          <Row label={C.protocol} desc={form.protocol === 'openai' ? C.protoOpenaiHint : C.protoAnthropicHint}>
+          <Row label={C.protocol} desc={form.protocol === 'openai' ? C.protoOpenaiHint : undefined}>
             <Segmented
               label={C.protocol}
               value={form.protocol}
@@ -291,6 +335,9 @@ function ConnectionForm({
                 { value: 'openai', label: C.protoOpenai },
               ]}
               onChange={(protocol) => {
+                listSeq.current++
+                setModels(null)
+                setListError(null)
                 setTest(null)
                 onChange({ ...blank(protocol), name: form.name, apiKey: form.apiKey })
               }}
@@ -310,24 +357,9 @@ function ConnectionForm({
             maxLength={300}
             spellCheck={false}
             placeholder={form.protocol === 'openai' ? C.baseUrlOpenai : C.baseUrlAnthropic}
-            onChange={(e) => setBaseUrl(e.target.value)}
+            onChange={(e) => setEndpoint({ baseUrl: e.target.value })}
           />
           <small>{C.baseUrlRule}</small>
-        </label>
-        <label className="quick-set-field">
-          <span>{C.model}</span>
-          {official ? (
-            <Select
-              className="admin-field"
-              label={C.model}
-              value={form.model}
-              options={ANTHROPIC_MODELS.map((m) => ({ value: m, label: C.models[m] ?? m }))}
-              onChange={(model) => set({ model })}
-            />
-          ) : (
-            <input ref={modelRef} className="admin-field" value={form.model} maxLength={100} spellCheck={false} placeholder={C.modelPlaceholder} onChange={(e) => set({ model: e.target.value })} />
-          )}
-          {official && <small>{C.modelHint}</small>}
         </label>
         <label className="quick-set-field">
           <span>{C.apiKey}</span>
@@ -339,9 +371,28 @@ function ConnectionForm({
             spellCheck={false}
             value={form.apiKey}
             placeholder={editing ? C.apiKeyKeep(form.keyLast4) : C.apiKeyPlaceholder}
-            onChange={(e) => set({ apiKey: e.target.value })}
+            onChange={(e) => setEndpoint({ apiKey: e.target.value })}
           />
         </label>
+        <div className="quick-set-field">
+          <span>{C.model}</span>
+          <div className="quick-set-model">
+            <Select
+              className="admin-field"
+              label={C.model}
+              value={form.model || null}
+              placeholder={models ? C.modelPick : C.modelEmpty}
+              disabled={modelOptions.length === 0}
+              options={modelOptions}
+              onChange={(model) => set({ model })}
+            />
+            <button ref={fetchRef} type="button" className="admin-btn" disabled={busy !== null} onClick={() => void fetchModels()}>
+              {busy === 'models' ? C.fetchingModels : C.fetchModels}
+            </button>
+          </div>
+          {listError ? <small className="quick-set-test is-bad">{listError}</small> : !models && <small>{C.fetchModelsHint}</small>}
+          <ModelSpecHint protocol={form.protocol} baseUrl={form.baseUrl} model={form.model} />
+        </div>
         {error && (
           <div className="admin-form-error" role="alert">
             {error}

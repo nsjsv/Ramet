@@ -1,6 +1,7 @@
 import { useEffect, useSyncExternalStore } from 'react'
 import { toolOf } from '@ramet/shared/reply-stats'
 import { api, type AgentInfo } from './api'
+import { builtinAgent } from './assistant/identity'
 import { subscribeControl } from './control'
 
 /* ---------- 默认 agent 设置 ----------
@@ -31,6 +32,8 @@ export function subscribeDefaultAgent(cb: () => void): () => void {
 }
 
 export function setDefaultAgent(agent: string): void {
+  // 前端自带的 agent（Genet）只在它自己的页上能用，当不了新页面的默认：选它不改全局默认
+  if (builtinAgent(agent)) return
   try {
     localStorage.setItem(KEY, agent)
   } catch (err) {
@@ -88,9 +91,14 @@ export function agentList(): AgentInfo[] {
   return state.agents
 }
 
+/** 按 id 认 agent：目录里的，或前端自带的（中心里的 Genet 不进目录，见 assistant/identity.ts）；认不出 undefined */
+export function findAgent(id: string): AgentInfo | undefined {
+  return state.agents.find((a) => a.id === id) ?? builtinAgent(id)
+}
+
 /** AI 写的署名：目录里的名字，对不上就写「AI」，不借用当前默认 agent（更新流水、「上次编辑」、集合的最后编辑者共用） */
 export function agentLabel(id: string | null): string {
-  const label = id ? agentList().find((a) => a.id === id)?.label?.trim() : ''
+  const label = id ? findAgent(id)?.label?.trim() : ''
   return label || 'AI'
 }
 

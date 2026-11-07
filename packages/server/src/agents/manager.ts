@@ -8,9 +8,11 @@
 
 import * as Y from 'yjs'
 import type { Pool } from 'pg'
-import { loadDocFromDb, pageAccess, type DocWriter } from '../collab.js'
-import { inheritedAttrs, userMessageElement } from './queue-message.js'
-import { SendQueue } from './send-queue.js'
+import { loadDocFromDb, type DocWriter } from '../collab.js'
+import { SendQueue, type QueueHost } from './send-queue.js'
+import { queueHost } from './queue-host.js'
+import { AssistantDriver, type AssistantDeps } from './drivers/assistant/driver.js'
+import { ASSISTANT_ID, isAssistantId, resolveAssistant } from './assistant-agent.js'
 import { memoryBlockOfPage } from '../memories.js'
 import { DriverBase } from './drivers/base.js'
 import { createAdapter } from './drivers/create.js'
@@ -19,7 +21,7 @@ import { lastUserMessageAttrs, lockedTool, mentionChain } from './doc.js'
 import type { Conn, ConnectorHub, InflightPrompt, ResumePlan } from './hub.js'
 import type { AgentAdapter, AgentConfig, AgentEvent, AskContent, ConfigOption, PermissionEvent } from './types.js'
 import { IdleRecycler } from './idle.js'
-import { mintPageToken, revokePageTokens, revokePageTokensOf, httpBaseFor, type GrantCtx, type PageTool } from '../page-read.js'
+import { grantUsable, mintPageToken, revokePageTokens, revokePageTokensOf, httpBaseFor, type GrantCtx, type PageTool } from '../page-read.js'
 import type { ToolHost } from '../routes/ramet-tools.js'
 import { approvalPreview } from './approval-detail.js'
 import { askSummary, checkAskAnswer } from './ask-form.js'
@@ -30,7 +32,7 @@ import { TeamPlanError, TeamPlans } from './team-plan.js'
 import { TeamToolError } from './team.js'
 import { agentPosture, authorize, ForbiddenError } from './posture.js'
 import { agentVersions, unavailableAgents } from './drivers/cli-version.js'
-import { assertCanUse, assertLocalOwner, inConnectorSpace, LOCAL_MACHINE, MachinePass, usableConnectors, type MachineScope } from './machine-access.js'
+import { ASSISTANT_MACHINE, assertCanUse, assertLocalOwner, inConnectorSpace, LOCAL_MACHINE, MachinePass, usableConnectors, type MachineScope } from './machine-access.js'
 import { recordMachineUse } from './machine-grants.js'
 import { RemoteAgent } from './remote-agent.js'
 import { createRunState, type RunState } from './run-state.js'
@@ -56,10 +58,12 @@ import {
   type RunTarget,
 } from './manager-types.js'
 import { prepareSession, restoreMsgBefore, setSessionConfig } from './session-config.js'
+import { configureDispatch } from './dispatch-config.js'
 import { SessionMirror } from './session-mirror.js'
 import { effectiveCwd, loadChoice, loadToolProfile, persistConfigs, saveChoice, saveToolProfile, saveWorkspace } from './session-store.js'
 import type { ToolProfile } from './tool-profile.js'
 import { runTurn } from './turn.js'
+import { TaskWatch } from './task-watch.js'
 import { runResume } from './resume-turn.js'
 import { redoRunTarget, resumeRunTarget } from './reply-target.js'
 
@@ -72,7 +76,7 @@ const LS_TIMEOUT_MS = 10_000
  *  原始适配器只在这个文件里被 kill / 取消 / 听事件 */
 type PoolEntry = {
   shared: DriverBase | RemoteAgent
-  loaded: Set<string>
+  loaded: AdapterEntry['loaded']
   key: string
   pageTokens: Map<string, string>
 }
@@ -138,6 +142,10 @@ export class AgentManager {
   readonly plans: TeamPlans
   /** 运行中排队发送（send-queue.ts）：路由经它入队 / 撤回 / 立即发送；一轮结束时 release 调它派发 */
   readonly queue: SendQueue
+  /** 「以某人身份写一条用户消息 / 发起一轮」的唯一实现（queue-host.ts）：排队派发与 Genet 的派活共用 */
+  private readonly queueHost: QueueHost
+  /** Genet 派出去的任务：派出去的那一轮结束时回报 / 交给 wait_task（task-watch.ts）；与排队同在一轮结束时触发 */
+  private readonly tasks: TaskWatch
   /** 会话记录在中心的副本：收尾后同步、换机器时下发（session-sync.ts）。依赖 pool / hub，在构造函数体里建 */
   private readonly sessions: SessionSync
   /** 在飞的 run_agent 子运行（不在 runIndex 里）：授权被收回时按「机器 + 人」当场取消 */
@@ -167,56 +175,26 @@ export class AgentManager {
       notifyInbox?: () => void
       /** 以某人身份写文档（hocuspocus 直连会话，collab.ts 的 createDocWriter）：排队消息派发时写用户消息。测试桩可以不给 */
       writeDoc?: DocWriter
+      /** Genet 的模型调用 / 主密钥 / DNS 解析（测试注入）；缺省走真实服务、读 RAMET_SECRET_KEY */
+      assistant?: Omit<AssistantDeps, 'pool'>
     },
   ) {
     this.sessions = new SessionSync(pool, opts.hub)
-    this.queue = new SendQueue(pool, {
+    this.queueHost = queueHost({
+      pool,
       running: (pageId) => this.running(pageId),
       stop: (pageId) => this.stop(pageId),
-      writable: async (pageId, user) => {
-        const role = await pageAccess(pool, pageId, user)
-        return role !== null && role !== 'viewer'
-      },
-      usable: async (pageId, user, agent) => {
-        if (!agent) return null
-        try {
-          if (!(await this.resolve(agent, user))) return '这条消息指定的 agent 当前不可用'
-          // 一页一种工具：写进文档之前就拦，别留下一条发不出去的消息
-          const lock = lockedTool(await this.pageFragment(pageId))
-          return fitsLock(lock, agent) ? null : new ToolLockedError(lock).message
-        } catch (err) {
-          // 机器使用权不够（assertLocalOwner / assertCanUse 抛 ForbiddenError）
-          return err instanceof Error ? err.message : String(err)
-        }
-      },
-      writeMessage: async (pageId, user, text, images, agent) => {
-        if (!this.opts.writeDoc) throw new Error('没有文档写入通道')
-        await this.opts.writeDoc(
-          `page:${pageId}`,
-          user,
-          (doc, origin) =>
-            doc.transact(() => {
-              const frag = doc.getXmlFragment('prosemirror')
-              frag.insert(frag.length, [userMessageElement(text, images, { ...inheritedAttrs(frag, agent), author: user.id })])
-            }, origin),
-          'user',
-        )
-      },
-      start: async (pageId, user, agent) => {
-        if (this.running(pageId)) return 'busy'
-        let target: RunTarget
-        try {
-          target = await this.resolveRun(pageId, { agent }, user)
-        } catch (err) {
-          return { reason: err instanceof UnknownAgentError ? '这条消息指定的 agent 当前不可用' : err instanceof Error ? err.message : String(err) }
-        }
-        if (this.running(pageId)) return 'busy'
-        // 不等这一轮跑完；没有浏览器 cookie（派发不是某个请求）：机器人客户端用临时会话（openBotAsUser）
-        void this.continue(pageId, target, user, null).catch(() => undefined)
-        return 'ok'
-      },
+      resolve: (agentId, user, pageId) => this.resolve(agentId, user, pageId),
+      pageFragment: (pageId) => this.pageFragment(pageId),
+      resolveRun: (pageId, body, user) => this.resolveRun(pageId, body, user),
+      // 没有浏览器 cookie（派发不是某个请求）：机器人客户端用临时会话（openBotAsUser）
+      continueRun: (pageId, target, user) => this.continue(pageId, target, user, null),
       broadcast: (pageId, ev) => this.broadcast(pageId, ev),
+      writeDoc: opts.writeDoc,
     })
+    this.queue = new SendQueue(pool, this.queueHost)
+    const fragment = (pageId: string): Promise<Y.XmlFragment> => this.pageFragment(pageId)
+    this.tasks = new TaskWatch({ pool, host: this.queueHost, queue: this.queue, writeDoc: opts.writeDoc, fragment, approvals: () => this.pendingApprovals() })
     this.plans = new TeamPlans({
       pool,
       resolve: (agentId, user) => this.resolve(agentId, user),
@@ -246,7 +224,9 @@ export class AgentManager {
     if (profile === 'none') return []
     const key = `${user.id}|${pageId}|${profile}`
     let token = entry.pageTokens.get(key)
-    if (!token) {
+    // 只复用还用得上的凭证（凭证有寿命，Genet 这种全站共用的适配器又很少被闲置回收）：过期 / 快过期就签新的，
+    // 会话里的旧凭证由 useSession 按 entry.loaded 对不上而重新加载换掉
+    if (!token || !grantUsable(token)) {
       // 完整档的页面会话能叫别的 agent（run_agent），凭证绑着这一页与这个 agent
       token = mintPageToken(user.id, entry.key, profile === 'minimal'
         ? { pageId, agentId: agent.id, canDispatch: false, profile: 'minimal' }
@@ -259,7 +239,8 @@ export class AgentManager {
   /** 凭证 + 中心地址，交给执行端的 PageTool。本机 agent 与中心同机，缺省可回环直连；connector 在别的机器上，
    *  没配 RAMET_PUBLIC_URL 就直接报错（回环地址对它是它自己） */
   private toolGrant(agent: ResolvedAgent, token: string): PageTool {
-    const url = httpBaseFor(process.env.RAMET_PUBLIC_URL, agent.remote ? undefined : this.opts.httpBase())
+    // Genet 的 MCP 进程就在中心本机：直接走回环（对外地址可能经 CDN / WAF，机器流量会被拦）
+    const url = agent.assistant ? this.opts.httpBase() : httpBaseFor(process.env.RAMET_PUBLIC_URL, agent.remote ? undefined : this.opts.httpBase())
     return { mcp: { url, token } }
   }
 
@@ -311,8 +292,12 @@ export class AgentManager {
     return {
       approvals: this.ownApprovals,
       agentsFor: async (user, callerAgentId) =>
-        (await this.catalog(user)).filter((a) => a.id !== callerAgentId).map((a) => ({ id: a.id, label: a.label })),
+        (await this.catalog(user))
+          .filter((a) => a.id !== callerAgentId)
+          .map((a) => ({ id: a.id, label: a.label, ...(a.unavailable ? { unavailable: a.unavailable } : {}) })),
       runAgent: (ctx, callee, task, signal) => runSubAgent(sub, ctx, callee, task, signal),
+      dispatch: { ...this.queueHost, configure: (pageId, user, agent, want) => configureDispatch(this.host(), pageId, user, agent, want) },
+      tasks: this.tasks,
       team: {
         // 凭证带的这一轮必须还在飞、阶段对得上，否则不列（旧的 MCP 进程再问也拿不到）
         round: async (team, user, pageId) => {
@@ -406,7 +391,9 @@ export class AgentManager {
    *  - 不存在 / 离线 / 调用者看不到这台机器（不在 connector 所在空间）返回 null（调用方当「未知 agent」）
    *  - 看得到但不是接入人、也没有有效的 agent 授权，抛 ForbiddenError（403，文案带主人名）
    *  授权判定在「是否在线」之前，离线不能成为绕过判定的缝；空间成员资格对所有人一视同仁（admin 没有特权）。 */
-  async resolve(agentId: string, user: { id: string; role: string }): Promise<ResolvedAgent | null> {
+  async resolve(agentId: string, user: { id: string; role: string }, pageId?: string): Promise<ResolvedAgent | null> {
+    // Genet 不在目录里、不用任何机器：只在这个人自己的 Genet 页上解析得出来（判定在 assistant-agent.ts），没给页面就是未知
+    if (isAssistantId(agentId)) return pageId ? resolveAssistant(this.pool, user, pageId) : null
     const local = this.opts.agents.find((a) => a.id === agentId)
     if (local) return { id: local.id, local, pass: assertLocalOwner(user, 'agent') }
     const parsed = parseRemoteId(agentId)
@@ -514,7 +501,7 @@ export class AgentManager {
   ): Promise<void> {
     // Ramet 自己的审批（知识中枢的删除等）：这里持有，不经 agent 会话，不碰任何人的机器
     if (this.ownApprovals.answer(pageId, body.agentId, body.requestId, body.optionId, user.id)) return
-    const agent = await this.resolve(body.agentId, user)
+    const agent = await this.resolve(body.agentId, user, pageId)
     const approval = this.mirror.approval(pageId, body.agentId, body.requestId)
     if (!approval) throw new UnknownApprovalError()
     let content: AskContent | undefined
@@ -547,9 +534,10 @@ export class AgentManager {
   }
 
   stop(pageId: string): void {
-    // Ramet 自己挂着的审批按拒绝结束；被叫 agent 的子运行一并取消
+    // Ramet 自己挂着的审批按拒绝结束；被叫 agent 的子运行、Genet 的 wait_task 一并取消
     this.ownApprovals.cancelPage(pageId)
     for (const fn of [...(this.stopHandlers.get(pageId) ?? [])]) fn()
+    this.tasks.cancelWaits(pageId)
     const run = this.pages.get(pageId)?.run
     if (!run) {
       // 重启后、hello 认领前页面上没有内存里的 run。停止记在绑定行上，认领时放进 drop。
@@ -605,9 +593,12 @@ export class AgentManager {
     // 指定了就用，失效了按「没指定」回落（请求体 → 目录第一个），与前端 chip 的
     // 回落规则同一口径（pickAgent）。前端也会收敛掉失效 attrs（message-chips 的 repairStaleAgent）。
     const specified = msg.agent !== ''
-    const fromMsg = !mentioned && specified ? await this.resolve(msg.agent, user) : null
-    const target = mentioned ?? (fromMsg ? msg.agent : body.agent || catalog.find((a) => !a.unavailable && fitsLock(lock, a.id))?.id)
-    const agent = fromMsg ?? (target ? await this.resolve(target, user) : null)
+    const fromMsg = !mentioned && specified ? await this.resolve(msg.agent, user, pageId) : null
+    // 回落：Genet 页上先是 Genet（它不在目录里），再按目录顺序
+    const home = (await this.resolve(ASSISTANT_ID, user, pageId)) ? [ASSISTANT_ID] : []
+    const fallback = [...home, ...catalog.filter((a) => !a.unavailable).map((a) => a.id)].find((id) => fitsLock(lock, id))
+    const target = mentioned ?? (fromMsg ? msg.agent : body.agent || fallback)
+    const agent = fromMsg ?? (target ? await this.resolve(target, user, pageId) : null)
     if (!agent) throw lock && !target ? new ToolLockedError(lock, true) : new UnknownAgentError()
     if (!mentioned && !fitsLock(lock, agent.id)) throw new ToolLockedError(lock)
     // 消息 attrs 里的 cwd / opts 属于消息 chip 选的那个 agent：这一轮换了别家（点名）就不沿用
@@ -697,6 +688,7 @@ export class AgentManager {
       await this.continueChain(pageId, user, cookieHeader)
       // 链跑完（或没有链）才轮到排队：链接着开了下一家时页面在忙，排队等那一家结束（它的 continue 会再调这里）
       this.queue.onRunEnd(pageId, 'end')
+      this.tasks.onRunEnd(pageId, 'end', null, run.startedAt)
     }
   }
 
@@ -770,7 +762,7 @@ export class AgentManager {
     for (const sub of [...this.subRuns]) {
       if (sub.connectorId === connectorId && sub.userId === userId) sub.cancel()
     }
-    this.opts.hub.cancelQuickOf(connectorId, userId, reason) // 随手 AI 本地通道里在飞的一次
+    this.opts.hub.cancelQuickOf(connectorId, userId, reason) // ⌘J 本地通道里在飞的一次
     for (const [key, entry] of this.adapters) {
       if (parseRemoteId(key)?.connectorId !== connectorId) continue
       revokePageTokensOf(userId, key)
@@ -837,11 +829,14 @@ export class AgentManager {
       return this.view(existing, agent.pass)
     }
     if (existing) existing.shared.kill()
-    // 远端：同一 connector 的同一 agent 共用 hub 持有的一个 RemoteAgent（同一 WSS 连接，会话级副本在里面）
-    const shared = agent.local
-      ? createAdapter(agent.local)
-      : this.opts.hub.remote(agent.remote!.connectorId, agent.remote!.agentId)
-    const created: PoolEntry = { shared, loaded: new Set(), key, pageTokens: new Map() }
+    // 远端：同一 connector 的同一 agent 共用 hub 持有的一个 RemoteAgent（同一 WSS 连接，会话级副本在里面）。
+    // Genet 全站共用一个实例（会话按凭证认人），它要的是库与模型调用，AgentConfig 装不下，所以不经 createAdapter
+    const shared = agent.assistant
+      ? new AssistantDriver({ pool: this.pool, ...this.opts.assistant })
+      : agent.local
+        ? createAdapter(agent.local)
+        : this.opts.hub.remote(agent.remote!.connectorId, agent.remote!.agentId)
+    const created: PoolEntry = { shared, loaded: new Map(), key, pageTokens: new Map() }
     this.adapters.set(key, created)
     this.idle.arm(key)
     // 会话级事件的常驻监听：每个适配器装一次，按 sessionId 找页面（找不到就丢，之后的 bind 用执行端快照补齐）。
@@ -855,7 +850,8 @@ export class AgentManager {
     let adapter: AgentAdapter
     if (pooled.shared instanceof RemoteAgent) adapter = pooled.shared.as(pass)
     else {
-      if (!(pass instanceof MachinePass) || pass.machine !== LOCAL_MACHINE) throw new Error('凭据不是签给本机 agent 的')
+      const machine = pooled.shared instanceof AssistantDriver ? ASSISTANT_MACHINE : LOCAL_MACHINE
+      if (!(pass instanceof MachinePass) || pass.machine !== machine) throw new Error('凭据不是签给这个 agent 的')
       adapter = pooled.shared
     }
     return { adapter, loaded: pooled.loaded, key: pooled.key, pageTokens: pooled.pageTokens }
@@ -900,7 +896,7 @@ export class AgentManager {
 
   /** 记住本页的来源（POST /agent-choice）：只认调用者此刻调得动的 agent；广播给本页所有订阅者（协作者的输入卡跟着换） */
   async setChoice(pageId: string, agentId: string, user: { id: string; role: string }): Promise<void> {
-    const agent = await this.resolve(agentId, user)
+    const agent = await this.resolve(agentId, user, pageId)
     if (!agent) throw new UnknownAgentError()
     await saveChoice(this.pool, pageId, agent.id)
     this.broadcast(pageId, { type: 'choice', agentId: agent.id })
@@ -954,7 +950,9 @@ export class AgentManager {
     this.broadcast(pageId, terminalStatus(run))
     // 排队发送：正常结束才自动发下一条，手动停止 / 出错则暂停（插队的停止除外，见 send-queue.ts）
     const outcome = run.ended ? 'end' : run.shutdown ? 'shutdown' : run.cancelled && !run.revoked ? 'cancelled' : 'error'
-    if (!(chained && outcome === 'end')) this.queue.onRunEnd(pageId, outcome)
+    if (chained && outcome === 'end') return
+    this.queue.onRunEnd(pageId, outcome)
+    this.tasks.onRunEnd(pageId, outcome, run.revoked ?? run.error, run.startedAt)
   }
 
   private vacate(pageId: string, run: RunState): void {
@@ -988,7 +986,7 @@ export class AgentManager {
       writeDoc: this.opts.writeDoc,
       getLiveDoc: (docName) => this.opts.getLiveDoc(docName),
       broadcast: (pageId, ev) => this.broadcast(pageId, ev),
-      resolve: (agentId, user) => this.resolve(agentId, user),
+      resolve: (agentId, user, pageId) => this.resolve(agentId, user, pageId),
       ensureAdapter: (agent) => this.ensureAdapter(agent),
       adapterOf: (key, pass) => {
         const pooled = this.adapters.get(key)
@@ -1001,7 +999,10 @@ export class AgentManager {
       mirror: this.mirror,
       sessions: this.sessions,
       catalog: (user) => this.catalog(user),
-      agentLabel: (agentId) => this.opts.agents.find((a) => a.id === agentId)?.label,
+      agentNames: {
+        localAgents: () => this.opts.agents.map((a) => ({ id: a.id, label: a.label })),
+        onlineAgents: (connectorId) => this.opts.hub.get(connectorId)?.agents,
+      },
     }
   }
 
@@ -1037,7 +1038,8 @@ export class AgentManager {
         const agent = this.claimedAgent(catalogId, cwd, pass)
         if (!agent) return
         const entry = this.ensureAdapter(agent)
-        entry.loaded.add(sessionId)
+        // 在跑的这一轮用的是上一个中心进程签的凭证（凭证只在内存里，已经作废）：记成不知道，下一轮重新加载换上新的
+        entry.loaded.set(sessionId, null)
         this.mirror.bind(pageId, catalogId, sessionId, entry.adapter)
       },
       restoreBefore: (catalogId, pass, sessionId, before) => {

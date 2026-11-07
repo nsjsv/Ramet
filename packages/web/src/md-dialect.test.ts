@@ -139,6 +139,28 @@ describe('方言：块级', () => {
     expect(first('<a href="https://e.com/" data-bookmarks>x</a>').name).toBe('paragraph')
   })
 
+  test('按钮：独占一段的 <button data-rule>，名字取中间的文字；规则 id 不是 uuid 当没设置；不带 data-rule / 段里还有别的字都不算', () => {
+    const id = '0b6f5a52-1c1e-4a39-9a43-1f2d3c4b5a69'
+    expect(first(`<button data-rule="${id}">新建 **周报**</button>`)).toMatchObject({ name: 'button_block', attrs: { rule: id, label: '新建 周报' } })
+    expect(first('<button data-rule="">还没设置</button>')).toMatchObject({ name: 'button_block', attrs: { rule: '', label: '还没设置' } })
+    expect(first('<button data-rule="x">坏的</button>')).toMatchObject({ name: 'button_block', attrs: { rule: '' } })
+    expect(first('<button>普通</button>').name).toBe('paragraph')
+    expect(first('前面 <button data-rule="">x</button>').name).toBe('paragraph')
+  })
+
+  test('AI 块：<!-- ai prompt rule --> … <!-- /ai --> 里的块是块身；提示词取 prompt（实体解码），规则 id 不是 uuid 当空；可以嵌套；没收尾不算', () => {
+    const id = '0b6f5a52-1c1e-4a39-9a43-1f2d3c4b5a69'
+    const b = first(`<!-- ai prompt="总结 &quot;本页&quot;" rule="${id}" -->\n\n- 要点一\n\n第二段\n\n<!-- /ai -->`)
+    expect(b).toMatchObject({ name: 'ai_gen', attrs: { prompt: '总结 "本页"', rule: id } })
+    expect(b.blocks!.map((x) => x.name)).toEqual(['bullet_list', 'paragraph'])
+    expect(first('<!-- ai prompt="x" rule="bad" -->\n\n内容\n\n<!-- /ai -->').attrs).toMatchObject({ rule: '' })
+    const nested = first('<!-- ai prompt="外" -->\n\n<!-- ai prompt="里" -->\n\n里面\n\n<!-- /ai -->\n\n<!-- /ai -->')
+    expect(nested.blocks![0]).toMatchObject({ name: 'ai_gen', attrs: { prompt: '里' } })
+    // 空的块身补一个空段落
+    expect(first('<!-- ai prompt="x" -->\n\n<!-- /ai -->').blocks!.map((x) => x.name)).toEqual(['paragraph'])
+    expect(first('<!-- ai prompt="x" -->\n\n没收尾').name).not.toBe('ai_gen')
+  })
+
   test('网页提及：行内的 <a data-mention> 整段换成 link_mention 原子；前后文字照留；不带标记 / 非 http(s) / 没闭合的不算', () => {
     expect(inl(first('看 <a href="https://e.com/a?x=1&amp;y=2" data-mention>https://e.com/a?x=1&y=2</a> 这个').inlines)).toBe('看 <link_mention> 这个')
     expect(first('<a href="https://e.com/a?x=1&amp;y=2" data-mention>x</a>').inlines![0]).toEqual({ atom: 'link_mention', attrs: { url: 'https://e.com/a?x=1&y=2' } })

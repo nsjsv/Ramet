@@ -102,3 +102,12 @@ export function assertLocalOwner(user: { id: string; role: string }, scope: Mach
   if (user.role !== 'admin') throw new ForbiddenError('服务器本机的 agent 只有管理员能用')
   return issue(user.id, LOCAL_MACHINE, scope)
 }
+
+/** Genet（agents/assistant-agent.ts）的「机器」标识：它在中心进程里跑，不碰任何人的机器 */
+export const ASSISTANT_MACHINE = 'assistant'
+
+/** Genet 的凭据：只为让适配器池的类型闸（ensureAdapter / view 只认凭据）照常成立。Genet 不用任何机器，所以不判机器使用权、
+ *  也不记使用；「这一页是不是他的 Genet 页」由 assistant-agent.ts 的 resolveAssistant 判过才会签 */
+export function assistantPass(user: { id: string }): MachinePass {
+  return issue(user.id, ASSISTANT_MACHINE, 'agent')
+}

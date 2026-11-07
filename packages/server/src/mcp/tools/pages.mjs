@@ -1,6 +1,6 @@
 // ---------- 页面内容：read_page / edit_page ----------
 // 读走「能看见」，写走「能改」，权限判定全在中心端点（page-read.ts / page-write.ts），这里只带凭证。
-import { call, failure, reply } from '../lib.mjs'
+import { broken, call, declined, failure, reply } from '../lib.mjs'
 
 /** 中心返回的 JSON → MCP 文本内容（页面按行读取的契约见 page-read.ts） */
 function render(body, blockId) {
@@ -35,7 +35,8 @@ async function readPage(args) {
 async function editPage({ pageId, ops }) {
   const r = await call(`/api/pages/${encodeURIComponent(pageId)}/edit`, { method: 'POST', body: { ops } })
   // 404 / 403 / 400：页面不存在 / 不能改 / ops 不合法；中心失败时文档没被碰过（见 page-write.ts）
-  if (!r.ok) return failure('写回失败', r)
+  if (declined(r)) return declined(r)
+  if (broken(r)) return failure('写回失败', r)
   return reply(`已写回 ${pageId}（${ops.length} 个操作）。`)
 }
 

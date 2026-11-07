@@ -1,4 +1,4 @@
-/* ---------- 空间公共记忆（/memory）----------
+/* ---------- 空间公共记忆（AI 页的记忆分页，/ai/memory）----------
  * 当前空间的全部记忆：查看、添加、删除，显示条数与合计字数（每一轮都会全部带上，所以提醒精简）。
  * 写入只有两条路：这里手动添加（或输入框里敲 `/记住 内容`），或 agent 提议、你点「记住」。只读成员只能看。
  * 数据只是 GET /api/spaces/:id/memories 的结果：control:global 的 'memories' 信号（不带内容）去抖重拉。 */
@@ -92,7 +92,7 @@ export default function MemoryPanel({ space }: { space: Space | null }) {
   const fill = used / spaceMax
   return (
     <div className="memory-page" data-flip>
-      <h1 className="memory-title">{C.title}</h1>
+      {/* 标题是 AI 页的分页栏 */}
       <p className="memory-sub">{space ? C.sub(space.name) : COPY.loading}</p>
       {space && !canWrite && <p className="memory-sub">{C.readOnly}</p>}
 

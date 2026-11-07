@@ -371,10 +371,13 @@ export async function loadDocForRead(
  * 用于服务端凭空建一份文档（agent 过程归档，见 agents/runs.ts）：那时文档不可能有活连接，
  * 所以先写内容、再让页面可被发现是唯一没有竞态的顺序。 */
 export async function writeDocState(pool: Pool, docName: string, doc: Y.Doc): Promise<void> {
-  await withTransaction(pool, async (client) => {
-    await client.query(PUT_SNAPSHOT, [docName, Buffer.from(Y.encodeStateAsUpdate(doc))])
-    await client.query(DELETE_UPDATES, [docName])
-  })
+  await withTransaction(pool, (client) => putDocState(client, docName, doc))
+}
+
+/** 同 writeDocState，但写在调用方的事务里：建页与别的登记要么一起成、要么都不成时用（Genet 页） */
+export async function putDocState(client: PoolClient, docName: string, doc: Y.Doc): Promise<void> {
+  await client.query(PUT_SNAPSHOT, [docName, Buffer.from(Y.encodeStateAsUpdate(doc))])
+  await client.query(DELETE_UPDATES, [docName])
 }
 
 /** 在一个可落盘的文档会话里应用一次写入，唯一实现是下面的 createDocWriter。

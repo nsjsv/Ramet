@@ -122,6 +122,11 @@ export function textOf(node: Y.XmlFragment | Y.XmlElement | Y.XmlText, atoms?: A
       const name = node.getAttribute('name')
       if (name) own += `@${name}`
     }
+    // 文件引用 chip（editor/file-mention.ts）：`@路径`，各家 CLI 都认这种写法；画面上只有文件名，给 AI 的必须是完整路径
+    if (node.nodeName === 'file_mention') {
+      const path = node.getAttribute('path')
+      if (path) own += `@${path}`
+    }
     // 行内公式（web/src/editor/math.ts）：给读者 / AI 的是 LaTeX 原文，带 `$` 定界，与 markdown 写法一致
     if (node.nodeName === 'math_inline') {
       const latex = node.getAttribute('latex')

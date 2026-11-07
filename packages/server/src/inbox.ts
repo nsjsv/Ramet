@@ -17,6 +17,10 @@
 //   question          等你回答：agent 的提问（带 form 的审批）。数据源、可见性、回答判定都与 approval 同一套，
 //                     只是表单要在页面里答，条目只给入口
 //   comment           评论：有人回复了我参与的串 / @了我 / 在我建的页面上新开了串，一个串一条（规则与 SQL 在 comments/inbox.ts）
+//   timer_failed      我的定时器 / 规则没能触发（触发记录 failed，含连续失败自动暂停）：只给主人，7 天内、最多 30 条，可「知道了」消掉。
+//                     source = 规则的来源（timer = 定时器）。跳过的（上一次还排着、超了每日上限）不进收件箱，只在 AI 页的列表里显示最近一次结果
+//   automation        规则的「发通知」动作写给我的一条通知（triggers/inbox-items.ts）：7 天内、最多 30 条，可「知道了」消掉
+//   doc_mention       有人在正文里 @了我（triggers/inbox-items.ts）：每页一条，打开那一页即看过（inbox_seen，同 done）
 // 列举类读路径一律只含自己是成员的空间，全局 admin 也一样。
 import type { Pool } from 'pg'
 import { pageAccess } from './collab.js'
@@ -25,18 +29,16 @@ import { canUse, inConnectorSpace, type MachineScope } from './agents/machine-ac
 import { parseRemoteId, type ActiveRun, type PendingApproval } from './agents/manager-types.js'
 import type { ConnectorAgentInfo } from './agents/protocol.js'
 import type { PermissionOption } from './agents/types.js'
+import { agentNames, type AgentNameHost } from './agents/agent-names.js'
 import { commentItems, type CommentInboxItem } from './comments/inbox.js'
+import { AUTOMATION_PREFIX, automationItems, docMentionItems, SELECT_MY_NOTICE, type AutomationInboxItem, type DocMentionInboxItem } from './triggers/inbox-items.js'
 
 export type InboxUser = { id: string; role: string }
 
 /** 收件箱从运行时拿的东西（AgentManager / ConnectorHub 的只读快照），测试可以给桩 */
-export type InboxHost = {
+export type InboxHost = AgentNameHost & {
   approvals(): PendingApproval[]
   runs(): ActiveRun[]
-  /** 中心本机 agent（RAMET_LOCAL_AGENTS=1 才有） */
-  localAgents(): Array<{ id: string; label: string }>
-  /** connector 此刻上报的 agent 清单；离线时为 undefined，回落库里上一次上报的 */
-  onlineAgents(connectorId: string): ConnectorAgentInfo[] | undefined
 }
 
 export type InboxItem =
@@ -106,6 +108,22 @@ export type InboxItem =
   | { type: 'question'; key: string; at: null; pageId: string; pageTitle: string; agentId: string; agentName: string; requestId: string; text: string }
   /** 评论：有人回复了我参与的串 / @了我 / 在我建的页面上新开了串（规则见 comments/inbox.ts） */
   | CommentInboxItem
+  /** 定时器没能触发：scheduledAt = 本应触发的时刻；paused = 定时器就是因为这一次（连续失败到上限）自动暂停的 */
+  | {
+      type: 'timer_failed'
+      key: string
+      at: string
+      eventId: string
+      timerId: string
+      timerName: string
+      source: string
+      scheduledAt: string
+      reason: string
+      paused: boolean
+    }
+  | AutomationInboxItem
+  /** 正文里 @了你：pageId / blockId 定位到那一块；actor = 加 @ 的人 */
+  | DocMentionInboxItem
 
 const DONE_WINDOW_DAYS = 7
 const LIST_MAX = 30
@@ -165,7 +183,9 @@ async function approvalItems(pool: Pool, user: InboxUser, host: InboxHost): Prom
   if (all.length === 0) return []
   const runs = host.runs()
   // 页面 + agent 上有在飞的一轮：只给发起人。没有对得上的在飞回合（审批比一轮活得久、被叫 agent 的审批）才退回「能回答的人」
+  // 只给某个人的（规则替主人开跑之前那张卡：页面上别的编辑者也能写这一页，但批的是主人的事、只认主人答）先按它筛
   const mine = all.filter((a) => {
+    if (a.event.only) return a.event.only === user.id
     const run = runs.find((r) => r.pageId === a.pageId && r.agentId === a.agentId)
     return !run || run.userId === user.id
   })
@@ -307,13 +327,22 @@ async function firstUseItems(pool: Pool, user: InboxUser): Promise<InboxItem[]> 
 
 // 过程页（kind='run'）的 owner_id = 发起这一轮的人、parent_id = 对话页；每个对话页只取最新的一轮。
 // 页面必须仍对我可读：对话页是活的（live_pages），且我是它所在空间的成员（列举类：全局 admin 也不例外）
+// Genet 标了「不用处理」的那一轮不算（quiet_turns，见 routes/mark-handled.ts）：标记落在上一个过程页之后、这个过程页之前就是这一轮的；
+// 跳过它之后同一页更早的、还没看过的那一轮照常出现
 const SELECT_DONE = `SELECT p.id AS page_id, p.title, rp.id AS run_page_id, rp.done_at, r.record->>'agent' AS agent, r.record->>'outcome' AS outcome
   FROM (
-    SELECT DISTINCT ON (parent_id) id, parent_id, created_at::timestamptz AS done_at
-    FROM live_pages
-    WHERE kind = 'run' AND owner_id = $1 AND parent_id IS NOT NULL
-      AND created_at::timestamptz > now() - interval '${DONE_WINDOW_DAYS} days'
-    ORDER BY parent_id, created_at::timestamptz DESC, id
+    SELECT DISTINCT ON (parent_id) id, parent_id, done_at FROM (
+      SELECT id, parent_id, created_at::timestamptz AS done_at,
+        lag(created_at::timestamptz) OVER (PARTITION BY parent_id ORDER BY created_at::timestamptz, id) AS prev_at
+      FROM live_pages
+      WHERE kind = 'run' AND owner_id = $1 AND parent_id IS NOT NULL
+        AND created_at::timestamptz > now() - interval '${DONE_WINDOW_DAYS} days'
+    ) runs
+    WHERE NOT EXISTS (
+      SELECT 1 FROM quiet_turns q WHERE q.page_id = runs.parent_id AND q.at <= runs.done_at
+        AND q.at > COALESCE(runs.prev_at, runs.done_at - interval '1 day')
+    )
+    ORDER BY parent_id, done_at DESC, id
   ) rp
   JOIN live_pages p ON p.id = rp.parent_id
   JOIN space_members m ON m.space_id = p.space_id AND m.user_id = $1
@@ -387,40 +416,57 @@ async function planItems(pool: Pool, user: InboxUser): Promise<InboxItem[]> {
   }))
 }
 
-/** 本机 agent 用目录里的名字；connector 上的 agent = `<机器名> · <agent 名>`（与 /api/agents 的 label 同形）。查不到就回落 id */
-async function agentNames(pool: Pool, host: InboxHost, ids: Set<string>): Promise<Map<string, string>> {
-  const names = new Map<string, string>()
-  const remote = new Map<string, Array<{ id: string; agentId: string }>>()
-  for (const id of ids) {
-    const local = host.localAgents().find((a) => a.id === id)
-    if (local) {
-      names.set(id, local.label)
-      continue
-    }
-    const parsed = parseRemoteId(id)
-    if (!parsed) continue
-    const list = remote.get(parsed.connectorId) ?? []
-    list.push({ id, agentId: parsed.agentId })
-    remote.set(parsed.connectorId, list)
-  }
-  if (remote.size > 0) {
-    const { rows } = await pool.query<{ id: string; name: string; agents: ConnectorAgentInfo[] | null }>(
-      'SELECT id, name, agents FROM connectors WHERE id = ANY($1::text[])',
-      [[...remote.keys()]],
-    )
-    for (const row of rows) {
-      const agents = host.onlineAgents(row.id) ?? row.agents ?? []
-      for (const { id, agentId } of remote.get(row.id) ?? []) {
-        names.set(id, `${row.name} · ${agents.find((a) => a.id === agentId)?.label ?? agentId}`)
-      }
-    }
-  }
-  return names
+export const TIMER_FAILED_PREFIX = 'timer_failed:'
+// 定时器已删的，记录随之级联删掉，不会出现在这里。
+// paused 只给让它自动暂停的那一次（定时器此刻是自动暂停的，且这是它最近结局的一次失败）：按定时器此刻的状态给的话，
+// 同一个定时器之前的每条失败都会显示「已暂停」，读着像暂停了好几回
+const SELECT_TIMER_FAILED = `SELECT e.id, e.trigger_id, e.scheduled_at, e.reason, COALESCE(e.settled_at, e.created_at) AS at, t.name, t.source,
+    (NOT t.enabled AND t.paused_reason <> '' AND e.id = (
+      SELECT f.id FROM trigger_events f WHERE f.trigger_id = e.trigger_id AND f.status = 'failed'
+      ORDER BY f.settled_at DESC NULLS LAST, f.created_at DESC, f.id DESC LIMIT 1
+    )) AS paused
+  FROM trigger_events e JOIN agent_triggers t ON t.id = e.trigger_id
+  WHERE e.owner_id = $1 AND e.status = 'failed' AND e.created_at > now() - interval '${DONE_WINDOW_DAYS} days'
+    AND EXISTS (SELECT 1 FROM space_members m WHERE m.space_id = t.space_id AND m.user_id = $1)
+    AND NOT EXISTS (SELECT 1 FROM inbox_dismissed d WHERE d.user_id = $1 AND d.item_key = '${TIMER_FAILED_PREFIX}' || e.id)
+  ORDER BY e.created_at DESC, e.id LIMIT ${LIST_MAX}`
+
+async function timerFailedItems(pool: Pool, user: InboxUser): Promise<InboxItem[]> {
+  const { rows } = await pool.query<{
+    id: string
+    trigger_id: string
+    scheduled_at: Date
+    reason: string
+    at: Date
+    name: string
+    source: string
+    paused: boolean
+  }>(SELECT_TIMER_FAILED, [user.id])
+  return rows.map((r) => ({
+    type: 'timer_failed' as const,
+    key: `${TIMER_FAILED_PREFIX}${r.id}`,
+    at: iso(r.at),
+    eventId: r.id,
+    timerId: r.trigger_id,
+    timerName: r.name,
+    source: r.source,
+    scheduledAt: iso(r.scheduled_at),
+    reason: r.reason,
+    paused: r.paused,
+  }))
+}
+
+/** 显示名的原料来自 agents/agent-names.ts（服务端唯一的来源）；收件箱的写法：connector 上的 agent = `<机器名> · <agent 名>`
+ *  （与 /api/agents 的 label 同形），本机 agent 与 Genet 只有名字。查不到就回落 id */
+async function displayNames(pool: Pool, host: InboxHost, ids: Set<string>): Promise<Map<string, string>> {
+  const out = new Map<string, string>()
+  for (const [id, n] of await agentNames(pool, host, ids)) out.set(id, n.machine ? `${n.machine} · ${n.label}` : n.label)
+  return out
 }
 
 /** 当前用户的收件箱。顺序只是同类挨着，分组与排序是前端的事 */
 export async function collectInbox(pool: Pool, user: InboxUser, host: InboxHost): Promise<InboxItem[]> {
-  const [approvals, pending, requests, firstUse, plans, done, running, comments] = await Promise.all([
+  const [approvals, pending, requests, firstUse, plans, done, running, comments, timers, automations, mentions] = await Promise.all([
     approvalItems(pool, user, host),
     pendingConnectorItems(pool, user, host),
     accessRequestItems(pool, user),
@@ -429,11 +475,14 @@ export async function collectInbox(pool: Pool, user: InboxUser, host: InboxHost)
     doneItems(pool, user),
     runningItems(pool, user, host),
     commentItems(pool, user),
+    timerFailedItems(pool, user),
+    automationItems(pool, user),
+    docMentionItems(pool, user),
   ])
-  const items = [...approvals, ...pending, ...requests, ...firstUse, ...plans, ...done, ...running, ...comments]
+  const items = [...approvals, ...pending, ...requests, ...firstUse, ...plans, ...done, ...running, ...comments, ...timers, ...automations, ...mentions]
   const ids = new Set<string>()
   for (const item of items) if ('agentId' in item && item.agentId) ids.add(item.agentId)
-  const names = await agentNames(pool, host, ids)
+  const names = await displayNames(pool, host, ids)
   for (const item of items) if ('agentName' in item) item.agentName = names.get(item.agentId) ?? item.agentId
   return items
 }
@@ -452,15 +501,24 @@ export type DismissResult = 'ok' | 'invalid' | 'not-found'
 
 const SELECT_MY_GRANT = `SELECT 1 FROM machine_grants g JOIN connectors c ON c.id = g.connector_id AND c.owner_id = $1
   WHERE g.id = $2 AND g.first_used_at IS NOT NULL`
+const SELECT_MY_FAILED_TRIGGER = `SELECT 1 FROM trigger_events WHERE id = $2 AND owner_id = $1 AND status = 'failed'`
 const INSERT_DISMISSED = 'INSERT INTO inbox_dismissed (user_id, item_key) VALUES ($1, $2) ON CONFLICT DO NOTHING'
 
-/** 点「知道了」。key 只认收件箱里本来就会给我的那类（现在只有 first_use:<授权 id>），格式不对返回 invalid；
- *  授权不存在或不是我的机器上的返回 not-found（不写行，也不区分这两种，免得探别人的授权 id） */
+/** 可消除的类型 → 归属校验（$1 = 我，$2 = id） */
+const DISMISSABLE: Array<[string, string]> = [
+  [FIRST_USE_PREFIX, SELECT_MY_GRANT],
+  [TIMER_FAILED_PREFIX, SELECT_MY_FAILED_TRIGGER],
+  [AUTOMATION_PREFIX, SELECT_MY_NOTICE],
+]
+
+/** 点「知道了」。key 只认收件箱里本来就会给我的那类（first_use:<授权 id>、timer_failed:<触发记录 id>、automation:<通知 id>），
+ *  格式不对返回 invalid；授权 / 记录不存在或不是我的返回 not-found（不写行，也不区分这两种，免得探别人的 id） */
 export async function dismissItem(pool: Pool, user: InboxUser, key: string): Promise<DismissResult> {
-  if (!key.startsWith(FIRST_USE_PREFIX)) return 'invalid'
-  const grantId = key.slice(FIRST_USE_PREFIX.length)
-  if (!grantId || grantId.length > 100) return 'invalid'
-  if (!(await pool.query(SELECT_MY_GRANT, [user.id, grantId])).rowCount) return 'not-found'
+  const kind = DISMISSABLE.find(([p]) => key.startsWith(p))
+  if (!kind) return 'invalid'
+  const id = key.slice(kind[0].length)
+  if (!id || id.length > 100) return 'invalid'
+  if (!(await pool.query(kind[1], [user.id, id])).rowCount) return 'not-found'
   await pool.query(INSERT_DISMISSED, [user.id, key])
   return 'ok'
 }

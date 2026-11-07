@@ -13,10 +13,12 @@ import {
   idList,
   isComputedProp,
   joinDate,
+  parseCfg,
   parseCollection,
   PROP_TYPES,
   readValue,
   rowValue,
+  sortable,
   validateValue,
   weekdayOf,
   type CollectionProp,
@@ -229,12 +231,18 @@ describe('创建者 / 最后编辑者 / 自动编号', () => {
   const sorted = (prop: string, dir: 'asc' | 'desc', ctx: QueryCtx = {}): string[] =>
     [...rows].sort((x, y) => compareRows(x, y, [{ prop, dir }], schema, ctx)).map((r) => r.id)
 
-  test('系统生成的类型写不进、不在行文档里；isComputedProp 认它们、创建 / 编辑时间、汇总、公式与反向关联', () => {
+  test('系统生成的类型写不进、不在行文档里；isComputedProp 认它们、创建 / 编辑时间、汇总、公式、按钮与反向关联', () => {
     for (const type of ['created_by', 'edited_by', 'unique_id'] as const) {
       expect(validateValue(prop(type), ['u1'])).toEqual({ ok: false, error: '这个属性自动生成，不能改' })
       expect(readValue(prop(type), ['u1'])).toBeUndefined()
     }
-    expect(PROP_TYPES.filter((type) => isComputedProp(prop(type)))).toEqual(['created_time', 'edited_time', 'created_by', 'edited_by', 'unique_id', 'rollup', 'formula'])
+    expect(PROP_TYPES.filter((type) => isComputedProp(prop(type)))).toEqual(['created_time', 'edited_time', 'created_by', 'edited_by', 'unique_id', 'rollup', 'formula', 'button'])
+    // 按钮没有值：写不进、读不出、排不了；配置只留字与合法的规则 id
+    expect(validateValue(prop('button'), 'x')).toEqual({ ok: false, error: '按钮属性没有值' })
+    expect(readValue(prop('button'), 'x')).toBeUndefined()
+    expect(sortable(prop('button'))).toBe(false)
+    expect(parseCfg('button', { label: '标记完成', rule: 'not-an-id', extra: 1 })).toEqual({ label: '标记完成' })
+    expect(parseCfg('button', { rule: '0b6f5a52-1c1e-4a39-9a43-1f2d3c4b5a69' })).toEqual({ label: '', rule: '0b6f5a52-1c1e-4a39-9a43-1f2d3c4b5a69' })
     expect(isComputedProp({ ...prop('relation'), cfg: { target: 'x', mirror: 'p00002' } })).toBe(true)
   })
 

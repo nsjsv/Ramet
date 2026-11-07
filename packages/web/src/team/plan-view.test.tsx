@@ -6,6 +6,7 @@ import type { TeamPlanView, TeamState, TeamTask } from '@ramet/shared/run-model'
 vi.mock('../default-agent', () => ({
   useAgents: () => ({ agents: [], loaded: true }),
   agentList: () => [{ id: 'claude', label: 'Claude Code' }],
+  findAgent: (id: string) => (id === 'claude' ? { id: 'claude', label: 'Claude Code' } : undefined),
   getDefaultAgent: () => '',
   subscribeAgentList: () => () => {},
   subscribeDefaultAgent: () => () => {},

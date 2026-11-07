@@ -488,7 +488,7 @@ test('写文件使用记录：非主人先留痕（action write，只记路径�
   expect(JSON.stringify(rows)).not.toContain('TOP-SECRET-CONTENT')
 })
 
-test('quick_writes：写成功记一行；git-status 的 by：随手 AI 比 agent 那一轮更近标 quick、更早则仍是 agent；别的工作区 / 没写过的文件不受影响', async () => {
+test('quick_writes：写成功记一行；git-status 的 by：⌘J 比 agent 那一轮更近标 quick、更早则仍是 agent；别的工作区 / 没写过的文件不受影响', async () => {
   const w = await world(WRITE_CAPS)
   const status = async (): Promise<Record<string, string | undefined>> => {
     const body = (await (await get(w, 'mowner', '/git-status')).json()) as { files: Array<{ path: string; by?: string }> }
@@ -514,10 +514,10 @@ test('quick_writes：写成功记一行；git-status 的 by：随手 AI 比 agen
   ])
   await pool.query("UPDATE quick_writes SET at = now() - interval '1 hour'")
   expect(await status()).toEqual({ 'a.txt': w.agent, 'b.txt': undefined })
-  // 随手 AI 又写了一次（比 agent 更近），回到 quick
+  // ⌘J 又写了一次（比 agent 更近），回到 quick
   await pool.query("UPDATE quick_writes SET at = now() + interval '1 hour'")
   expect(await status()).toEqual({ 'a.txt': 'quick', 'b.txt': undefined })
-  // 页面上换了工作区，同一个相对路径是另一个文件，不算随手 AI 写的
+  // 页面上换了工作区，同一个相对路径是另一个文件，不算 ⌘J 写的
   await grantMachine(w.m.id, w.id.plain, { scopes: ['agent'] })
   expect((await postJson(`/api/pages/${w.pageId}/agent-cwd`, w.cookie.mowner, { agent: w.agent, cwd: '/srv/other' })).status).toBe(200)
   expect((await status())['a.txt']).toBeUndefined()

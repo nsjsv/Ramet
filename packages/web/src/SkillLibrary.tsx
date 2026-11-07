@@ -1,4 +1,4 @@
-/* ---------- Skill 库（/skills）----------
+/* ---------- Skill 库（AI 页的 Skill 分页，/ai/skills）----------
  * 当前空间里的 skill 列表 + 新建 + 导入（zip / 文件夹 / GitHub）。skill 本身就是页面：点一行进 /page/:id，
  * 正文在编辑器里写，名称 / 描述 / 附件在页面顶部的 SkillHead（editor/skill-head.tsx）。
  * 权限同页面：只读成员能看列表，新建 / 导入 / 删除按钮不出现。 */
@@ -108,8 +108,9 @@ export default function SkillLibrary({ space, pages, onChanged }: { space: Space
 
   return (
     <div className="skill-page" data-flip>
+      {/* 标题是 AI 页的分页栏，这里只有说明和操作 */}
       <div className="skill-title-row">
-        <h1 className="skill-title">{C.title}</h1>
+        <p className="skill-sub">{space ? C.sub(space.name) : COPY.loading}</p>
         {canWrite && (
           <div className="skill-actions">
             <button className={'skill-btn' + (panel === 'create' ? ' is-on' : '')} onClick={() => setPanel(panel === 'create' ? null : 'create')}>
@@ -121,7 +122,6 @@ export default function SkillLibrary({ space, pages, onChanged }: { space: Space
           </div>
         )}
       </div>
-      <p className="skill-sub">{space ? C.sub(space.name) : COPY.loading}</p>
       {!canWrite && space && <p className="skill-sub">{C.noPermission}</p>}
 
       {error && (

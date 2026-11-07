@@ -45,13 +45,13 @@
 //                  agent 看到的「视图」只有目标回复之前的内容；会话 id 证明重做新建了会话）
 //   含「随手审批」 → 要一次审批（allow_once / reject_once），回显 `perm:<optionId|cancelled>`
 //   含「报图片」   → 回显这一轮 prompt 里的图片块 `images:<块数>:<mimeType,…>`
-//   含「随手工具」 → 发一个工具调用（不经审批），睡 3 秒（认取消）再回显 'tool-ran'（测随手 AI 见到工具调用就中止）
+//   含「随手工具」 → 发一个工具调用（不经审批），睡 3 秒（认取消）再回显 'tool-ran'（测 ⌘J 见到工具调用就中止）
 //   提问（表单；协议层不支持表单时一律回显 `ask:unsupported`、不发）：
 //   含「表单提问:<形状>」 → 按各家 agent 的形状发一张表单（形状见 ASK_SHAPES：claude / codex / opencode / omp / omp-select /
 //                  omp-confirm / weird），带 toolCallId 的先发对应的工具调用；回显 `ask:<action>:<content JSON>`
 //   含「表单撤回」 → 发一张表单，300ms 后撤回它，回显 `ask-withdrawn:<宿主的应答 action>`
 //   含「表单超时」 → 发一张表单不等应答就收尾（omp 超时后不通知客户端）；「报表单超时」回显那张表单迟到的应答 `ask-late:<action|pending>`
-//   含「随手慢」   → 约 20 秒慢速输出（认取消；测随手 AI 的超时）
+//   含「随手慢」   → 约 20 秒慢速输出（认取消；测 ⌘J 的超时）
 //   含「报会话」   → 回 `session:<会话 id> resumed:<恢复自哪个会话|no> prior:<此前已有的轮数>`（测原生驱动的 resume 只发新消息）
 //   含「审批模式」 → 回 `perm-mode:<当前 mode> model:<当前模型>`（测切模式 / 切模型下一轮生效）
 //   协议层声明了 caps.subagents / caps.questions 才认的（pi 没有子代理和多题提问）：

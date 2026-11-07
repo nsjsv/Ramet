@@ -1,7 +1,8 @@
 /* ---------- 评论输入框 ----------
  * 就是对话输入框（editor/composer-input.tsx：段落 + 提及 chip，对外是记号文字），这里只接两件事：
- *   - `@` 只出「成员」（本空间成员，去掉自己）：查询解析、一次性触发会话、键位、菜单都用对话输入框那一套
- *     （mention-query / trigger-session / mention-nav / mention-menu），候选源只给成员，分类固定在 person；
+ *   - `@` 只出「成员」（本空间成员，去掉自己）与 Genet（固定在最前，查询词对得上才出）：查询解析、一次性触发会话、键位、菜单都用
+ *     对话输入框那一套（mention-query / trigger-session / mention-nav / mention-menu），候选源只给成员，分类固定在 person；
+ *     选中 Genet 落成 GENET_MARK（框里是 agent chip），发出去就叫自己的 Genet 处理这个串（服务端 comments/genet-call.ts）；
  *   - Enter 发送、Shift+Enter 换行、Esc 取消。 */
 
 import { useEffect, useRef, useState } from 'react'
@@ -13,7 +14,8 @@ import { mentionKey, type MentionKeyAction } from '../editor/mention-nav'
 import { advance, type Session } from '../editor/trigger-session'
 import { COPY } from '../copy'
 import { loadSpaceMembers, selfId, spaceMembers } from '../people'
-import { COMMENT_MAX } from './comments-api'
+import { ASSISTANT_AGENT } from '../assistant/identity'
+import { COMMENT_MAX, GENET_MARK } from './comments-api'
 
 const C = COPY.comments
 
@@ -29,10 +31,12 @@ interface Props {
   onSubmit: (text: string) => Promise<void>
   /** 给了就有「取消」按钮，Esc 也走它 */
   onCancel?: () => void
+  /** 没有取消按钮时 Esc 走它（回复框：收起浮层 / 卡片）。PM 自己会把 Esc 标成已处理，外层的 Esc 监听收不到，只能从这里接 */
+  onEscape?: () => void
   submitLabel?: string
 }
 
-export default function CommentComposer({ getSchema, tick, spaceId, placeholder, initial = '', autoFocus, onSubmit, onCancel, submitLabel }: Props) {
+export default function CommentComposer({ getSchema, tick, spaceId, placeholder, initial = '', autoFocus, onSubmit, onCancel, onEscape, submitLabel }: Props) {
   const ref = useRef<ComposerInputHandle>(null)
   const [empty, setEmpty] = useState(!initial.trim())
   const [busy, setBusy] = useState(false)
@@ -58,7 +62,11 @@ export default function CommentComposer({ getSchema, tick, spaceId, placeholder,
     people: spaceId ? (spaceMembers(spaceId) ?? []).filter((p) => p.id !== me) : [],
     recent: [],
   }
-  const matches: Candidate[] = mention ? candidatesFor(mention, sources, 'person') : []
+  const genet: Candidate[] =
+    mention && ASSISTANT_AGENT.label.toLowerCase().includes(mention.query.trim().toLowerCase())
+      ? [{ kind: 'agent', id: ASSISTANT_AGENT.id, label: ASSISTANT_AGENT.label }]
+      : []
+  const matches: Candidate[] = mention ? [...genet, ...candidatesFor(mention, sources, 'person')] : []
 
   const closeMention = (): void => {
     session.current = null
@@ -81,8 +89,8 @@ export default function CommentComposer({ getSchema, tick, spaceId, placeholder,
     const q = mention
     const composer = ref.current
     closeMention()
-    if (!q || !composer || cand.kind !== 'person') return
-    composer.replace(q.base + q.start, q.base + q.end, `@[${cand.person.username}](user:${cand.person.id}) `)
+    if (!q || !composer || (cand.kind !== 'person' && cand.kind !== 'agent')) return
+    composer.replace(q.base + q.start, q.base + q.end, cand.kind === 'agent' ? `${GENET_MARK} ` : `@[${cand.person.username}](user:${cand.person.id}) `)
     composer.focus()
   }
 
@@ -134,8 +142,9 @@ export default function CommentComposer({ getSchema, tick, spaceId, placeholder,
               act(action)
               return true
             }
-            if (e.key === 'Escape' && onCancel) {
-              onCancel()
+            const escape = onCancel ?? onEscape
+            if (e.key === 'Escape' && escape) {
+              escape()
               return true
             }
             if (e.key !== 'Enter' || e.shiftKey) return false

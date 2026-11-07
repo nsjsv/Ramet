@@ -1,5 +1,5 @@
 /* ---------- 项目面板的 REST 客户端（server routes/project.ts）----------
- * 项目面板浏览 agent 所在机器上的工作区（文件树 / 文件内容 / git 改动），只读；唯一的写是 write（随手 AI 收下代码改写）。
+ * 项目面板浏览 agent 所在机器上的工作区（文件树 / 文件内容 / git 改动），只读；唯一的写是 write（⌘J 收下代码改写）。
  * 中心只转发，每个请求都可能因为机器不在线（409）/ connector 太旧（409）/ 没有授权（403）/ 路径被 connector 拒绝（400）失败：
  * request() 抛 ApiError，message 已是服务端的人话，直接展示即可；status 用来区分机器的问题与这个路径的问题。 */
 
@@ -68,7 +68,7 @@ export interface ChangedFile {
   staged: boolean
   /** 重命名 / 复制的来源 */
   from?: string
-  /** 本页哪个 agent（catalog id）改过它；'quick' = 随手 AI 在代码查看器里写的；没有 = 用户自己改的 */
+  /** 本页哪个 agent（catalog id）改过它；'quick' = ⌘J 在代码查看器里写的；没有 = 用户自己改的 */
   by?: string
 }
 
@@ -103,7 +103,7 @@ export const projectApi = {
   status: (pageId: string, agent: string) => request<StatusResult>(base(pageId, agent, '/git-status')),
   diff: (pageId: string, agent: string, path: string) =>
     request<DiffResult>(base(pageId, agent, '/git-diff') + withPath(path)),
-  /** 写回一个已存在的文本文件（随手 AI 收下改写时用）。需要页面可写 + 对这台机器有 machine 授权；
+  /** 写回一个已存在的文本文件（⌘J 收下改写时用）。需要页面可写 + 对这台机器有 machine 授权；
    *  409 且 code 'conflict' = 读到之后文件被改过（baseHash 不符），要重新打开 */
   write: (pageId: string, agent: string, path: string, baseHash: string, content: string) =>
     request<WriteResult>(base(pageId, agent, '/write'), { method: 'POST', body: JSON.stringify({ path, baseHash, content }) }),

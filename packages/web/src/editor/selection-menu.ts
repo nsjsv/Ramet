@@ -231,7 +231,7 @@ function buildSelectionMenu(
       },
     ],
     [
-      // 随手 AI：按钮本身就是「选中文字时旁边的 ✨ ⌘J 提示」；点它 = 按 ⌘J
+      // ⌘J：按钮本身就是「选中文字时旁边的 ✨ ⌘J 提示」；点它 = 按 ⌘J
       {
         title: COPY.quick.menuTitle,
         cls: 'sel-ai',

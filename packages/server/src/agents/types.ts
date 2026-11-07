@@ -80,7 +80,8 @@ export type AgentEvent =
   /** form 表示这是一条提问：options 固定是提交（accept）/ 跳过（decline），答案随应答带 content */
   /** view 是这次要批的工具调用的中性视图（审批卡的命令 / diff 预览优先读它，没有再从 toolCall 推） */
   /** defaultToNo：agent 要求这条审批不能一键批准（拒绝排在选项最前，主按钮落在拒绝上） */
-  | { type: 'permission'; requestId: string; title: string; options: PermissionOption[]; toolCall?: Record<string, unknown>; view?: ToolView; form?: AskForm; defaultToNo?: boolean; sessionId?: string; agentId?: string }
+  /** only：只给这个人看、只认这个人答（Ramet 自己的审批：规则替主人开跑、外来事件之后 Genet 动手，批的是主人自己的事）；没有 = 页面上能答的人都看得到 */
+  | { type: 'permission'; requestId: string; title: string; options: PermissionOption[]; toolCall?: Record<string, unknown>; view?: ToolView; form?: AskForm; defaultToNo?: boolean; sessionId?: string; agentId?: string; only?: string }
   /** 一条审批结束（有人答 / 停止该会话 / 会话被换掉 / 进程退出 / connector 终态断开）。移除审批的唯一信号 */
   | { type: 'permission_resolved'; requestId: string; sessionId?: string; agentId?: string }
   | { type: 'commands'; list: AgentCommand[]; sessionId?: string; agentId?: string }

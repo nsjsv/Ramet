@@ -28,6 +28,8 @@ interface FindStore {
 }
 
 const listeners = new Set<() => void>()
+/** 装了查找插件的视图。只有页面编辑器装（editor-session 的页面档）：别处给对话视图当底座的隐藏编辑器也登记进来的话，
+ *  跳转 / 替换取的第一个视图可能是它 */
 const views = new Set<EditorView>()
 
 export const findStore: FindStore = {

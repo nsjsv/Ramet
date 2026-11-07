@@ -2,7 +2,7 @@
  * 按界面分组，带参数的串是函数。
  * 已迁入：外壳（侧栏、页面树 / 目录树、空间切换）、页面顶栏与分享、编辑方式、公开页，其余界面的串逐步迁入。
  * 收件箱的串在 inbox/inbox-copy.ts（并进 COPY.inbox；单独成文件是为了本文件不超过 800 行），
- * 公共记忆在 memory/memory-copy.ts，带队在 team/team-copy.ts，工具档位在 editor/tools-copy.ts，集合在 collection/collection-copy.ts，评论在 comments/comments-copy.ts，组件库的确认框 / Toast 在 ui/ui-copy.ts（同理）。 */
+ * 公共记忆在 memory/memory-copy.ts，带队在 team/team-copy.ts，工具档位在 editor/tools-copy.ts，集合在 collection/collection-copy.ts，评论在 comments/comments-copy.ts，Genet 浮窗在 assistant/assistant-copy.ts，AI 页在 ai/ai-copy.ts，组件库的确认框 / Toast 在 ui/ui-copy.ts（同理）。 */
 import { CONNECT_COPY, CONNECTORS_COPY } from './connector-copy'
 import { INBOX_COPY } from './inbox/inbox-copy'
 import { MEMORY_COPY } from './memory/memory-copy'
@@ -11,6 +11,9 @@ import { TOOLS_COPY } from './editor/tools-copy'
 import { COLLECTION_COPY } from './collection/collection-copy'
 import { COMMENTS_COPY } from './comments/comments-copy'
 import { DIALOG_COPY } from './ui/ui-copy'
+import { ASSISTANT_COPY } from './assistant/assistant-copy'
+import { AI_COPY } from './ai/ai-copy'
+import { QUICK_SETTINGS_COPY } from './quick-settings-copy'
 
 export const COPY = {
   inbox: INBOX_COPY,
@@ -20,6 +23,8 @@ export const COPY = {
   collection: COLLECTION_COPY,
   comments: COMMENTS_COPY,
   dialog: DIALOG_COPY,
+  assistant: ASSISTANT_COPY,
+  ai: AI_COPY,
   untitled: '无标题',
   /** 浏览器标签页标题里空标题页的叫法 */
   blankPage: '新页面',
@@ -103,7 +108,6 @@ export const COPY = {
     noSpace: '（无空间）',
     trash: '回收站',
     addSpace: '添加空间',
-    skills: 'Skill 库',
   },
   tree: {
     pageTree: '页面树',
@@ -276,6 +280,7 @@ export const COPY = {
       callout: '带图标的提示框',
       toggle: '可以收起的内容',
       toc: '按标题生成的目录',
+      button: '点一下就跑一串动作',
       columns2: '左右两栏',
       columns3: '三栏',
       embed: '嵌入视频、网页、Figma……',
@@ -336,10 +341,9 @@ export const COPY = {
   },
   /** Skill 库（空间里的做事方法：SKILL.md + 脚本 / 参考资料） */
   skills: {
-    title: 'Skill 库',
-    sub: (space: string) => `「${space}」空间里的 skill。agent 按描述自动选用；在文档里输入 / 也可以点名某个 skill。`,
+    sub: (space: string) => `「${space}」的 skill，agent 按描述自动选用`,
     empty: '这个空间还没有 skill',
-    emptyHint: '新建一个，或从 zip、文件夹、GitHub 导入已有的（Agent Skills 通用格式）。',
+    emptyHint: '新建一个，或从 zip、文件夹、GitHub 导入',
     create: '新建',
     import: '导入',
     open: '打开',
@@ -528,7 +532,7 @@ export const COPY = {
       termClose: '关闭了终端',
       previewShare: '共享了一个端口预览',
       previewStop: '停止了端口预览',
-      quick: '用这台机器上的 agent 做了一次随手改写',
+      quick: '用这台机器上的 agent 做了一次 ⌘J 改写',
       unknown: (action: string) => `做了「${action}」`,
     },
     /** 授权流程 */
@@ -588,11 +592,11 @@ export const COPY = {
   },
   connectors: CONNECTORS_COPY,
   connect: CONNECT_COPY,
-  /** 随手 AI（⌘J）：单次调用，不开会话、不进对话；模型连接是用户自己的（key 自己填，站点不提供） */
+  /** ⌘J：单次调用，不开会话、不进对话；模型连接是用户自己的（key 自己填，站点不提供） */
   quick: {
     /** 选区菜单里的入口按钮 */
-    menuTitle: '随手 AI（⌘J）：改写选中的文字',
-    popTitle: '随手 AI',
+    menuTitle: 'Genet（⌘J）：改写选中的文字',
+    popTitle: 'Genet',
     /** 输入框占位：有选区 / 没有选区 */
     placeholderRewrite: '想怎么改？回车执行，或点下面的预设',
     placeholderDraft: '想写什么？回车执行',
@@ -618,15 +622,15 @@ export const COPY = {
     openSettings: '去设置',
     stale: '原文在生成期间被改动了，没法直接替换。按 Esc 关掉，重新选中再来。',
     cannotPlace: '结果放不进这个位置（这里不接受这种内容）。按 Esc 关掉，换个位置再试。',
-    noConnection: '还没有配置模型连接。随手 AI 用的是你自己的 API key，站点不提供。',
-    noLocalAgent: '随手 AI 现在选的是「本地」通道，但还没选用哪台机器上的 agent。请到设置 → 随手 AI 里选一个。',
+    noConnection: '还没有添加模型供应商。Genet 用的是你自己的 API key，站点不提供。',
+    noLocalAgent: '⌘J 现在选的是「本地」通道，但还没选用哪台机器上的 agent。请到设置 → Genet 里选一个。',
     secretMissing: '服务器还没有配置 RAMET_SECRET_KEY，暂时不能保存 API key。',
     errNetwork: '连不上服务器，请检查网络。',
     errInterrupted: '连接中断了，没有收到完整结果。',
     errLogin: '登录已过期，请刷新页面重新登录。',
     /** 项目面板的代码查看器里的 ⌘J：选中几行 → 就地 diff → ↵ 收下就写回机器上的文件 */
     code: {
-      menuTitle: '随手 AI（⌘J）：改写选中的代码',
+      menuTitle: 'Genet（⌘J）：改写选中的代码',
       selectFirst: '先选中几行代码，再按 ⌘J',
       placeholder: '想怎么改这几行？回车执行，或点下面的预设',
       presets: { concise: '改简洁', comment: '加注释', fix: '修问题' },
@@ -648,7 +652,7 @@ export const COPY = {
     },
     /** 终端里的 ⌘J：说人话 → 一条建议的命令；永远不自动执行 */
     term: {
-      menuTitle: '随手 AI（⌘J）：说人话，出命令',
+      menuTitle: 'Genet（⌘J）：说人话，出命令',
       title: '说人话',
       placeholder: '用人话说你想做什么，回车出命令',
       running: '正在想命令…',
@@ -664,61 +668,8 @@ export const COPY = {
       where: (shell: string, cwd: string) => `${shell ? `${shell} · ` : ''}${cwd}`,
     },
   },
-  /** 设置 → 随手 AI */
-  quickSettings: {
-    tab: '随手 AI',
-    desc: '选中文字按 ⌘J，让模型就地改写或续写；用的是你自己的模型 key',
-    channelTitle: '通道',
-    channelLabel: '用哪里的模型',
-    channelDesc: '「本站」经本站转发到你配置的模型服务；「本地」让你自己机器（或别人授权给你的机器）上的 agent 做一次改写，不需要填 key。',
-    channelSite: '本站',
-    channelLocal: '本地',
-    localAgentLabel: '用哪个 agent',
-    localAgentDesc: '只列出你自己接入的、或别人授权给你使用的机器上的 agent，且机器要在线。随手 AI 在一个受限会话里运行：不能读写文件、不能运行命令、不会批准任何操作。',
-    localAgentNone: '请选择…',
-    localAgentGone: (name: string) => `${name}（现在用不了：机器不在线或授权已失效）`,
-    localAgentEmpty: '现在没有可选的 agent：先接入一台机器，或请机器主人授权给你。',
-    connectionsTitle: '模型连接',
-    connectionsDesc: '可以存多套，选一套当作随手 AI 用的。key 加密保存，只有你自己能用，页面上只显示后四位；本站不提供共用的 key，费用由你自己的账号承担。',
-    secretMissing: '服务器还没有配置 RAMET_SECRET_KEY（用来加密 API key 的主密钥），现在不能新增或更换 key。请让管理员在服务器环境里设置后重启。',
-    empty: '还没有模型连接。添加一套后，选中文字按 ⌘J 就能用。',
-    current: '当前',
-    useThis: '设为当前',
-    edit: '编辑',
-    del: '删除',
-    add: '添加连接',
-    formNew: '添加模型连接',
-    formEdit: '编辑模型连接',
-    protocol: '协议',
-    protoAnthropic: 'Anthropic',
-    protoOpenai: 'OpenAI 兼容',
-    protoOpenaiHint: 'DeepSeek、通义、Kimi、OpenRouter、Gemini 的兼容接口等，按 /chat/completions 接口调用。',
-    protoAnthropicHint: '不填地址就用官方地址；填了就是兼容 Anthropic 接口的第三方，此时模型名自由填写。',
-    name: '名称',
-    namePlaceholder: '例如：我的 Claude / DeepSeek',
-    baseUrl: '地址',
-    baseUrlOptional: '地址（选填）',
-    baseUrlAnthropic: '留空 = 官方地址',
-    baseUrlOpenai: '例如 https://api.deepseek.com/v1',
-    baseUrlRule: '只允许 https，不能是本机或内网地址。',
-    model: '模型',
-    modelPlaceholder: '模型名，例如 deepseek-chat',
-    apiKey: 'API key',
-    apiKeyKeep: (last4: string) => `已保存 ••••${last4}，不改就留空`,
-    apiKeyPlaceholder: 'sk-…',
-    test: '测试连接',
-    testing: '测试中…',
-    testOk: (reply: string) => (reply ? `连通了，模型回复：${reply}` : '连通了'),
-    save: '保存',
-    saving: '保存中…',
-    cancel: '取消',
-    required: (field: string) => `请填写「${field}」`,
-    saved: '已保存',
-    loadFailed: '设置加载失败',
-    delConfirm: '确认删除',
-    models: { 'claude-opus-5-5': 'Opus 5.5（质量最好）', 'claude-sonnet-5-5': 'Sonnet 5.5（均衡）', 'claude-haiku-5-5': 'Haiku 5.5（最快、最省）' } as Record<string, string>,
-    modelHint: '速度与费用都算在你自己的 key 上。',
-  },
+  /** 设置 → Genet */
+  quickSettings: QUICK_SETTINGS_COPY,
   /** 项目面板（右侧）：agent 所在机器上的工作区。只读——文件树、文件内容、git 改动；不做任何 git 操作 */
   project: {
     toggle: '项目面板',
@@ -836,8 +787,8 @@ export const COPY = {
       count: (n: number) => `${n} 个文件有改动`,
       truncated: '改动很多，只列出前一部分。',
       you: '你',
-      /** 随手 AI 在代码查看器里写进去的 */
-      youQuick: '你（随手 AI）',
+      /** ⌘J 在代码查看器里写进去的 */
+      youQuick: '你（⌘J）',
       back: '返回改动列表',
       openFile: '打开文件',
       noDiff: '没有可显示的差异。',

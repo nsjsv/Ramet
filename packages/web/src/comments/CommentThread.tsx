@@ -1,9 +1,12 @@
 /* ---------- 一个讨论串 ----------
- * 浮层、抽屉、整页讨论区共用：评论列表（头像 + 名字 + 相对时间 + 已编辑）+ 回复框 + 解决 / 重新打开；
+ * 浮层、右侧卡片、抽屉、整页讨论区共用：评论列表（头像 + 名字 + 相对时间 + 已编辑）+ 回复框 + 解决 / 重新打开；
  * 自己的评论可编辑 / 删除，空间 owner 可删任何人的。readOnly（公开页）只画列表。
- * 首条被删且还有回复时显示「评论已删除」占位（服务端留的 deleted 行）；作者 null = 已注销用户。 */
+ * 首条被删且还有回复时显示「评论已删除」占位（服务端留的 deleted 行）；作者 null = 已注销用户。
+ * Genet 以作者名义代发的回复标「Genet 代发」（公开页也标：服务端公开接口同样带 via）。
+ * @了 Genet 的评论下面一行处理状态（call）：等着时「Genet 正在处理…」，没回成的原因 + 去 AI 页看对话（只有叫的人收得到）。 */
 
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import type { Schema } from '@milkdown/kit/prose/model'
 import { Avatar } from '../Avatar'
 import { COPY } from '../copy'
@@ -11,8 +14,8 @@ import { personOf, selfId, subscribePeople, type Person } from '../people'
 import { relativeTime } from '../UpdatesFeed'
 import CommentBody from './CommentBody'
 import CommentComposer from './CommentComposer'
-import type { Comment, CommentAuthor, Thread } from './comments-api'
-import { editComment, removeComment, replyTo, setResolved } from './comments-store'
+import type { Anchor, Comment, CommentAuthor, GenetCall, Thread } from './comments-api'
+import { closePopover, createThread, editComment, openThread, removeComment, replyTo, setResolved } from './comments-store'
 import { confirmDialog } from '../ui/dialog'
 
 const C = COPY.comments
@@ -29,10 +32,22 @@ export type CommentCtx = {
 }
 
 /** 作者的头像人物：同空间成员给真头像，否则（公开页 / 已离开空间）只用名字画首字 */
-function personFor(author: CommentAuthor, spaceId: string | null): Person | null {
+export function personFor(author: CommentAuthor, spaceId: string | null): Person | null {
   if (!author) return null
   const known = author.id && spaceId ? personOf(spaceId, author.id) : null
   return known ?? { id: author.id ?? '', username: author.name, avatar: null }
+}
+
+function CallLine({ call }: { call: GenetCall }) {
+  if (call.state === 'waiting') return <div className="cm-call is-waiting">{C.callWaiting}</div>
+  return (
+    <div className="cm-call">
+      <span>{call.state === 'done' ? C.callDone : C.callFailed(call.reason)}</span>
+      <Link className="cm-link" to="/ai">
+        {C.callOpen}
+      </Link>
+    </div>
+  )
 }
 
 function CommentItem({ comment, ctx }: { comment: Comment; ctx: CommentCtx }) {
@@ -62,6 +77,11 @@ function CommentItem({ comment, ctx }: { comment: Comment; ctx: CommentCtx }) {
           {relativeTime(comment.createdAt)}
         </span>
         {comment.editedAt && <span className="cm-time">{C.edited}</span>}
+        {comment.via === 'genet' && (
+          <span className="cm-via" data-tip={C.viaGenetTip}>
+            {C.viaGenet}
+          </span>
+        )}
         {(canEdit || canDelete) && !editing && (
           <span className="cm-item-acts">
             {canEdit && (
@@ -95,12 +115,13 @@ function CommentItem({ comment, ctx }: { comment: Comment; ctx: CommentCtx }) {
       ) : (
         <CommentBody body={comment.body} />
       )}
+      {!editing && comment.call && <CallLine call={comment.call} />}
       {error && <div className="cm-error">{error}</div>}
     </div>
   )
 }
 
-export default function CommentThread({ thread, ctx, autoFocus }: { thread: Thread; ctx: CommentCtx; autoFocus?: boolean }) {
+export default function CommentThread({ thread, ctx, autoFocus, onEscape }: { thread: Thread; ctx: CommentCtx; autoFocus?: boolean; onEscape?: () => void }) {
   // 成员名单晚到：到了重画一次（头像从首字换成真图）
   const [, setPeopleTick] = useState(0)
   useEffect(() => subscribePeople(() => setPeopleTick((t) => t + 1)), [])
@@ -135,6 +156,7 @@ export default function CommentThread({ thread, ctx, autoFocus }: { thread: Thre
               placeholder={C.replyPlaceholder}
               autoFocus={autoFocus}
               submitLabel={C.reply}
+              onEscape={onEscape}
               onSubmit={(text) => replyTo(thread.id, text)}
             />
           )}
@@ -144,5 +166,23 @@ export default function CommentThread({ thread, ctx, autoFocus }: { thread: Thre
         </div>
       )}
     </div>
+  )
+}
+
+/** 给刚选中的字写第一条评论（浮层与右侧草稿卡片共用）：发出后激活新串，取消 / Esc 收起 */
+export function DraftComposer({ anchor, ctx }: { anchor: Anchor; ctx: CommentCtx }) {
+  return (
+    <CommentComposer
+      getSchema={ctx.getSchema}
+      tick={ctx.tick}
+      spaceId={ctx.spaceId}
+      placeholder={C.placeholder}
+      autoFocus
+      onCancel={closePopover}
+      onSubmit={async (text) => {
+        const created = await createThread('inline', text, anchor)
+        openThread(created.id)
+      }}
+    />
   )
 }

@@ -1,4 +1,4 @@
-// ---------- 随手 AI 本地通道（connector 侧）：在这台机器上用 agent 做一次受限的文本改写 ----------
+// ---------- ⌘J 本地通道（connector 侧）：在这台机器上用 agent 做一次受限的文本改写 ----------
 // 中心发来 quick 帧（agent 范围的驱动帧：已过 connector 的第二道闸 checkActor）。这里起一个受限会话：
 //   - 临时空目录当 cwd，不给 MCP 工具（agent 摸不到页面，也摸不到工作区）；
 //   - 不给工具、固定在不提权的模式、审批 / 提问一律拒绝且不发事件，都由驱动的 newRestrictedSession 保证
@@ -76,12 +76,12 @@ export class QuickRunner {
   private async run(msg: QuickFrame): Promise<void> {
     const { send, log } = this.deps
     const fail = (message: string): void => send({ t: 'err', rid: msg.rid, message })
-    if (typeof msg.prompt !== 'string' || !msg.prompt.trim() || msg.prompt.length > QUICK_PROMPT_MAX) return fail('随手 AI 的请求内容不合法')
+    if (typeof msg.prompt !== 'string' || !msg.prompt.trim() || msg.prompt.length > QUICK_PROMPT_MAX) return fail('⌘J 的请求内容不合法')
     if (typeof msg.agent !== 'string' || !msg.agent) return fail('缺少 agent')
     if (this.runs.has(msg.rid) || [...this.runs.values()].some((r) => r.actor === msg.actor)) {
-      return fail('你已经有一次随手 AI 在这台机器上运行，等它结束再试')
+      return fail('你已经有一次 ⌘J 在这台机器上运行，等它结束再试')
     }
-    if (this.runs.size >= QUICK_MAX_TOTAL) return fail('这台机器上的随手 AI 太忙了，稍后再试')
+    if (this.runs.size >= QUICK_MAX_TOTAL) return fail('这台机器上的 ⌘J 太忙了，稍后再试')
 
     let reason: string | null = null
     let sessionId: string | null = null
@@ -99,7 +99,7 @@ export class QuickRunner {
       graceTimer = setTimeout(wakeGrace, CANCEL_GRACE_MS)
     }
     this.runs.set(msg.rid, { actor: msg.actor, abort })
-    const timer = setTimeout(() => abort('随手 AI 超时（60 秒），已中止'), this.deps.timeoutMs ?? QUICK_TIMEOUT_MS)
+    const timer = setTimeout(() => abort('⌘J 超时（60 秒），已中止'), this.deps.timeoutMs ?? QUICK_TIMEOUT_MS)
 
     const dir = await mkdtemp(join(this.deps.tmpRoot ?? tmpdir(), 'ramet-quick-')).catch(() => null)
     let off = (): void => undefined
@@ -120,11 +120,11 @@ export class QuickRunner {
         if (!('sessionId' in ev) || ev.sessionId !== sid) return
         if (ev.type === 'text' && !ev.parentId && ev.delta) {
           total += ev.delta.length
-          if (total > QUICK_OUTPUT_MAX) abort('随手 AI 输出太长，已中止')
+          if (total > QUICK_OUTPUT_MAX) abort('⌘J 输出太长，已中止')
           else if (reason === null) send({ t: 'quick-delta', rid: msg.rid, text: ev.delta })
         } else if (ev.type === 'tool') {
           // 改写用不着工具：agent 要调就中止（受限会话本来就不给工具、审批一律拒绝，这里是再收紧一道）
-          abort('这个 agent 想在随手 AI 里调用工具，已中止；换一个 agent 或到设置里换成「本站」通道')
+          abort('这个 agent 想在 ⌘J 里调用工具，已中止；换一个 agent 或到设置里换成「本站」通道')
         }
       })
       if (reason !== null) throw new Error(reason)
