@@ -215,18 +215,6 @@
   color: var(--ink-3);
 }
 
-/* Genet 代发的回复：时间后面的小标 */
-.cm-via {
-  flex: none;
-  padding: 0 6px;
-  border-radius: var(--r-pill);
-  background: var(--accent-tint);
-  color: var(--accent);
-  font-size: 11px;
-  line-height: 17px;
-  white-space: nowrap;
-}
-
 /* @了 Genet 的评论下面的处理状态：等着时呼吸，没回成的原因 + 链接 */
 .cm-call {
   display: flex;
@@ -242,8 +230,28 @@
   animation: run-breathe 1.6s ease-in-out infinite;
 }
 
+/* 代回复：草稿生成中（呼吸）/ 失败原因 + 去设置，在评论框下面 */
+.cm-draft-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  color: var(--ink-3);
+  font-size: var(--t-xs);
+}
+
+.cm-draft-busy {
+  color: var(--accent);
+  animation: run-breathe 1.6s ease-in-out infinite;
+}
+
+.cm-draft-line.is-error {
+  color: var(--danger);
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .cm-call.is-waiting {
+  .cm-call.is-waiting,
+  .cm-draft-busy {
     animation: none;
   }
 }

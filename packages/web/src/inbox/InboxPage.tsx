@@ -4,7 +4,8 @@
  * 数据来自 GET /api/inbox（已按权限筛过），这里只渲染，不带来新权限，按钮调的都是已有接口：
  *   - 审批选项 = api.respondPermission（页面里的审批卡同一个接口）；
  *   - 批准 / 拒绝机器接入 = api.approveConnector / rejectConnector（设置 → 连接器同一个接口）；
- *   - 使用申请只展示，「去处理」跳到设置 → 机器，授权必须走那里的完整确认流程。
+ *   - 使用申请只展示，「去处理」跳到设置 → 机器，授权必须走那里的完整确认流程；
+ *   - 评论 / 正文 @ 的「代回复」只是带 draft=1 跳到页面，草稿在页面的评论框里生成（⌘J 同一个接口），发不发由用户自己定。
  * 答完 / 批准完先乐观摘除，之后服务端的 'inbox' 信号会重拉校正。 */
 
 import { useState, type ReactNode } from 'react'
@@ -17,7 +18,7 @@ import { openSettings } from '../settings-bus'
 import { relativeTime } from '../UpdatesFeed'
 import type { InboxItem } from './inbox-api'
 import { inboxApi } from './inbox-api'
-import { splitInbox } from './inbox-model'
+import { draftReplyHref, splitInbox } from './inbox-model'
 import { dropInboxItem, refreshInbox, useInbox } from './inbox-store'
 import { confirmDialog } from '../ui/dialog'
 
@@ -311,7 +312,26 @@ function AutomationRow({ item }: { item: Of<'automation'> }) {
   )
 }
 
-/** 评论：点进页面并打开那个串（页面里打开串即记为已读），先在本地摘掉 */
+/** 「代回复」按钮：先在本地摘掉这一条，再跳到页面起草（评论 / 正文 @ 共用）；这一条不能代回复就没有按钮 */
+function draftReplyAction(item: Of<'comment'> | Of<'doc_mention'>, navigate: (to: string) => void): ReactNode | undefined {
+  const href = draftReplyHref(item)
+  if (!href) return undefined
+  return (
+    <button
+      className="inbox-btn"
+      type="button"
+      data-tip={C.draftReplyTip}
+      onClick={() => {
+        dropInboxItem(item.key)
+        navigate(href)
+      }}
+    >
+      {C.draftReply}
+    </button>
+  )
+}
+
+/** 评论：点进页面并打开那个串（页面里打开串即记为已读），先在本地摘掉；「代回复」打开串并起草回复 */
 function CommentRow({ item }: { item: Of<'comment'> }) {
   const navigate = useNavigate()
   const open = (): void => {
@@ -324,13 +344,14 @@ function CommentRow({ item }: { item: Of<'comment'> }) {
       head={C.comment.head(item.author?.name ?? C.comment.unknown, C.comment.reason[item.reason])}
       sub={`${C.comment.where(pageName(item.pageTitle))} · ${relativeTime(item.at)}`}
       onOpen={open}
+      actions={draftReplyAction(item, navigate)}
     >
       {item.excerpt && <div className="inbox-detail-line inbox-excerpt">{item.excerpt}</div>}
     </Row>
   )
 }
 
-/** 正文里 @了你：点进页面并定位到那一块（打开那一页即算看过，服务端同「做完待你看」），先在本地摘掉 */
+/** 正文里 @了你：点进页面并定位到那一块（打开那一页即算看过，服务端同「做完待你看」），先在本地摘掉；「代回复」在那一块开评论框起草 */
 function DocMentionRow({ item }: { item: Of<'doc_mention'> }) {
   const navigate = useNavigate()
   const open = (): void => {
@@ -338,7 +359,7 @@ function DocMentionRow({ item }: { item: Of<'doc_mention'> }) {
     navigate(`/page/${item.pageId}${item.blockId ? `?block=${encodeURIComponent(item.blockId)}` : ''}`)
   }
   return (
-    <Row icon="at" head={C.docMention.head(item.actor.name, pageName(item.pageTitle))} sub={relativeTime(item.at)} onOpen={open}>
+    <Row icon="at" head={C.docMention.head(item.actor.name, pageName(item.pageTitle))} sub={relativeTime(item.at)} onOpen={open} actions={draftReplyAction(item, navigate)}>
       {item.excerpt && <div className="inbox-detail-line inbox-excerpt">{item.excerpt}</div>}
     </Row>
   )

@@ -30,8 +30,10 @@
 // automation_notices：「发通知」动作写给某人的一条收件箱通知；space_id = 规则所在空间（收件箱只列自己是成员的空间），规则删了通知留着。
 // quiet_turns：Genet 在哪一页的哪个时刻标了「不用处理」（routes/mark-handled.ts）。那一轮的过程页不算「做完待你看」（inbox.ts 的 done）：
 //   过程页与回复块之间库里没有关联（只在文档里），按时间认 —— 同一页同时只有一轮，落在上一个过程页之后、这个过程页之前的标记就是这一轮的。
-// agent_triggers.builtin：每人一条的内置规则（'comment' = 评论找我、'mention' = 正文 @我，triggers/builtin.ts）。默认开、只能关不能删；
+// agent_triggers.builtin：每人一条的内置规则（'comment' = 评论找我、'mention' = 正文 @我，triggers/builtin.ts）。新建的关着、只能关不能删；
 //   唯一索引挡住并发补建出两条。
+// builtin_off_once：内置规则曾经是默认开的（每来一条评论 / 正文 @ 就跑一轮 Genet，花主人的模型额度），改成默认关时把存量的一次性关掉。
+//   这张空表只当「已经关过」的记号：DO 块看表在不在，不在就建表并关掉全部内置规则；之后用户自己打开的，重启时不会再被关。
 // page_mentions：正文里「哪一块 @了谁」的当前集合（triggers/sources/mention.ts 每次存盘按差集认新增的 @）。
 //   actor_id = 插入它的人（那一块最后的编辑者，agent 写的记发起人）；为空 = 认不出是谁加的（导入 / 复制来的、上线前就有的），
 //   这种不触发、也不进收件箱。不挂 users 外键：编辑者删号后行留着，收件箱按 users 现查认不出就不给。excerpt = 当时那一块的文字摘录（收件箱用）。
@@ -161,4 +163,10 @@ CREATE TABLE IF NOT EXISTS page_watch_windows (
 );
 ALTER TABLE agent_triggers ADD COLUMN IF NOT EXISTS hook_hash TEXT;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_triggers_hook ON agent_triggers(hook_hash) WHERE hook_hash IS NOT NULL;
+DO $$ BEGIN
+  IF to_regclass('builtin_off_once') IS NULL THEN
+    CREATE TABLE builtin_off_once ();
+    UPDATE agent_triggers SET enabled = false, updated_at = now() WHERE builtin IS NOT NULL AND enabled;
+  END IF;
+END $$;
 `

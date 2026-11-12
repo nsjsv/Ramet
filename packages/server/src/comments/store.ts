@@ -10,7 +10,7 @@ export type CommentAuthor = { id: string; name: string } | null
 /** 评论里 @Genet 的处理状态（comments/genet-call.ts）。回了（answered）不出：回复就在串里。
  *  waiting 给能看这个串的人都看（知道有回复要来）；没成的结局（done = 看过了但没回在这里、failed）与原因只给叫的人 */
 export type GenetCall = { state: 'waiting' | 'done' | 'failed'; reason: string }
-/** via = 'genet'：Genet 以作者的名义代发的（作者批过原文，或作者在串里叫了它），界面上标「Genet 代发」；本人写的没有这个键 */
+/** via = 'genet'：Genet 以作者的名义代发的（作者批过原文，或作者在串里叫了它），只做记录、界面上不另标；本人写的没有这个键 */
 export type Comment = {
   id: string
   author: CommentAuthor

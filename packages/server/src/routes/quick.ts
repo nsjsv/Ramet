@@ -10,7 +10,7 @@
 // POST   /api/me/ai-connections/models {id?, protocol?, baseUrl?, apiKey?}
 //                                            → 200 {ok:true, models:[{id,name}]} | {ok:false, code, message}；输入/地址不合法 400
 // GET    /api/me/model-spec?protocol&baseUrl&model → {catalog, match:{exact,context?,output?}|null, thinking:[{value,name}]}  模型在公开目录里的规格 + Genet 会给的思考档
-// POST   /api/quick {kind:'rewrite'|'draft'|'composer'|'code'|'command', instruction, text?, before?, after?, file?, shell?, cwd?, output?}
+// POST   /api/quick {kind:'rewrite'|'draft'|'composer'|'code'|'command'|'reply', instruction, text?, before?, after?, file?, shell?, cwd?, output?, title?, quote?}
 //                                            → SSE: event delta {text} … done {stopReason} | error {code, message}
 //        开流前的失败走普通 JSON 状态码：400 参数 / 地址不安全；409 没配连接（no connection）、key 解不开（key unreadable）、
 //        本地通道没选 agent / 选的不可用 / connector 太旧 / 上一次还没结束（no local agent / local agent unavailable / connector outdated / quick busy）；
@@ -99,9 +99,12 @@ const OUTPUT_MAX_CHARS = 100_000
 const TEST_TIMEOUT_MS = 30_000
 const TEST_MAX_TOKENS = 32
 const TEST_SYSTEM = '这是一次连通性测试。只回复 ok，不要输出别的。'
-const KINDS: readonly QuickKind[] = ['rewrite', 'draft', 'composer', 'code', 'command']
-/** 这些任务要有 text（rewrite 的原文、composer 的草稿、code 的选中代码）；draft / command 不用 */
+const KINDS: readonly QuickKind[] = ['rewrite', 'draft', 'composer', 'code', 'command', 'reply']
+/** 这些任务要有 text（rewrite 的原文、composer 的草稿、code 的选中代码）；draft / command 不用，reply 的 text 是评论串、可以没有 */
 const NEEDS_TEXT: readonly QuickKind[] = ['rewrite', 'composer', 'code']
+/** reply：页面标题、评论针对的正文只是参考，超长截断不报错 */
+const TITLE_MAX = 200
+const QUOTE_MAX = 4_000
 /** code：选区前后的上下文各留这么多行；command：终端输出留尾这么多行（再封顶字数） */
 const CODE_CONTEXT_LINES = 40
 const TERMINAL_LINES = 30
@@ -156,7 +159,7 @@ function parseFile(raw: unknown): QuickInput['file'] {
 export function parseQuickBody(raw: unknown): QuickInput {
   const body = asBody(raw)
   const kind = body.kind as QuickKind
-  if (!KINDS.includes(kind)) throw new InputError('kind 只能是 rewrite / draft / composer / code / command')
+  if (!KINDS.includes(kind)) throw new InputError('kind 只能是 rewrite / draft / composer / code / command / reply')
   if (typeof body.instruction !== 'string' || !body.instruction.trim()) throw new InputError('instruction 必填')
   if (body.instruction.length > INSTRUCTION_MAX) throw new InputError(`instruction 太长（最多 ${INSTRUCTION_MAX} 字）`)
   const instruction = body.instruction.trim()
@@ -177,6 +180,14 @@ export function parseQuickBody(raw: unknown): QuickInput {
       cwd: oneLine(optionalString(body, 'cwd', 500)),
       output,
     }
+  }
+  if (kind === 'reply') {
+    // 代回复评论：text 是评论串（新开一条评论时没有），title / quote 是页面标题与评论针对的正文。
+    // 没有串也没有正文就没什么可回的；我是谁（me）由路由按登录的人填
+    const quote = clipHead(optionalString(body, 'quote', Number.MAX_SAFE_INTEGER).trim(), QUOTE_MAX)
+    if (!text.trim() && !quote) throw new InputError('没有要回复的评论或正文')
+    const title = clipHead(oneLine(optionalString(body, 'title', Number.MAX_SAFE_INTEGER)), TITLE_MAX)
+    return { kind, instruction, text: text.trim(), before: '', after: '', title, quote }
   }
   // 上下文只是参考：超长的截到上限（before 留靠近光标的尾巴，after 留靠近光标的头）；代码另按行截
   let before = clipTail(optionalString(body, 'before', Number.MAX_SAFE_INTEGER), CONTEXT_MAX)
@@ -415,6 +426,8 @@ export function quickRoutes(pool: Pool, deps: QuickDeps = {}, local?: LocalQuick
       if (err instanceof InputError) return c.json(bad(err.message), 400)
       throw err
     }
+    // 代回复：串里哪些话是用户自己说的，按登录的人认（前端给的名字不作数）
+    if (input.kind === 'reply') input = { ...input, me: user.username }
 
     const settings = await getSettings(pool, user.id)
     let open: (signal: AbortSignal) => AsyncIterable<ModelChunk>

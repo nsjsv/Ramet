@@ -1,10 +1,11 @@
 // ---------- 内置规则：每人一条「评论找我」、一条「正文 @我」 ----------
-// 别人在评论里找我、在正文里 @我时叫醒 Genet 判断要不要处理：个人助手替主人盯消息，所以默认开，不用自己去配。
+// 打开后，别人在评论里找我、在正文里 @我时叫醒 Genet 判断要不要处理。默认关：每来一条就跑一轮 Genet、花的是主人自己的模型额度，
+// 开不开由主人决定；关着时这些事照样进收件箱（评论 / 正文 @ 条目不靠规则），要回就在收件箱点「代回复」自己起草。
 // 两条都是普通规则（agent_triggers 一行，builtin = 来源名），走同一条派发流程；只是不能删（只能关），名字不能改，
 // 也不能在 AI 页另建同来源的规则（一人多条只会把同一件事通知好几遍）。策略（叫 Genet 的指令）、动作、配置、启停都能改。
 // 什么时候补建：来源要给某人发事件之前（他配了模型连接才补，没配的人不必凭空多两行）、AI 页列规则之前。
 // 「还不能生效」（dormant）：动作里有叫 Genet，而主人还没配模型连接、或者还没有 Genet 页 —— 这时事件来了直接不发
-// （不落记录、不进收件箱、不算失败），配好之后自动生效；默认开的规则不该给还没用上 AI 的人制造失败提醒。
+// （不落记录、不进收件箱、不算失败），配好之后自动生效；打开了的规则不该给还没用上 AI 的人制造失败提醒。
 
 import { randomUUID } from 'node:crypto'
 import type { Pool } from 'pg'
@@ -135,11 +136,12 @@ const BUILTIN: Record<BuiltinSource, { name: string; config: CommentConfig | Men
   mention: { name: '正文 @我', config: { spaces: [] } },
 }
 
-const INSERT_BUILTIN = `INSERT INTO agent_triggers (id, space_id, owner_id, source, builtin, name, instruction, spec, config, time_zone, target_page, agent, actions)
-  VALUES ($1, $2, $3, $4, $4, $5, $6, '{}'::jsonb, $7::jsonb, $8, $9, $10, $11::jsonb)
+// 新建的一律关着（enabled = false），见文件头
+const INSERT_BUILTIN = `INSERT INTO agent_triggers (id, space_id, owner_id, source, builtin, name, instruction, spec, config, time_zone, target_page, agent, actions, enabled)
+  VALUES ($1, $2, $3, $4, $4, $5, $6, '{}'::jsonb, $7::jsonb, $8, $9, $10, $11::jsonb, false)
   ON CONFLICT (owner_id, builtin) WHERE builtin IS NOT NULL DO NOTHING`
 
-/** 把这个人缺的内置规则补上（已有的不动：关掉的、改过策略的都原样留着）。规则所在空间 = 个人空间 */
+/** 把这个人缺的内置规则补上，补上的是关着的（已有的不动：打开的、改过策略的都原样留着）。规则所在空间 = 个人空间 */
 export async function ensureBuiltin(pool: Pool, userId: string): Promise<void> {
   const have = (await pool.query<{ builtin: string }>('SELECT builtin FROM agent_triggers WHERE owner_id = $1 AND builtin IS NOT NULL', [userId])).rows
   const missing = BUILTIN_SOURCES.filter((b) => !have.some((r) => r.builtin === b))

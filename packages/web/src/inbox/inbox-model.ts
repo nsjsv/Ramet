@@ -70,3 +70,11 @@ export function dropSeenOf(items: readonly InboxItem[], pageId: string): InboxIt
 export function hasSeenOf(items: readonly InboxItem[], pageId: string): boolean {
   return items.some((item) => seenByOpening(item, pageId))
 }
+
+/** 「代回复」跳到哪：评论 = 打开那个串并起草回复，正文里 @了你 = 在那一块开新评论框起草（页面侧见 comments/reply-draft.ts）。
+ *  别的条目、没有块 id 的正文 @ 没有这个按钮（null） */
+export function draftReplyHref(item: InboxItem): string | null {
+  if (item.type === 'comment') return `/page/${item.pageId}?comment=${encodeURIComponent(item.threadId)}&draft=1`
+  if (item.type === 'doc_mention' && item.blockId) return `/page/${item.pageId}?block=${encodeURIComponent(item.blockId)}&draft=1`
+  return null
+}

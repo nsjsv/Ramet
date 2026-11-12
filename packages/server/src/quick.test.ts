@@ -382,6 +382,7 @@ describe('POST /api/quick：开流前的拒绝', () => {
       [{ kind: 'code', instruction: '加类型', text: 'a', file: 'x.ts' }, /file/],
       [{ kind: 'command', instruction: '看看磁盘', shell: 5 }, /字符串/],
       [{ kind: 'command', instruction: '看看磁盘', cwd: 'x'.repeat(501) }, /太长/],
+      [{ kind: 'reply', instruction: '起草' }, /没有要回复/],
     ]
     for (const [body, re] of cases) {
       const r = await quick(u.cookie, body)
@@ -579,6 +580,15 @@ describe('POST /api/quick：流式输出与错误映射', () => {
     const bare = await quick(u.cookie, { kind: 'command', instruction: '列出文件' })
     expect(bare.status).toBe(200)
     expect(seen[2]!.user).not.toContain('<shell>')
+  })
+
+  it('reply：<me> 按登录的人填（请求体里的 me 不认）；输入的其余拼装见 quick-reply.test.ts', async () => {
+    const u = await newUser('reply-me')
+    await addConnection(u.cookie)
+    expect((await quick(u.cookie, { kind: 'reply', instruction: '起草', me: '冒充的人', text: 'bob：你看下' })).status).toBe(200)
+    expect(seen[0]!.user).toContain('<task>reply</task>')
+    expect(seen[0]!.user).toContain('<me>reply-me</me>')
+    expect(seen[0]!.user).not.toContain('冒充的人')
   })
 
   it('refusal → error(refusal)；max_tokens → error(max_tokens)；没有内容 → error(empty)', async () => {

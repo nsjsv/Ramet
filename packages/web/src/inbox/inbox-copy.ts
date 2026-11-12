@@ -12,6 +12,9 @@ export const INBOX_COPY = {
   emptyHint: '等你批准的命令、待批准的机器接入、做完的任务、别人在评论和正文里找你、没能触发的规则、规则发给你的通知都会汇总在这里。',
   group: { attention: '需要你处理', news: '新消息', running: '在跑' },
   open: '打开页面',
+  /** 评论 / 正文 @ 条目：打开那一页，用 ⌘J 同一套起草一条回复放进评论框，自己改完再发 */
+  draftReply: '代回复',
+  draftReplyTip: '打开页面，用你的模型起草一条回复放进评论框；改好后自己发送',
   failed: '操作失败，请重试',
   approval: {
     head: (agent: string) => `${agent} 等你批准`,

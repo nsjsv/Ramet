@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest'
 import type { InboxItem } from './inbox-api'
-import { attentionCount, dropByKey, dropSeenOf, groupOf, hasSeenOf, newsCount, splitInbox } from './inbox-model'
+import { attentionCount, draftReplyHref, dropByKey, dropSeenOf, groupOf, hasSeenOf, newsCount, splitInbox } from './inbox-model'
 
 const approval = (key: string): InboxItem => ({
   type: 'approval', key, at: null, pageId: 'p1', pageTitle: 't', agentId: 'a', agentName: 'A', requestId: key, title: '运行命令', options: [], detail: {},
@@ -129,6 +129,16 @@ describe('正文里 @了你', () => {
     expect(hasSeenOf(items, 'p2')).toBe(true)
     expect(dropSeenOf(items, 'p1').map((i) => i.key)).toEqual(['doc_mention:p2', 'comment:t1'])
     expect(dropSeenOf(items, 'p2').map((i) => i.key)).toEqual(['doc_mention:p1', 'd1', 'comment:t1'])
+  })
+})
+
+describe('代回复', () => {
+  test('评论打开那个串起草、正文 @ 在那一块起草；别的条目、没有块 id 的没有这个按钮', () => {
+    expect(draftReplyHref(comment('t1', 't'))).toBe('/page/p1?comment=t1&draft=1')
+    expect(draftReplyHref(docMention('p2', 't'))).toBe('/page/p2?block=b1&draft=1')
+    expect(draftReplyHref({ ...docMention('p2', 't'), blockId: '' } as InboxItem)).toBeNull()
+    expect(draftReplyHref(done('d1', 'p1', 't'))).toBeNull()
+    expect(draftReplyHref(approval('a'))).toBeNull()
   })
 })
 

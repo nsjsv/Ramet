@@ -2,7 +2,7 @@
  * 浮层、右侧卡片、抽屉、整页讨论区共用：评论列表（头像 + 名字 + 相对时间 + 已编辑）+ 回复框 + 解决 / 重新打开；
  * 自己的评论可编辑 / 删除，空间 owner 可删任何人的。readOnly（公开页）只画列表。
  * 首条被删且还有回复时显示「评论已删除」占位（服务端留的 deleted 行）；作者 null = 已注销用户。
- * Genet 以作者名义代发的回复标「Genet 代发」（公开页也标：服务端公开接口同样带 via）。
+ * Genet 以作者名义代发的回复（via）不另标：作者看过原文、点了发送，就是他自己说的话。
  * @了 Genet 的评论下面一行处理状态（call）：等着时「Genet 正在处理…」，没回成的原因 + 去 AI 页看对话（只有叫的人收得到）。 */
 
 import { useEffect, useState } from 'react'
@@ -15,7 +15,8 @@ import { relativeTime } from '../UpdatesFeed'
 import CommentBody from './CommentBody'
 import CommentComposer from './CommentComposer'
 import type { Anchor, Comment, CommentAuthor, GenetCall, Thread } from './comments-api'
-import { closePopover, createThread, editComment, openThread, removeComment, replyTo, setResolved } from './comments-store'
+import { DRAFT_ID, closePopover, createThread, editComment, openThread, removeComment, replyTo, setResolved } from './comments-store'
+import { stopReplyDraft } from './reply-draft'
 import { confirmDialog } from '../ui/dialog'
 
 const C = COPY.comments
@@ -77,11 +78,6 @@ function CommentItem({ comment, ctx }: { comment: Comment; ctx: CommentCtx }) {
           {relativeTime(comment.createdAt)}
         </span>
         {comment.editedAt && <span className="cm-time">{C.edited}</span>}
-        {comment.via === 'genet' && (
-          <span className="cm-via" data-tip={C.viaGenetTip}>
-            {C.viaGenet}
-          </span>
-        )}
         {(canEdit || canDelete) && !editing && (
           <span className="cm-item-acts">
             {canEdit && (
@@ -157,6 +153,7 @@ export default function CommentThread({ thread, ctx, autoFocus, onEscape }: { th
               autoFocus={autoFocus}
               submitLabel={C.reply}
               onEscape={onEscape}
+              draftFor={{ target: thread.id }}
               onSubmit={(text) => replyTo(thread.id, text)}
             />
           )}
@@ -169,7 +166,7 @@ export default function CommentThread({ thread, ctx, autoFocus, onEscape }: { th
   )
 }
 
-/** 给刚选中的字写第一条评论（浮层与右侧草稿卡片共用）：发出后激活新串，取消 / Esc 收起 */
+/** 给刚选中的字写第一条评论（浮层与右侧草稿卡片共用）：发出后激活新串，取消 / Esc 收起（代回复的草稿还在生成就一起停掉） */
 export function DraftComposer({ anchor, ctx }: { anchor: Anchor; ctx: CommentCtx }) {
   return (
     <CommentComposer
@@ -178,7 +175,11 @@ export function DraftComposer({ anchor, ctx }: { anchor: Anchor; ctx: CommentCtx
       spaceId={ctx.spaceId}
       placeholder={C.placeholder}
       autoFocus
-      onCancel={closePopover}
+      draftFor={{ target: DRAFT_ID, anchor }}
+      onCancel={() => {
+        stopReplyDraft(DRAFT_ID)
+        closePopover()
+      }}
       onSubmit={async (text) => {
         const created = await createThread('inline', text, anchor)
         openThread(created.id)

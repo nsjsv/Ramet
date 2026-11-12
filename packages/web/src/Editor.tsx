@@ -141,13 +141,26 @@ export default function EditorPage({
   // IDB 缓存先出内容时第一枪就中，老文档的 id 随首笔补 id 事务落在 synced 后。
   // 找不到静默放弃（键 = 页+块，命中即记，同页再点同块不重闪）；换页换参数重置。
   // 带 ?text=（editor/text-anchor.ts）：滚到块里那段字并高亮，字找不到退回整块闪烁
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const blockParam = searchParams.get('block')
-  // ?comment=<串>（收件箱点进来）：评论只在文档视图里，记着对话视图的页面这一次先按文档视图打开（不改记忆）
+  // ?comment=<串>（收件箱点进来）：评论只在文档视图里，记着对话视图的页面这一次先按文档视图打开（不改记忆）。
+  // &draft=1（收件箱「代回复」）：打开串之后起草回复 / 在 ?block= 那一块开新评论框起草，同样只在文档视图里
   const commentParam = searchParams.get('comment')
+  const draftParam = searchParams.get('draft') === '1'
   useEffect(() => {
-    if (commentParam) setChatMode(false)
-  }, [id, commentParam])
+    if (commentParam || draftParam) setChatMode(false)
+  }, [id, commentParam, draftParam])
+  // 草稿交出去了（或开不了框）：去掉 URL 里的 draft，刷新 / 后退回来不再生成一遍
+  const dropDraftParam = useCallback(() => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        next.delete('draft')
+        return next
+      },
+      { replace: true },
+    )
+  }, [setSearchParams])
   const textAnchor = textParam(searchParams)
   const anchorText = textAnchor?.text ?? ''
   const anchorN = textAnchor?.n ?? 0
@@ -403,6 +416,17 @@ export default function EditorPage({
     const provider = providerRef.current
     return !!provider && provider.configuration.name === `page:${id}` && provider.synced
   }, [id])
+  // 正文 @ 的代回复要在那一块开划词评论框：这一页没有划词评论（关了 / 不是文档页）就说明原因，不开框
+  const inlineOk = page?.kind === 'doc' && commentKinds.inline
+  useEffect(() => {
+    if (!draftParam || !blockParam || commentParam || !page || inlineOk) return
+    toast(COPY.comments.draftNoInline)
+    dropDraftParam()
+  }, [draftParam, blockParam, commentParam, page, inlineOk, dropDraftParam])
+  const commentDraft = useMemo(
+    () => (draftParam ? { title: page?.title ?? '', block: blockParam } : null),
+    [draftParam, page?.title, blockParam],
+  )
   return (
     <>
       <TopBar
@@ -526,6 +550,8 @@ export default function EditorPage({
           deepLink={commentParam}
           ready={commentsReady}
           kinds={commentKinds}
+          draft={commentDraft}
+          onDraftTaken={dropDraftParam}
         />
       )}
       {historyOpen && id && (

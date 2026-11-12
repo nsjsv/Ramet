@@ -27,9 +27,9 @@ export const AUTOMATION_COPY = {
     create: '新建规则',
     loadFailed: '规则加载失败，请稍后再试',
     group: { builtin: '内置规则', timer: '定时', event: '事件', collection: '合集', button: '按钮', ai: 'AI 块 / 属性', other: '其他' },
-    /** 内置规则（评论找我 / 正文 @我）：每人一条、默认开着 */
+    /** 内置规则（评论找我 / 正文 @我）：每人一条、默认关着 */
     builtinTag: '内置',
-    builtinTip: '内置规则：可以改策略、配置和动作，也可以关掉，但不能删',
+    builtinTip: '内置规则：默认关着，打开后有人在评论或正文里找你就叫 Genet 自动处理（用你的模型额度）；可以改策略、配置和动作，但不能删',
     /** 内置规则还不能生效时（还没配模型连接 / 还没有 Genet 页）的补救按钮 */
     fixSettings: '去配置模型连接',
     fixGenet: '打开 Genet',

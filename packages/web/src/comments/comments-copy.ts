@@ -25,9 +25,18 @@ export const COMMENTS_COPY = {
   remove: '删除',
   confirmRemove: '删除这条评论？',
   edited: '已编辑',
-  /** Genet 以作者的名义发的回复（作者在审批卡上看过原文、点了发送） */
-  viaGenet: 'Genet 代发',
-  viaGenetTip: '这条回复由 Genet 写，以作者的名义发出（作者看过原文，或者是作者在串里叫了 Genet）',
+  /** 代回复（收件箱「代回复」进来）：草稿流式写进评论框，本人改完再发 */
+  drafting: '正在起草回复…',
+  draftStop: '停止',
+  /** 交给模型的要求：回复一个串 / 正文里被 @ 了，在那一段上新开一条评论 */
+  draftInstruction: '以我的口吻起草一条回复。',
+  draftMentionInstruction: '别人在这段正文里 @了我，以我的口吻起草一条评论回应。',
+  /** 串太长、交给模型时中间省略掉的那几条 */
+  draftOmitted: (n: number) => `（中间省略 ${n} 条评论）`,
+  draftResolved: '这个评论串已经解决了，重新打开后再回复。',
+  draftGone: '要回复的评论或正文已经不在了。',
+  draftNoText: '那一段没有文字，没法在上面评论。',
+  draftNoInline: '这一页没有开划词评论，没法在正文上起草回复。',
   /** 评论里 @Genet 之后那条评论下面的状态 */
   callWaiting: 'Genet 正在处理…',
   callDone: 'Genet 看过了，没有回在这里',

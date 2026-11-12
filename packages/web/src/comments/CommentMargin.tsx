@@ -62,7 +62,6 @@ function PreviewItem({ comment, ctx }: { comment: Comment; ctx: CommentCtx }) {
         <Avatar person={personFor(comment.author, ctx.spaceId)} size={20} />
         <span className="cm-name">{comment.author?.name ?? C.deletedUser}</span>
         <span className="cm-time">{relativeTime(comment.createdAt)}</span>
-        {comment.via === 'genet' && <span className="cm-via">{C.viaGenet}</span>}
       </div>
       <CommentBody body={comment.body} />
     </div>

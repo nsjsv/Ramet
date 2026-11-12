@@ -6,7 +6,7 @@
  * 判定与评论接口同一套：主人读得到这一页（含 viewer：评论不改文档）、是 doc 页、这种评论在页面上开着；
  * 读不到 / 串不在 404，不是 doc 400，关掉了 403。等审批的这段时间可能变了，点完「发送」再判一次。
  * 例外：主人在这个串里 @Genet 叫过它、还在等（comments/genet-call.ts 的 claim）→ 这次直接发出，不弹卡：是他叫它回在这里的；一次呼叫只免一次。
- * 发出去的回复标 via = 'genet'（界面上「Genet 代发」），广播、收件箱刷新、「评论找我」的触发与界面上回复同一条（posted）。 */
+ * 发出去的回复记 via = 'genet'（界面上不另标，作者就是主人），广播、收件箱刷新、「评论找我」的触发与界面上回复同一条（posted）。 */
 
 import type { Context, Hono } from 'hono'
 import type { Pool } from 'pg'

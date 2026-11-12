@@ -1,13 +1,14 @@
-/* ---------- 两个默认开的来源：评论找我、正文 @我（真实写路径：评论接口、协同存盘） ----------
- * bob 在 alice 的页面上开串 / 回复 alice 发过言的串 / @alice、在正文里 @alice → alice 的 Genet 页出现外来的事件通知并被叫醒；
+/* ---------- 两个内置规则的来源：评论找我、正文 @我（真实写路径：评论接口、协同存盘） ----------
+ * 内置规则打开后：bob 在 alice 的页面上开串 / 回复 alice 发过言的串 / @alice、在正文里 @alice → alice 的 Genet 页出现外来的事件通知并被叫醒；
  * 自己的不算、不是成员的空间不算；正文里同一块再编辑不重复、上线前就有的 @ 不补发；收件箱「正文里 @了你」打开那一页即消失。
- * 内置规则每人两条：默认开、只能关不能删、不能改名、不能另建；没配模型连接的人跳过（不落记录、不进收件箱）。
- * Genet 的 reply_comment 每次都先给主人看原文，同意了才以主人的名义发出去，评论上标「Genet 代发」。 */
+ * 内置规则每人两条：默认关（关着时只进收件箱）、存量一次性关掉、只能关不能删、不能改名、不能另建；没配模型连接的人跳过（不落记录、不进收件箱）。
+ * Genet 的 reply_comment 每次都先给主人看原文，同意了才以主人的名义发出去（评论记 via = genet）。 */
 import { describe, expect, it } from 'vitest'
 import * as Y from 'yjs'
 import type { HocuspocusProvider } from '@hocuspocus/provider'
 import type { PermissionEvent } from '../agents/types.js'
 import { insertConnection } from '../ai-connections.js'
+import { initDb } from '../db.js'
 import { mintPageToken } from '../page-read.js'
 import { ASSISTANT_ID } from '../agents/assistant-agent.js'
 import type { Comment, Thread } from '../comments/store.js'
@@ -65,11 +66,17 @@ function req(method: string, path: string, auth: { cookie?: string; token?: stri
   })
 }
 
-async function world(): Promise<World> {
+/** builtinOn：把 alice 的两条内置规则打开（默认关；这里多数用例看的是打开之后的行为） */
+async function world(builtinOn = true): Promise<World> {
   const { cookie, pageId } = await setupPage()
   const aliceId = await userIdOf('alice')
   await insertConnection(pool, aliceId, { name: 'c', protocol: 'anthropic', baseUrl: null, model: 'claude-opus-5-5' }, 'sk-ant-test-secret-9999', assistantSecret)
   const home = ((await (await postJson('/api/me/assistant', cookie)).json()) as { pageId: string }).pageId
+  if (builtinOn) {
+    for (const r of (await automations(cookie)).filter((x) => x.builtin)) {
+      expect((await req('PATCH', `/api/me/automations/${r.id}`, { cookie }, { enabled: true })).status).toBe(200)
+    }
+  }
   const bobCookie = await joinPageSpace(pageId, 'bob')
   const doc = await connectDoc(home, cookie)
   const sse = new SSECollector()
@@ -211,14 +218,20 @@ describe('评论找我', () => {
 })
 
 describe('内置规则', () => {
-  it('每人两条、默认开、排在最前；改策略通知跟着变、按原因过滤、关掉不触发；不能删、不能改名、不能另建；没配模型连接的人跳过且不进收件箱', async () => {
-    const w = await world()
+  it('每人两条、默认关、排在最前；关着只进收件箱；打开后改策略通知跟着变、按原因过滤、关掉不触发；不能删、不能改名、不能另建；没配模型连接的人跳过且不进收件箱', async () => {
+    const w = await world(false)
     const list = await automations(w.alice.cookie)
     expect(list.slice(0, 2).map((r) => [r.builtin, r.name, r.enabled, r.dormant, r.triggerText, r.actionsText])).toEqual([
-      ['comment', '评论找我', true, null, '评论里 @我、回复我参与的串、在我的页面上开新串', [`叫 Genet：${DEFAULT_POLICY}`]],
-      ['mention', '正文 @我', true, null, '正文里 @我', [`叫 Genet：${DEFAULT_POLICY}`]],
+      ['comment', '评论找我', false, null, '评论里 @我、回复我参与的串、在我的页面上开新串', [`叫 Genet：${DEFAULT_POLICY}`]],
+      ['mention', '正文 @我', false, null, '正文里 @我', [`叫 Genet：${DEFAULT_POLICY}`]],
     ])
     const rule = list[0]!.id
+    // 关着：bob 开串不叫 Genet（不落记录），收件箱照常有这条评论
+    const closed = await newThread(w.bob.cookie, w.page, `@[alice](user:${w.alice.id}) 还关着`)
+    await drain()
+    expect(await eventsOf(w.alice.id, `comment:${closed.comments[0]!.id}`)).toEqual([])
+    expect((await inbox(w.alice.cookie)).filter((i) => i.type === 'comment').length).toBe(1)
+    expect(notices(w.doc)).toEqual([])
     const del = await req('DELETE', `/api/me/automations/${rule}`, { cookie: w.alice.cookie })
     expect(del.status).toBe(400)
     expect(((await del.json()) as { error: string }).error).toBe(BUILTIN_NO_DELETE)
@@ -228,7 +241,8 @@ describe('内置规则', () => {
     expect(((await another.json()) as { error: string }).error).toBe('这种触发还不能在这里建')
     expect((await req('PATCH', `/api/me/automations/${rule}`, { cookie: w.alice.cookie }, { config: { reasons: [] } })).status).toBe(400)
 
-    // 改策略：通知里的指令跟着变
+    // 打开 + 改策略：通知里的指令跟着变
+    expect((await req('PATCH', `/api/me/automations/${rule}`, { cookie: w.alice.cookie }, { enabled: true })).status).toBe(200)
     const policy = await req('PATCH', `/api/me/automations/${rule}`, { cookie: w.alice.cookie }, { actions: [{ type: 'genet', instruction: '只有 @我 的才要我看' }] })
     expect(policy.status).toBe(200)
     await newThread(w.bob.cookie, w.page, '第一条')
@@ -247,18 +261,19 @@ describe('内置规则', () => {
     await drain()
     expect(await eventsOf(w.alice.id, `comment:${off.comments[0]!.id}`)).toEqual([])
 
-    // bob 没配模型连接：他的内置规则显示还不能生效；alice @bob 不落记录、不进收件箱（评论条目照常有）
+    // bob 没配模型连接：他的内置规则显示还不能生效；打开了也一样，alice @bob 不落记录、不进收件箱（评论条目照常有）
     const bobs = await automations(w.bob.cookie)
     expect(bobs.slice(0, 2).map((r) => [r.builtin, r.enabled, r.dormant])).toEqual([
-      ['comment', true, { code: 'no_connection', text: '配好模型连接后生效' }],
-      ['mention', true, { code: 'no_connection', text: '配好模型连接后生效' }],
+      ['comment', false, { code: 'no_connection', text: '配好模型连接后生效' }],
+      ['mention', false, { code: 'no_connection', text: '配好模型连接后生效' }],
     ])
+    const bobRule = bobs[0]!.id
+    expect((await req('PATCH', `/api/me/automations/${bobRule}`, { cookie: w.bob.cookie }, { enabled: true })).status).toBe(200)
     await newThread(w.alice.cookie, w.page, `@[bob](user:${w.bob.id}) 你来`)
     await drain()
     expect(await eventsOf(w.bob.id)).toEqual([])
     expect((await inbox(w.bob.cookie)).map((i) => i.type)).toEqual(['comment'])
     // 还没有 Genet 页只是「还不能生效」：关掉再开、改策略都不拦（普通规则会 400「先打开一次 AI 页」）
-    const bobRule = bobs[0]!.id
     expect((await req('PATCH', `/api/me/automations/${bobRule}`, { cookie: w.bob.cookie }, { enabled: false })).status).toBe(200)
     expect((await req('PATCH', `/api/me/automations/${bobRule}`, { cookie: w.bob.cookie }, { enabled: true })).status).toBe(200)
     expect((await req('PATCH', `/api/me/automations/${bobRule}`, { cookie: w.bob.cookie }, { actions: [{ type: 'genet', instruction: '都告诉我' }] })).status).toBe(200)
@@ -282,6 +297,24 @@ describe('内置规则', () => {
     expect((await req('PATCH', `/api/me/automations/${rule}`, { cookie: w.alice.cookie }, { enabled: true })).status).toBe(200)
     await settled(w.sse, 2)
     close(w)
+  }, 60_000)
+
+  it('存量一次性关掉：升级时开着的内置规则被关一次；之后用户自己打开的，再次启动不再被关', async () => {
+    const { cookie } = await setupPage()
+    const id = await userIdOf('alice')
+    const rule = (await automations(cookie))[0]!
+    expect(rule.builtin).toBe('comment')
+    const enabled = async (): Promise<boolean[]> =>
+      (await pool.query<{ enabled: boolean }>('SELECT enabled FROM agent_triggers WHERE owner_id = $1 AND builtin IS NOT NULL ORDER BY builtin', [id])).rows.map((r) => r.enabled)
+    // 还没关过的老库：内置规则当时是默认开的
+    await pool.query('UPDATE agent_triggers SET enabled = true WHERE owner_id = $1 AND builtin IS NOT NULL', [id])
+    await pool.query('DROP TABLE builtin_off_once')
+    await initDb(pool)
+    expect(await enabled()).toEqual([false, false])
+    // 用户自己打开「评论找我」，服务重启（再跑一遍 DDL）不再被关
+    expect((await req('PATCH', `/api/me/automations/${rule.id}`, { cookie }, { enabled: true })).status).toBe(200)
+    await initDb(pool)
+    expect(await enabled()).toEqual([true, false])
   }, 60_000)
 })
 
@@ -358,7 +391,7 @@ describe('评论之后 Genet 的处理', () => {
     close(w)
   }, 60_000)
 
-  it('reply_comment：每次都弹卡给主人看原文，拒绝不发；发送后串里多一条主人名义、标「Genet 代发」的回复（bob、公开页都看得到）；判定同评论接口', async () => {
+  it('reply_comment：每次都弹卡给主人看原文，拒绝不发；发送后串里多一条主人名义、记 via = genet 的回复（bob、公开页都看得到）；判定同评论接口', async () => {
     const w = await world()
     const t = await newThread(w.bob.cookie, w.page, '能帮我看下吗')
     await waitFor(() => notices(w.doc).length === 1)

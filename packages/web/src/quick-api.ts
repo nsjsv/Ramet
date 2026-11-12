@@ -6,7 +6,7 @@
 import { notifyUnauthorized, request } from './api'
 import { COPY } from './copy'
 
-export type QuickKind = 'rewrite' | 'draft' | 'composer' | 'code' | 'command'
+export type QuickKind = 'rewrite' | 'draft' | 'composer' | 'code' | 'command' | 'reply'
 export type Protocol = 'anthropic' | 'openai'
 export type Channel = 'site' | 'local'
 
@@ -70,6 +70,9 @@ export interface QuickBody {
   shell?: string
   cwd?: string
   output?: string
+  /** reply：页面标题、评论针对的那段正文（评论串放 text；我是谁由服务端按登录的人填） */
+  title?: string
+  quote?: string
 }
 
 const jsonInit = (method: string, body: unknown): RequestInit => ({ method, body: JSON.stringify(body) })

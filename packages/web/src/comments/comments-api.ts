@@ -16,7 +16,7 @@ export type Comment = {
   editedAt: string | null
   /** 首条被删但串里还有回复：留占位，body 为空 */
   deleted: boolean
-  /** 'genet' = Genet 以作者的名义代发（作者批过原文，或作者在串里叫了它）；本人写的没有这个键 */
+  /** 'genet' = Genet 以作者的名义代发（作者批过原文，或作者在串里叫了它）；只做记录，界面上不另标；本人写的没有这个键 */
   via?: 'genet'
   /** 这条评论 @了 Genet 的处理状态：waiting 人人看得到；没回成（done = 看过了没回在这里、failed）只给叫的人。回了 / 公开接口没有这个键 */
   call?: GenetCall
