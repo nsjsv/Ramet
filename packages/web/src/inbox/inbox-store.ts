@@ -103,6 +103,13 @@ export function markPageSeen(pageId: string, force = false): void {
   void inboxApi.seen(pageId).catch(() => undefined)
 }
 
+/** 非 React 的订阅方（桌面通知，notify/desktop.ts）：每次状态变化拿到最新的 */
+export function onInboxChange(cb: (s: { items: InboxItem[]; loaded: boolean; failed: boolean }) => void): () => void {
+  const listener = (): void => cb(state)
+  listeners.add(listener)
+  return () => listeners.delete(listener)
+}
+
 function subscribe(listener: () => void): () => void {
   listeners.add(listener)
   return () => listeners.delete(listener)

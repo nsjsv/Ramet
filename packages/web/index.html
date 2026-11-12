@@ -7,6 +7,8 @@
     <link rel="icon" href="/favicon.ico" sizes="48x48" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <!-- 让 iOS 能「添加到主屏幕」：只有这样打开的 Ramet 才能订阅系统通知 -->
+    <link rel="manifest" href="/manifest.webmanifest" />
     <script>
       // 首帧前定好明暗（与 src/theme.ts 同一个 key 与取值）：模块脚本是 defer 的，等它就会先闪一下白底
       ;(function () {

@@ -3,6 +3,7 @@ import type { Page, Space, User } from './api'
 import { COPY } from './copy'
 import { Icon, type IconName } from './icons'
 import { MachinesPane } from './MachinesPane'
+import { NotifyPane } from './notify/NotifyPane'
 import Modal from './ui/Modal'
 import { QuickAiPane } from './QuickAiPane'
 import { MyUsagePane } from './usage/UsageView'
@@ -22,13 +23,14 @@ import { onOpenSettings } from './settings-bus'
  * 权限只在分页可见性上表达；各分页内容自己管自己的动作权限。外壳是 Modal（portal 到 body，见 ui/Modal.tsx）。
  * 卡片 / 行 / 开关等原语在 ui/form-kit.tsx，各分页在 settings-panes.tsx 与 SpaceSettings.tsx。 */
 
-type TabId = 'account' | 'appearance' | 'editor' | 'keys' | 'agent' | 'quick' | 'usage' | 'space' | 'connectors' | 'machines'
+type TabId = 'account' | 'appearance' | 'editor' | 'keys' | 'notify' | 'agent' | 'quick' | 'usage' | 'space' | 'connectors' | 'machines'
 
 const TABS: Record<TabId, { label: string; icon: IconName; desc: string }> = {
   account: { label: '账户', icon: 'user', desc: '头像、密码与登录' },
   appearance: { label: '外观', icon: 'sun', desc: '界面的明暗配色' },
   editor: { label: '编辑器', icon: 'edit', desc: '编辑体验与新页面的默认打开方式' },
   keys: { label: '快捷键', icon: 'keyboard', desc: '键盘快捷键与 Markdown 输入写法' },
+  notify: { label: COPY.notify.tab, icon: 'bell', desc: COPY.notify.tabDesc },
   agent: { label: '默认 Agent', icon: 'bot', desc: '聊天输入框与 /命令 默认使用的 agent' },
   quick: { label: COPY.quickSettings.tab, icon: 'genet', desc: COPY.quickSettings.desc },
   usage: { label: COPY.usage.tab, icon: 'sigma', desc: COPY.usage.tabDesc },
@@ -66,7 +68,7 @@ export default function SettingsModal({
   const canSpace = space !== null
   // 连接器是写入口（配对 / 撤销）：只读成员 / 无空间都不出现
   const canConnectors = canSpace && space.my_role !== 'viewer'
-  const personal: TabId[] = ['account', 'appearance', 'editor', 'keys', 'agent', 'quick', 'usage']
+  const personal: TabId[] = ['account', 'appearance', 'editor', 'keys', 'notify', 'agent', 'quick', 'usage']
   const spaceTabs: TabId[] = canSpace ? ['space', ...(canConnectors ? (['connectors'] as const) : []), 'machines'] : []
   const [tab, setTab] = useState<TabId>(initialTab ?? 'account')
   // 弹窗开着时也认「去设置」（空间 AI 卡里没有连接时跳去 Genet 分页）：initialTab 只在打开那一下生效
@@ -118,6 +120,7 @@ export default function SettingsModal({
           {active === 'appearance' && <AppearancePane />}
           {active === 'editor' && <EditorPane />}
           {active === 'keys' && <ShortcutsPane />}
+          {active === 'notify' && <NotifyPane onNavigate={onClose} />}
           {active === 'agent' && <AgentPane />}
           {active === 'quick' && <QuickAiPane />}
           {active === 'usage' && <MyUsagePane />}

@@ -5,6 +5,7 @@
  * 公共记忆在 memory/memory-copy.ts，带队在 team/team-copy.ts，工具档位在 editor/tools-copy.ts，集合在 collection/collection-copy.ts，评论在 comments/comments-copy.ts，Genet 浮窗在 assistant/assistant-copy.ts，空间 AI 在 assistant/space-ai-copy.ts，AI 页在 ai/ai-copy.ts，组件库的确认框 / Toast 在 ui/ui-copy.ts（同理）。 */
 import { CONNECT_COPY, CONNECTORS_COPY } from './connector-copy'
 import { INBOX_COPY } from './inbox/inbox-copy'
+import { NOTIFY_COPY } from './notify/notify-copy'
 import { MEMORY_COPY } from './memory/memory-copy'
 import { TEAM_COPY } from './team/team-copy'
 import { TOOLS_COPY } from './editor/tools-copy'
@@ -19,6 +20,7 @@ import { QUICK_SETTINGS_COPY } from './quick-settings-copy'
 
 export const COPY = {
   inbox: INBOX_COPY,
+  notify: NOTIFY_COPY,
   tools: TOOLS_COPY,
   memory: MEMORY_COPY,
   team: TEAM_COPY,

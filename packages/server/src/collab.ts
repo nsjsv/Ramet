@@ -411,7 +411,7 @@ export function createDocWriter(instance: () => Hocuspocus): DocWriter {
 }
 
 // 纯信令文档：挂在 Hocuspocus 实例上做全局广播，无任何内容，已认证即放行
-const CONTROL_DOC_NAME = 'control:global'
+export const CONTROL_DOC_NAME = 'control:global'
 
 // 树 / 空间变更通知：向 control:global 的所有连接广播 'changed'（客户端以此触发刷新）。
 // 没人连 control:global 时 documents 里没有该文档，静默跳过；fire and forget，

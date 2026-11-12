@@ -28,6 +28,7 @@ import { approveConnector, type ConnectorStatus } from './connectors.js'
 import type { MachineScope } from './machine-access.js'
 import { CONNECTOR_PAIR_PATH, type ConnectorAgentInfo, type PairReply } from './protocol.js'
 import type { PiStream } from '../pi-models.js'
+import type { PushTransport } from '../push/webpush.js'
 
 if (!process.env.DATABASE_URL) {
   throw new Error('需要 DATABASE_URL 指向测试库,例如 postgres://postgres:postgres@localhost:5432/ramet_test')
@@ -79,6 +80,18 @@ export const webhookFetch = createSafeFetch({
   forbidden: (address) => address !== '127.0.0.1' && isForbiddenAddress(address),
 })
 
+/** 浏览器推送的假推送服务：记下每一次请求；status 可改（缺省 201），fail 设了就抛那个错（模拟连不上） */
+export const pushService: { sent: { url: string; headers: Record<string, string>; body: Buffer }[]; status: number; fail: Error | null } = {
+  sent: [],
+  status: 201,
+  fail: null,
+}
+const pushTransport: PushTransport = async (url, headers, body) => {
+  if (pushService.fail) throw pushService.fail
+  pushService.sent.push({ url: url.href, headers, body })
+  return { status: pushService.status }
+}
+
 export const pool = getPool()
 await initDb(pool)
 // 端口预览也一起起（随机端口）：预览的测试要用；不测预览的文件多开一个空闲监听，无碍
@@ -87,6 +100,7 @@ export const s = await startServer(pool, 0, {
   // 不拉公开模型目录（测试不碰外网）：Genet 按内置规则给档位；目录本身在 model-catalog.test.ts、驱动里的用法在 driver.test.ts
   assistant: { stream: assistantStream, secretKey: assistantSecret, catalog: null },
   triggers: { now: () => new Date(triggerClock.at ?? Date.now()), fetch: webhookFetch },
+  push: { transport: pushTransport },
 })
 export const base = `http://127.0.0.1:${s.port}`
 export const previewBase = `http://127.0.0.1:${s.previewPort}`

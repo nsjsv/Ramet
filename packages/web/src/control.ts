@@ -8,6 +8,7 @@
  * 客户端据此失效各自的缓存。这条连接全局只开一份：App（刷侧栏树）、agent 目录（失效缓存）、
  * 设置弹窗（刷连接器在线态）订同一条，各开一条 ws 是白费带宽。
  * 另有本地事件 'sync'：(重)连上时发一次，补拉断线期间错过的广播。
+ * 反方向只有一种：标签页在不在用（presence:on / off，sendControl），服务端据此决定推不推系统通知。
  * 端口预览的共享列表变了（`previews:<pageId>`）单独走 subscribePreviews，不进上面的事件，老订阅方不会因此多刷一次树 / 目录。 */
 
 import { HocuspocusProvider } from '@hocuspocus/provider'
@@ -59,6 +60,12 @@ export function subscribePreviews(cb: (pageId: string | null) => void): () => vo
     previewListeners.delete(cb)
     off()
   }
+}
+
+/** 往服务端发一条 stateless（标签页在不在用的上报，notify/presence.ts）。连接还没建立时可能丢：
+ * 连上 / 重连后的 'sync' 里上报方会重发当前状态 */
+export function sendControl(payload: string): void {
+  provider?.sendStateless(payload)
 }
 
 /** 旁听：只在别人（App）开着连接时收事件，自己不建连接。发版检查用它接 'sync'——部署重启 server 时

@@ -58,8 +58,12 @@ import { webRootFromEnv, webStatic } from './web-static.js'
 import { PreviewAccess } from './preview-access.js'
 import { createPreviewServer } from './preview-server.js'
 import { onMachineFirstUse, sweepGrants, type Disconnect } from './agents/machine-grants.js'
-import { InboxPoke } from './inbox.js'
+import { InboxPoke, type InboxHost } from './inbox.js'
 import { inboxRoutes } from './routes/inbox.js'
+import { PushDispatcher } from './push/dispatch.js'
+import { Presence } from './push/presence.js'
+import { pushRoutes } from './routes/push.js'
+import type { PushTransport } from './push/webpush.js'
 import { commentRoutes } from './routes/comments.js'
 import { debugRoutes } from './routes/debug.js'
 import { runsRoutes } from './routes/runs.js'
@@ -123,6 +127,8 @@ export type ServerOptions = {
   linkPreview?: LinkPreview
   /** 触发器（规则）的时钟与向外 webhook 的出站 fetch：测试注入；缺省真实时间、防护版 fetch（允许 http） */
   triggers?: { now?: () => Date; fetch?: SafeFetch }
+  /** 浏览器推送的出站：测试注入假的推送服务；缺省按环境变量真发（含代理） */
+  push?: { transport?: PushTransport }
 }
 
 /** RAMET_PREVIEW_PORT / RAMET_PREVIEW_ORIGIN → 预览配置；没设或写坏了返回 undefined（预览关闭） */
@@ -155,6 +161,7 @@ export function startServer(
   close: () => Promise<void>
   sweepGrants: () => Promise<number>
   triggers: Pick<TriggerHub, 'tick' | 'emit' | 'causedBy' | 'touched'>
+  push: Pick<PushDispatcher, 'idle'>
 }> {
   const app = new Hono<AuthEnv>()
   app.use('*', cors({ origin: 'http://localhost:5173' }))
@@ -226,14 +233,21 @@ export function startServer(
   // 正文 @我（triggers/sources/mention.ts）：每次存盘之后对一遍正文里的 @，新 @ 到的人进收件箱、按他的规则触发。触发器后建好，惰性取。
   // 盯页面（triggers/sources/page-watch.ts）：每次存盘记下别人的改动攒着，到点由触发器的时钟收走汇报
   const pageWatch: PageWatch = new PageWatch((): PageWatchDeps => ({ pool, hub: triggers, getLiveDoc: (name) => hocuspocus.documents.get(name) }))
+  // 谁此刻正在用 Ramet（标签页在 control:global 上报），推送据此不打扰人
+  const presence = new Presence()
   const hocuspocus = createHocuspocus(pool, [
     projector.extension,
     fanout.extension,
     mentionWatch(() => ({ pool, hub: triggers, poke: () => inbox.poke() })),
     pageWatch.extension(),
+    presence.extension(),
   ])
-  // 收件箱刷新信号：300ms 去抖合并，经 control:global 广播 'inbox'（不带内容，前端收到后重拉 GET /api/inbox）
-  const inbox = new InboxPoke(() => notifyInboxChanged(hocuspocus))
+  // 收件箱刷新信号：300ms 去抖合并，经 control:global 广播 'inbox'（不带内容，前端收到后重拉 GET /api/inbox）；
+  // 同一个信号驱动浏览器推送（push 在后面建好，惰性取）
+  const inbox = new InboxPoke(() => {
+    notifyInboxChanged(hocuspocus)
+    push.poke()
+  })
   const offFirstUse = onMachineFirstUse(() => inbox.poke())
   const offSpaceAiConnections = watchSpaceAiConnections(pool, () => notifyPagesChanged(hocuspocus))
   // 外来事件之后 Genet 动手前先问主人（routes/ramet-consent.ts）：读 Genet 页的活文档判，审批挂在 Ramet 自己的审批上（agentManager 后建，惰性取）
@@ -420,6 +434,13 @@ export function startServer(
     localAgents: () => agentManager.agents().map((a) => ({ id: a.id, label: a.label })),
     onlineAgents: (connectorId) => hub.get(connectorId)?.agents,
   }
+  // 收件箱从运行时拿的只读快照：收件箱接口与浏览器推送共用（推送的可见性就是收件箱的可见性）
+  const inboxHost: InboxHost = {
+    approvals: () => agentManager.pendingApprovals(),
+    runs: () => agentManager.activeRuns(),
+    ...agentNameHost,
+  }
+  const push = new PushDispatcher({ pool, inbox: inboxHost, isActive: (userId) => presence.isActive(userId), transport: options.push?.transport })
   // AI 块的生成：模型请求同 Genet（测试注入假的），主密钥同 Genet
   const aiGenDeps: AiGenDeps = {
     pool,
@@ -455,14 +476,9 @@ export function startServer(
   // AI 块（ai-gen.ts）：页面上点「生成」；规则的「刷新 AI 块」动作经触发器的 aiGen 走同一份
   app.route('/', aiGenRoutes({ ...aiGenDeps, projector, background: (work) => triggers.background(work) }))
   // 收件箱（每条路由自带 requireAuth）：聚合审批 / 机器接入 / 使用申请 / 做完待看 / 在跑，只是视图
-  app.route(
-    '/',
-    inboxRoutes(pool, {
-      approvals: () => agentManager.pendingApprovals(),
-      runs: () => agentManager.activeRuns(),
-      ...agentNameHost,
-    }),
-  )
+  app.route('/', inboxRoutes(pool, inboxHost))
+  // 浏览器推送（每条路由自带 requireAuth）：登记 / 注销设备、查状态、测试通知
+  app.route('/', pushRoutes(pool, () => push))
   // 页面评论（每条路由自带 requireAuth）。写成功后：页面文档上广播 {t:'comments'}（同页在线的人重拉评论，
   // 只有连着这一页的人收得到，不经全员的 control 通道），收件箱也刷新（回复 / @ / 新开串都可能给别人添条目）
   // 新串 / 回复另交给「评论找我」的触发（triggers/sources/comment.ts）：后台跑，评论接口不等它
@@ -622,6 +638,8 @@ export function startServer(
           causedBy: (pageId) => triggers.causedBy(pageId),
           touched: (pageId, depth) => triggers.touched(pageId, depth),
         },
+        // 等推送派发跑完，测试用
+        push: { idle: () => push.idle() },
         close: async () => {
           if (closed) return
           closed = true
@@ -633,6 +651,7 @@ export function startServer(
           await triggers.dispose()
           await imgbed.dispose()
           inbox.dispose()
+          await push.close()
           offFirstUse()
           offSpaceAiConnections()
           // 先让在跑的 run 收尾：运行中的正文只在内存里，收尾要经机器人客户端写进文档，

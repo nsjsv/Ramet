@@ -10,7 +10,8 @@
     "./block-address": "./src/block-address.ts",
     "./md-dialect": "./src/md-dialect/index.ts",
     "./collection-model": "./src/collection-model.ts",
-    "./collection-query": "./src/collection-query.ts"
+    "./collection-query": "./src/collection-query.ts",
+    "./inbox-notice": "./src/inbox-notice.ts"
   },
   "dependencies": {
     "mdast-util-from-markdown": "^2.0.3",

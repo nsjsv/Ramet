@@ -6,6 +6,7 @@ import { COLLECTION_NUMBERS_DDL } from './collections/schema.js'
 import { ASSISTANT_DDL } from './agents/drivers/assistant/schema.js'
 import { AI_USAGE_DDL } from './ai-usage-schema.js'
 import { TRIGGERS_DDL } from './triggers/schema.js'
+import { PUSH_DDL } from './push/schema.js'
 
 // 页面变更日志（page-sync.ts）的 UPDATE 触发列：对外字段（API_PAGE_FIELDS，含 position）+ 图标两列 + 封面三列 + deleted_at。
 // 由白名单拼出，不另抄一份列清单，对外字段加列时触发条件跟着变。content_text / agent_session /
@@ -637,6 +638,7 @@ ${AI_USAGE_DDL}
 -- 排队消息发送时用户正在看的页面(Genet 浮窗:「这页」指它,派发时写进 user_message 的 ctx 属性);空 = 没有
 ALTER TABLE send_queue ADD COLUMN IF NOT EXISTS ctx TEXT NOT NULL DEFAULT '';
 ${TRIGGERS_DDL}
+${PUSH_DDL}
 `
 
 // 存量数据迁移(幂等,可重复执行):

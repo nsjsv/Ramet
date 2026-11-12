@@ -56,6 +56,11 @@ services:
       # 可选：公开模型目录（Genet 按它给各模型的思考档位、上下文窗口、输出上限），缺省 https://models.dev/api.json；
       # 设成 off 不拉（服务器上不了外网时），Genet 按内置规则给档位
       RAMET_MODEL_CATALOG: ${RAMET_MODEL_CATALOG:-}
+      # 可选：浏览器推送（标签页关了也能收到系统通知）。服务器要能连到各家浏览器的推送服务
+      # （Chrome → fcm.googleapis.com、Firefox → Mozilla、Safari → Apple、Edge → 微软）；连不上时设一个 http 代理，
+      # 写成 http://<代理主机>:<端口>（容器里连宿主机的代理别写 127.0.0.1）。RAMET_PUSH_HOSTS：额外放行的推送服务主机，逗号分隔，.example.com 表示子域
+      RAMET_PUSH_PROXY: ${RAMET_PUSH_PROXY:-}
+      RAMET_PUSH_HOSTS: ${RAMET_PUSH_HOSTS:-}
     ports:
       # 页面 / REST / WebSocket（只给本机反代用就写成 127.0.0.1:8080）
       - '${WEB_PORT:-8080}:3789'

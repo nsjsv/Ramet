@@ -25,6 +25,9 @@ import AssistantDock from './assistant/AssistantDock'
 import CommandPalette, { preloadPalette } from './palette/CommandPalette'
 import { recentRunPages } from './project/agent-commands'
 import { markPageSeen, openPage, startInboxSync } from './inbox/inbox-store'
+import { startDesktopNotify } from './notify/desktop'
+import { startPresence } from './notify/presence'
+import { forgetDevice, startNotify } from './notify/push-client'
 import { reportTimeZone } from './ai/timer-api'
 
 /* 非首屏页面按需加载（新页面默认也走这里），进了对应路由才下载。占位一律 null：这些页面本来就是先空着、取到数据再画，
@@ -155,7 +158,10 @@ function AuthProvider({ children }: { children: ReactNode }) {
   }, [uid])
 
   const logout = useCallback(() => {
-    void api.logout().catch(() => {}) // 接口失败（会话已死/断网）也要清本地态
+    // 先注销这台设备的系统通知（要带着还有效的登录 cookie），下一个在这台设备登录的人不会收到上一个人的通知
+    void forgetDevice()
+      .then(() => api.logout())
+      .catch(() => {}) // 接口失败（会话已死/断网）也要清本地态
     sessionStorage.removeItem(PENDING_PATH_KEY) // 别把上个会话的邀请 / 接入确认带到下次登录
     setUser(null)
   }, [])
@@ -254,6 +260,20 @@ function Shell({ user }: { user: User }) {
   useEffect(() => startFavoritesSync(), [])
   // 收件箱：外壳挂载拉一次，之后跟着 control:global 的 'inbox' 信号重拉（不另开连接）；退出 / 换账号时拆掉并清空
   useEffect(() => startInboxSync(), [user.id])
+  // 系统通知：标签页在不在用（服务端据此决定推不推）、这台设备的推送 / 桌面通知；点了通知在站内跳过去
+  useEffect(() => startPresence(), [user.id])
+  // navigate 随路由变化换引用，通知模块只随账号重建，经 ref 取最新的
+  const navigateRef = useRef(navigate)
+  navigateRef.current = navigate
+  useEffect(() => {
+    const open = (url: string): void => navigateRef.current(url)
+    const offNotify = startNotify(user.id, open)
+    const offDesktop = startDesktopNotify(open)
+    return () => {
+      offNotify()
+      offDesktop()
+    }
+  }, [user.id])
   // 时区：定时器按用户的墙上时间算，服务端只能从浏览器知道（变了才报）
   useEffect(() => reportTimeZone(user.id), [user.id])
   // 登录几秒后、浏览器空闲时预取命令面板与项目面板的本体（平时按需加载）：第一次 ⌘K / 打开项目面板不用等下载
