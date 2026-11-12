@@ -3,18 +3,22 @@
  * 自己的评论可编辑 / 删除，空间 owner 可删任何人的。readOnly（公开页）只画列表。
  * 首条被删且还有回复时显示「评论已删除」占位（服务端留的 deleted 行）；作者 null = 已注销用户。
  * Genet 以作者名义代发的回复（via）不另标：作者看过原文、点了发送，就是他自己说的话。
- * @了 Genet 的评论下面一行处理状态（call）：等着时「Genet 正在处理…」，没回成的原因 + 去 AI 页看对话（只有叫的人收得到）。 */
+ * 空间 AI 写的评论（author.ai）：机器人图标 + 空间 AI 的名字，没有用户头像；没人能改，串的发起人、叫它的人、空间 owner 能删（comment-ai.ts）。
+ * @了 Genet 的评论下面一行处理状态（call）：等着时「Genet 正在处理…」，没回成的原因 + 去 AI 页看对话（只有叫的人收得到）。
+ * @了空间 AI 的同一行：「<名字> 正在回复…」/「<名字> 没能回复：原因」（成员都看得到，没有对话页可去）。 */
 
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import type { Schema } from '@milkdown/kit/prose/model'
 import { Avatar } from '../Avatar'
+import { markVarStyle } from '../agent-marks'
 import { COPY } from '../copy'
 import { personOf, selfId, subscribePeople, type Person } from '../people'
 import { relativeTime } from '../UpdatesFeed'
 import CommentBody from './CommentBody'
 import CommentComposer from './CommentComposer'
-import type { Anchor, Comment, CommentAuthor, GenetCall, Thread } from './comments-api'
+import { canDeleteComment, canEditComment } from './comment-ai'
+import type { Anchor, Comment, CommentAuthor, CommentCall, Thread } from './comments-api'
 import { DRAFT_ID, closePopover, createThread, editComment, openThread, removeComment, replyTo, setResolved } from './comments-store'
 import { stopReplyDraft } from './reply-draft'
 import { confirmDialog } from '../ui/dialog'
@@ -39,7 +43,22 @@ export function personFor(author: CommentAuthor, spaceId: string | null): Person
   return known ?? { id: author.id ?? '', username: author.name, avatar: null }
 }
 
-function CallLine({ call }: { call: GenetCall }) {
+/** 评论作者的头像：空间 AI 是机器人图标（同回复块抬头的 mark），人是头像 */
+export function CommentAvatar({ author, spaceId }: { author: CommentAuthor; spaceId: string | null }) {
+  if (author?.ai) {
+    return (
+      <span className="cm-ai-avatar" aria-hidden="true">
+        <span className="agent-mark" style={markVarStyle('bot')} />
+      </span>
+    )
+  }
+  return <Avatar person={personFor(author, spaceId)} size={20} />
+}
+
+function CallLine({ call }: { call: CommentCall }) {
+  if (call.ai !== undefined) {
+    return <div className={'cm-call' + (call.state === 'waiting' ? ' is-waiting' : '')}>{call.state === 'waiting' ? C.aiCallWaiting(call.ai) : C.aiCallFailed(call.ai, call.reason)}</div>
+  }
   if (call.state === 'waiting') return <div className="cm-call is-waiting">{C.callWaiting}</div>
   return (
     <div className="cm-call">
@@ -51,12 +70,12 @@ function CallLine({ call }: { call: GenetCall }) {
   )
 }
 
-function CommentItem({ comment, ctx }: { comment: Comment; ctx: CommentCtx }) {
+/** threadBy = 串的发起人（首条评论的作者）：空间 AI 写的评论他能删 */
+function CommentItem({ comment, threadBy, ctx }: { comment: Comment; threadBy: string | undefined; ctx: CommentCtx }) {
   const [editing, setEditing] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const mine = !!comment.author?.id && comment.author.id === selfId()
-  const canDelete = !ctx.readOnly && !comment.deleted && (mine || ctx.canModerate)
-  const canEdit = !ctx.readOnly && !comment.deleted && mine
+  const canDelete = !ctx.readOnly && canDeleteComment(comment, threadBy, selfId(), ctx.canModerate)
+  const canEdit = !ctx.readOnly && canEditComment(comment, selfId())
 
   async function remove(): Promise<void> {
     if (!(await confirmDialog({ message: C.confirmRemove, danger: true }))) return
@@ -72,7 +91,7 @@ function CommentItem({ comment, ctx }: { comment: Comment; ctx: CommentCtx }) {
   return (
     <div className="cm-item">
       <div className="cm-meta">
-        <Avatar person={personFor(comment.author, ctx.spaceId)} size={20} />
+        <CommentAvatar author={comment.author} spaceId={ctx.spaceId} />
         <span className="cm-name">{comment.author?.name ?? C.deletedUser}</span>
         <span className="cm-time" data-tip={new Date(comment.createdAt).toLocaleString()}>
           {relativeTime(comment.createdAt)}
@@ -137,7 +156,7 @@ export default function CommentThread({ thread, ctx, autoFocus, onEscape }: { th
     <div className={'cm-thread' + (resolved ? ' is-resolved' : '')}>
       <div className="cm-list">
         {thread.comments.map((c) => (
-          <CommentItem key={c.id} comment={c} ctx={ctx} />
+          <CommentItem key={c.id} comment={c} threadBy={thread.comments[0]?.author?.id} ctx={ctx} />
         ))}
       </div>
       {resolved && <div className="cm-resolved-line">{C.resolvedBy(thread.resolvedBy?.name ?? C.deletedUser)}</div>}
@@ -166,14 +185,16 @@ export default function CommentThread({ thread, ctx, autoFocus, onEscape }: { th
   )
 }
 
-/** 给刚选中的字写第一条评论（浮层与右侧草稿卡片共用）：发出后激活新串，取消 / Esc 收起（代回复的草稿还在生成就一起停掉） */
-export function DraftComposer({ anchor, ctx }: { anchor: Anchor; ctx: CommentCtx }) {
+/** 给刚选中的字写第一条评论（浮层与右侧草稿卡片共用）：发出后激活新串，取消 / Esc 收起（代回复的草稿还在生成就一起停掉）。
+ *  initial = 框里预先写好的字（正文里 @空间 AI 开的框预填它的记号） */
+export function DraftComposer({ anchor, ctx, initial }: { anchor: Anchor; ctx: CommentCtx; initial?: string }) {
   return (
     <CommentComposer
       getSchema={ctx.getSchema}
       tick={ctx.tick}
       spaceId={ctx.spaceId}
       placeholder={C.placeholder}
+      initial={initial}
       autoFocus
       draftFor={{ target: DRAFT_ID, anchor }}
       onCancel={() => {

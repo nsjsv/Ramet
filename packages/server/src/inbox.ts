@@ -30,6 +30,7 @@ import { parseRemoteId, type ActiveRun, type PendingApproval } from './agents/ma
 import type { ConnectorAgentInfo } from './agents/protocol.js'
 import type { PermissionOption } from './agents/types.js'
 import { agentNames, type AgentNameHost } from './agents/agent-names.js'
+import { isSpaceAiId, SPACE_AI_DEFAULT_NAME, spaceAiNames } from './agents/space-ai.js'
 import { commentItems, type CommentInboxItem } from './comments/inbox.js'
 import { AUTOMATION_PREFIX, automationItems, docMentionItems, SELECT_MY_NOTICE, type AutomationInboxItem, type DocMentionInboxItem } from './triggers/inbox-items.js'
 
@@ -484,6 +485,12 @@ export async function collectInbox(pool: Pool, user: InboxUser, host: InboxHost)
   for (const item of items) if ('agentId' in item && item.agentId) ids.add(item.agentId)
   const names = await displayNames(pool, host, ids)
   for (const item of items) if ('agentName' in item) item.agentName = names.get(item.agentId) ?? item.agentId
+  // 空间 AI 的名字按条目所在页的空间取（同一个 id 在不同空间叫法不同）
+  const aiPages = items.flatMap((item) => ('agentName' in item && 'pageId' in item && isSpaceAiId(item.agentId) ? [item.pageId] : []))
+  const aiNames = await spaceAiNames(pool, aiPages)
+  for (const item of items) {
+    if ('agentName' in item && 'pageId' in item && isSpaceAiId(item.agentId)) item.agentName = aiNames.get(item.pageId) ?? SPACE_AI_DEFAULT_NAME
+  }
   return items
 }
 

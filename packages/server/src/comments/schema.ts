@@ -11,6 +11,10 @@
 // comment_genet_calls：评论里 @Genet 的一次呼叫（comments/genet-call.ts），一条评论最多一次。
 //   state：waiting（通知写进了 Genet 页、等它处理）/ answered（它回在了串里）/ done（那一轮结束了但没回在这里）/ failed（reason）；
 //   home_id = 通知写进的 Genet 页（没写成 = NULL）；created_at 用服务进程的时钟写，与一轮的开始时刻比（谁先谁后决定那一轮管不管它）
+// comments.author_ai：'space' = 空间 AI 写的（评论里 @它，comments/space-ai-call.ts），这时 author_id 为空；名字不存，读时按页面空间现取。
+//   invoker_id = 叫它写这条的人（他能删这条；删号置空）。人写的评论两列都为空
+// comment_ai_calls：评论里 @空间 AI 的一次呼叫，一条评论最多一次。state：waiting（排着 / 在跑）/ answered（回在了串里）/ failed（reason）。
+//   只在进程内跑：服务重启时还 waiting 的在启动时结成 failed
 export const COMMENTS_DDL = `
 CREATE TABLE IF NOT EXISTS comment_threads (
   id TEXT PRIMARY KEY,
@@ -55,6 +59,18 @@ CREATE TABLE IF NOT EXISTS comment_genet_calls (
 );
 CREATE INDEX IF NOT EXISTS idx_genet_calls_waiting ON comment_genet_calls(home_id, created_at) WHERE state = 'waiting';
 CREATE INDEX IF NOT EXISTS idx_genet_calls_thread ON comment_genet_calls(thread_id, user_id) WHERE state = 'waiting';
+ALTER TABLE comments ADD COLUMN IF NOT EXISTS author_ai TEXT CHECK (author_ai IN ('space'));
+ALTER TABLE comments ADD COLUMN IF NOT EXISTS invoker_id TEXT REFERENCES users(id) ON DELETE SET NULL;
+CREATE TABLE IF NOT EXISTS comment_ai_calls (
+  comment_id TEXT PRIMARY KEY REFERENCES comments(id) ON DELETE CASCADE,
+  thread_id TEXT NOT NULL REFERENCES comment_threads(id) ON DELETE CASCADE,
+  invoker_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  state TEXT NOT NULL CHECK (state IN ('waiting', 'answered', 'failed')),
+  reason TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  settled_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_ai_calls_waiting ON comment_ai_calls(created_at) WHERE state = 'waiting';
 `
 
 // 评论开关(两种评论各一个):inline_comments = 划词评论,默认开;page_comments = 正文下方的整页讨论,默认关。

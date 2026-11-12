@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { Page, Space, User } from './api'
 import { COPY } from './copy'
 import { Icon, type IconName } from './icons'
@@ -8,6 +8,7 @@ import { QuickAiPane } from './QuickAiPane'
 import SpaceSettings from './SpaceSettings'
 import { ConnectorsPane } from './ConnectorsPane'
 import { AccountPane, AgentPane, AppearancePane, EditorPane, ShortcutsPane } from './settings-panes'
+import { onOpenSettings } from './settings-bus'
 
 /* ---------- 主设置弹窗 ----------
  * 入口：侧栏底部「空间切换」右边的 ⚙（常驻）。左侧分组导航（带图标），右侧标题 + 说明 + 卡片式设置行：
@@ -66,6 +67,8 @@ export default function SettingsModal({
   const personal: TabId[] = ['account', 'appearance', 'editor', 'keys', 'agent', 'quick']
   const spaceTabs: TabId[] = canSpace ? ['space', ...(canConnectors ? (['connectors'] as const) : []), 'machines'] : []
   const [tab, setTab] = useState<TabId>(initialTab ?? 'account')
+  // 弹窗开着时也认「去设置」（空间 AI 卡里没有连接时跳去 Genet 分页）：initialTab 只在打开那一下生效
+  useEffect(() => onOpenSettings((t) => setTab(t)), [])
   // 分页可能中途变得不可见（空间被退）；回落到账户，不留空白
   const active: TabId = [...personal, ...spaceTabs].includes(tab) ? tab : 'account'
   const meta = TABS[active]

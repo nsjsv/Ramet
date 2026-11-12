@@ -13,6 +13,7 @@ import { IndexeddbPersistence } from 'y-indexeddb'
 import type { NavigateFunction } from 'react-router-dom'
 import { api, type Page } from '../api'
 import { agentList } from '../default-agent'
+import { mentionAgents } from './mention-sources'
 import { cursorIdentity, isIdentity, type Identity } from '../identity'
 import type { BlockHandleProvider } from './block-handle'
 import type { TouchBlockSetup } from './block-touch'
@@ -22,6 +23,7 @@ import { startTitleSession } from './title-session'
 import { configSlash, slash, slashSession } from './slash'
 import { blankClick } from './blank-click'
 import { configDocMention, docMention } from './doc-mention'
+import { openAiComment } from '../comments/comment-entry'
 import { configClipboardText, configMarkdownOut, configPaste, extraInputRules } from './markdown'
 import { rametDialect } from './md-dialect'
 import { highlightInputRule, highlightSchema, textColorSchema } from './color-marks'
@@ -417,8 +419,10 @@ export function startEditorSession(deps: EditorSessionDeps): () => void {
         ui((s) =>
           docMention({
             pages: () => pagesRef.current,
-            // 列全部工具：显式 @ 点名不受本页的工具锁定（它用自己的会话，对话内容靠补发带过去）
-            agents: agentList,
+            // 列全部工具：显式 @ 点名不受本页的工具锁定（它用自己的会话，对话内容靠补发带过去）。
+            // 空间 AI 在 `>>` 消息块里是点名；在普通段落里选它是在这一段上开划词评论框问它（commentOn）
+            agents: () => mentionAgents(agentList(), id),
+            commentOn: openAiComment(id),
             pageId: id,
             enabled: !readOnly,
             // `[[新名字`：建当前页的子页（同空间），建好广播刷新侧栏

@@ -11,8 +11,9 @@ import { dropInboxItem } from '../inbox/inbox-store'
 import { selfId } from '../people'
 import { commentsApi, type Anchor, type Comment, type Thread } from './comments-api'
 
-/** 激活的串：看一个已有的串，或给刚选中的字写第一条评论（还没有串）。宽屏是右侧展开的卡片，窄屏是浮层 */
-export type Popover = { kind: 'thread'; threadId: string } | { kind: 'draft'; anchor: Anchor }
+/** 激活的串：看一个已有的串，或给刚选中的字写第一条评论（还没有串）。宽屏是右侧展开的卡片，窄屏是浮层。
+ *  initial = 新评论框里预先写好的字（正文里 @空间 AI 开的框预填它的记号） */
+export type Popover = { kind: 'thread'; threadId: string } | { kind: 'draft'; anchor: Anchor; initial?: string }
 
 /** 草稿（还没有串）在高亮与右侧卡片里用的 id */
 export const DRAFT_ID = '__draft'
@@ -186,8 +187,8 @@ export function openThread(threadId: string): void {
   markThreadRead(threadId)
 }
 
-export function openDraft(anchor: Anchor): void {
-  set({ popover: { kind: 'draft', anchor }, drawer: false, expanded: null })
+export function openDraft(anchor: Anchor, initial?: string): void {
+  set({ popover: { kind: 'draft', anchor, ...(initial ? { initial } : {}) }, drawer: false, expanded: null })
 }
 
 export function closePopover(): void {

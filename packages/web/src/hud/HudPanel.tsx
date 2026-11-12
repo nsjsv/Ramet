@@ -104,7 +104,7 @@ export function HudPanel({
           <AgentBadgeView badge={agentBadge(run.agent)} />
         </span>
         <div className="hp-title">
-          <b>{agentName(run.agent)}</b>
+          <b>{agentName(run.agent, pageId)}</b>
           <span className={run.live ? 'hp-sub is-live' : 'hp-sub'}>{subLine(run, tally.steps)}</span>
         </div>
         {run.live && canStop && (

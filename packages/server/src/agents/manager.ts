@@ -13,6 +13,7 @@ import { SendQueue, type QueueHost } from './send-queue.js'
 import { queueHost } from './queue-host.js'
 import { AssistantDriver, type AssistantDeps } from './drivers/assistant/driver.js'
 import { ASSISTANT_ID, isAssistantId, resolveAssistant } from './assistant-agent.js'
+import { isSpaceAiId, pageToolCtx, resolveSpaceAi } from './space-ai.js'
 import { memoryBlockOfPage } from '../memories.js'
 import { DriverBase } from './drivers/base.js'
 import { createAdapter } from './drivers/create.js'
@@ -222,15 +223,14 @@ export class AgentManager {
   private pageReadTools(entry: AdapterEntry, user: { id: string; role: string }, agent: ResolvedAgent, pageId: string, profile: ToolProfile): PageTool[] {
     // 工具档位（tool-profile.ts）：无档不挂 MCP，精简档的凭证带档位（中心端点据此拦），不能叫别的 agent
     if (profile === 'none') return []
-    const key = `${user.id}|${pageId}|${profile}`
+    // 空间 AI 的凭证收窄到页面所在的空间：页面搬到别的空间就是另一把
+    const key = `${user.id}|${pageId}|${profile}|${agent.space?.id ?? ''}`
     let token = entry.pageTokens.get(key)
     // 只复用还用得上的凭证（凭证有寿命，Genet 这种全站共用的适配器又很少被闲置回收）：过期 / 快过期就签新的，
     // 会话里的旧凭证由 useSession 按 entry.loaded 对不上而重新加载换掉
     if (!token || !grantUsable(token)) {
       // 完整档的页面会话能叫别的 agent（run_agent），凭证绑着这一页与这个 agent
-      token = mintPageToken(user.id, entry.key, profile === 'minimal'
-        ? { pageId, agentId: agent.id, canDispatch: false, profile: 'minimal' }
-        : { pageId, agentId: agent.id, canDispatch: true })
+      token = mintPageToken(user.id, entry.key, pageToolCtx(agent, pageId, profile))
       entry.pageTokens.set(key, token)
     }
     return [this.toolGrant(agent, token)]
@@ -284,6 +284,12 @@ export class AgentManager {
   private teamRun(team: NonNullable<GrantCtx['team']>, userId: string, pageId: string | null): RunState | null {
     const run = this.runIndex.get(team.runId)
     return run && !run.closed && !run.cancelled && run.userId === userId && run.pageId === pageId && run.team?.kind === team.kind ? run : null
+  }
+
+  /** 评论里叫空间 AI（comments/space-ai-call.ts）：与 >> 对话同一个驱动实例（签给它的凭证 scope = 适配器 key，回收时一起作废）
+   *  + MCP 回打中心的地址。agent 必须是 resolveSpaceAi 解析出来的 */
+  spaceAiRunner(agent: ResolvedAgent): { adapter: AgentAdapter; url: string } {
+    return { adapter: this.ensureAdapter(agent).adapter, url: this.opts.httpBase() }
   }
 
   /** Ramet 工具的 HTTP 端点（routes/ramet-tools.ts）要的能力：自己的审批、可叫的 agent、叫 agent 执行、带队组长的两个工具 */
@@ -394,6 +400,8 @@ export class AgentManager {
   async resolve(agentId: string, user: { id: string; role: string }, pageId?: string): Promise<ResolvedAgent | null> {
     // Genet 不在目录里、不用任何机器：只在这个人自己的 Genet 页上解析得出来（判定在 assistant-agent.ts），没给页面就是未知
     if (isAssistantId(agentId)) return pageId ? resolveAssistant(this.pool, user, pageId) : null
+    // 空间 AI 同理：按页面所在的团队空间解析（判定在 space-ai.ts）
+    if (isSpaceAiId(agentId)) return pageId ? resolveSpaceAi(this.pool, user, pageId) : null
     const local = this.opts.agents.find((a) => a.id === agentId)
     if (local) return { id: local.id, local, pass: assertLocalOwner(user, 'agent') }
     const parsed = parseRemoteId(agentId)
@@ -830,9 +838,10 @@ export class AgentManager {
     }
     if (existing) existing.shared.kill()
     // 远端：同一 connector 的同一 agent 共用 hub 持有的一个 RemoteAgent（同一 WSS 连接，会话级副本在里面）。
-    // Genet 全站共用一个实例（会话按凭证认人），它要的是库与模型调用，AgentConfig 装不下，所以不经 createAdapter
+    // Genet 全站共用一个实例（会话按凭证认人），它要的是库与模型调用，AgentConfig 装不下，所以不经 createAdapter；
+    // 空间 AI 是同一个驱动的另一个实例（key 不同，会话按凭证上的空间认）
     const shared = agent.assistant
-      ? new AssistantDriver({ pool: this.pool, ...this.opts.assistant })
+      ? new AssistantDriver({ pool: this.pool, ...this.opts.assistant, mode: agent.space ? 'space' : 'genet' })
       : agent.local
         ? createAdapter(agent.local)
         : this.opts.hub.remote(agent.remote!.connectorId, agent.remote!.agentId)

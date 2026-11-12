@@ -47,7 +47,7 @@ export function RunHead({
 }) {
   const { record, parent } = detail
   const badge = agentBadge(record.agent)
-  const name = agentName(record.agent) || record.agent
+  const name = agentName(record.agent, parent?.id) || record.agent
   const steps = record.entries.filter((e) => e.k === 'tool').length
   const usage = record.usage ?? record.info?.usage
   return (

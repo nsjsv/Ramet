@@ -17,7 +17,7 @@ import { Icon } from '../icons'
 import { agentOptionsFor, subscribeAgentOptions, usePageAgents } from './agent-bar'
 import { defaultModeValue, modeText } from './agent-mode'
 import { agentBadge } from './ai-block'
-import { capsOf } from '../assistant/identity'
+import { capsOf, isSpaceAiId } from '../assistant/identity'
 import { ChipMenu } from './chip-menu'
 import { WorkspacePanel } from './workspace-panel'
 
@@ -86,7 +86,9 @@ export function ChipBar({ pageId, agent, cwd, opts, size = 'card', onAgent, onCw
   }, [pageId, agent])
 
   if (agents.length === 0) {
-    return <span className="chip-empty">{!loaded ? T.loadingAgents : lock ? T.lockedEmpty(lock) : T.noAgents}</span>
+    // 锁定成空间 AI 而它没在目录里 = 这个空间的 AI 被关了（锁定的工具名是它的 id，不给用户看）
+    const locked = isSpaceAiId(lock) ? COPY.spaceAi.notEnabled : T.lockedEmpty(lock)
+    return <span className="chip-empty">{!loaded ? T.loadingAgents : lock ? locked : T.noAgents}</span>
   }
 
   const info = agents.find((a) => a.id === agent)
@@ -129,8 +131,9 @@ export function ChipBar({ pageId, agent, cwd, opts, size = 'card', onAgent, onCw
   return (
     <div className={`chip-bar is-${size}`}>
       <Chip id={AGENT} open={open} anchors={anchors} onToggle={toggle} tip={T.agent}>
-        <AgentBadgeView badge={agentBadge(agent)} className="chip-mark" />
-        <span className="chip-text">{info?.label ?? agent}</span>
+        {/* 目录里只剩只能点名的空间 AI 时没有回落，agent 是空串：提示去选，不借默认 agent 的图标、也不是一颗空 chip */}
+        {agent ? <AgentBadgeView badge={agentBadge(agent)} className="chip-mark" /> : <Icon name="bot" size={14} />}
+        <span className="chip-text">{info?.label ?? (agent || COPY.spaceAi.pickSource)}</span>
       </Chip>
       {agent && caps.workspace && (
         <Chip id={CWD} open={open} anchors={anchors} onToggle={toggle} tip={COPY.cwd.chipTitle(cwd)}>

@@ -70,9 +70,10 @@ export default function CommentsHost({ pageId, mode, getView, ctx, deepLink, rea
   const inline = kinds.inline
   useEffect(() => {
     if (mode !== 'auth' || !inline) return
-    return setCommentEntry(pageId, (view, range) => {
+    return setCommentEntry(pageId, (view, range, initial) => {
       const anchor = encodeAnchor(view.state.doc, yContextOf(view.state), range.from, range.to)
-      if (anchor) openDraft(anchor)
+      if (anchor) openDraft(anchor, initial)
+      return !!anchor
     })
   }, [pageId, mode, inline])
 

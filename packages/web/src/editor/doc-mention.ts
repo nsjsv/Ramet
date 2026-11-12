@@ -3,6 +3,7 @@
  * 列表样式复用 .chat-mention（见 chat.css）。
  * 选中插的是行内原子 chip：page_mention（页面；skill 也是指向 skill 页的 page_mention）、agent_mention、
  * user_mention（成员，editor/user-mention.ts），画面上只有名字，看不见 `@[标题](page:id)` 这段语法与 uuid。
+ * 例外：普通段落（不在 `>>` 消息块里）选空间 AI 不插 chip，删掉 `@查询`、在这一段上开划词评论框（doc-mention-ai.ts）。
  * 对话输入框插的是那段记号，进文档时由 mention-upgrade.ts 在既有 parse 边界升成同一种 chip。
  * 「新建页面」（`[[新名字` 的最后一项）：建当前页的子页（标题就是打的名字），再插入指向它的提及。建页是异步的，
  * 回来时按当下光标处重新找 `[[…` 的范围再换（这期间文档可能变了，找不到就不插）。
@@ -34,19 +35,22 @@ import { chevronEl, rowIconEl } from './mention-icon'
 import { activate, mentionKey, type MentionKeyAction } from './mention-nav'
 import { mentionRows } from './mention-rows'
 import { mentionSources, warmMentionSources } from './mention-sources'
+import { agentPickRoute, commentRangeAt, type TextRange } from './doc-mention-ai'
 import { END_SESSION, endSessionSoon, parseAt, sessionField, type Session } from './trigger-session'
 
 export interface DocMentionOptions {
   /** 页面目录（Editor 的 listPages 结果），候选来源 */
   pages: () => Page[] | null
-  /** 可点名的 agent 目录（default-agent.ts 的 agentList） */
-  agents: () => AgentInfo[]
+  /** 可点名的 agent 目录（default-agent.ts 的 agentList，团队空间里开着的空间 AI 也在，mention-sources.ts 的 mentionAgents） */
+  agents: () => readonly AgentInfo[]
   /** 当前页：决定空间（skill / 成员候选按它取），「最近」不列它自己 */
   pageId: string
   /** viewer 只读时不弹出、不拦键 */
   enabled: boolean
   /** `[[新名字` 选「新建页面」：建当前页的子页并返回它（失败抛错，菜单只记日志） */
   createPage: (title: string) => Promise<Page>
+  /** 普通段落里选了空间 AI（label = 它的名字）：在 range 上开新的划词评论框、预填它的记号；range 空 / 这一页没有划词评论时由宿主提示原因 */
+  commentOn: (view: EditorView, range: TextRange | null, label: string) => void
 }
 
 interface DocMentionController {
@@ -76,6 +80,13 @@ const docMentionKey = new PluginKey<Session | null>('rametDocMention')
 const controllers = new WeakMap<EditorView, DocMentionController>()
 
 const anywhere = (): boolean => true
+
+/** 光标在不在用户消息块（`>>`）里 */
+function inMessage(view: EditorView): boolean {
+  const $from = view.state.selection.$from
+  for (let d = $from.depth; d > 0; d--) if ($from.node(d).type.name === 'user_message') return true
+  return false
+}
 
 function hide(c: DocMentionController): void {
   c.menu.style.display = 'none'
@@ -194,6 +205,18 @@ function insertChip(c: DocMentionController, make: (view: EditorView) => Prosemi
   view.focus()
 }
 
+/** 普通段落里选了空间 AI：删掉 `@查询`（正文里不留东西），在这一段（没字就往前找）开评论框 */
+function askInComment(c: DocMentionController, label: string): void {
+  const view = c.view
+  if (view.isDestroyed) return
+  const hit = queryAt(view)
+  if (!hit) return
+  const tr = view.state.tr.delete(hit.at, view.state.selection.from)
+  tr.setMeta(docMentionKey, END_SESSION)
+  view.dispatch(tr)
+  c.opts.commentOn(view, commentRangeAt(view.state.doc, hit.at), label)
+}
+
 const pageChip = (page: { id: string; title: string }) => (view: EditorView) =>
   view.state.schema.nodes.page_mention?.create({ pageId: page.id, title: mentionLabel(page.title) }) ?? null
 
@@ -219,6 +242,7 @@ function pick(c: DocMentionController, cand: Candidate): void {
   if (cand.kind === 'category') {
     act(c, { type: 'enter', cat: cand.cat })
   } else if (cand.kind === 'agent') {
+    if (agentPickRoute(cand.id, inMessage(c.view)) === 'comment') return askInComment(c, cand.label)
     insertChip(c, (view) => view.state.schema.nodes.agent_mention?.create({ agentId: cand.id, label: cand.label }) ?? null)
   } else if (cand.kind === 'page') {
     insertChip(c, pageChip(cand.page))

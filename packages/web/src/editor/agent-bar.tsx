@@ -12,6 +12,8 @@ import { encodeOpts, messageConfigOf, type MessageConfig } from './message-block
 import { upgradeMentions } from './mention-upgrade'
 import { selfId } from '../people'
 import { isAssistantPage, pageCatalog } from '../assistant/identity'
+import { spaceAiOfPage, useSpaceAi, type SpaceAiInfo } from '../assistant/space-ai'
+import { continueOffText, replyOffText } from './space-ai-run'
 
 // ---------- agent 交互层 ----------
 // SSE（GET /api/pages/:id/agent-events）推 status / permission / permission_resolved / commands / config 等事件；
@@ -434,13 +436,20 @@ export function useAgentRunError(pageId: string): string | null {
 /** 触发一次生成；失败原因写到运行错误单源（不吞） */
 export function runAgent(pageId: string, agent: string): void {
   // 锁定的工具一台都不在线时照样交给服务端：消息里显式 @ 了别的 agent 就照常跑（@ 不受锁定），没有 @ 服务端回「现在没有可用的 …」
-  if (!agent && !agentStateFor(pageId).lock) {
-    setAgentRunError(pageId, '没有可用的 agent：还没连 connector（设置 → 连接器），或别人接入的机器还没授权给你（设置 → 机器）')
+  const lock = agentStateFor(pageId).lock
+  if (!agent && !lock) {
+    // 空间 AI 开着却没回落到它：它只在被 @ / 被选成来源时才用，告诉用户怎么叫它
+    const spaceAi = spaceAiOfPage(pageId)
+    setAgentRunError(
+      pageId,
+      spaceAi?.enabled ? COPY.spaceAi.callHint(spaceAi.name) : '没有可用的 agent：还没连 connector（设置 → 连接器），或别人接入的机器还没授权给你（设置 → 机器）',
+    )
     return
   }
   setAgentRunError(pageId, null)
   void api.continuePage(pageId, agent).catch((err: unknown) => {
-    setAgentRunError(pageId, err instanceof Error ? `启动失败：${err.message}` : '启动失败')
+    const off = continueOffText(pageId, err, agent, lock)
+    setAgentRunError(pageId, off ?? (err instanceof Error ? `启动失败：${err.message}` : '启动失败'))
   })
 }
 
@@ -455,9 +464,15 @@ export function continueRest(pageId: string): void {
 // 只取仍在目录里的（被撤销的 connector 等失效 id 跳过）。输入卡、文档发送、斜杠命令、消息 chip 都走这里。
 // 目录先按本页锁定的工具过滤：锁定的工具一台在线的都没有时解析成 ''，不回落到别的工具。
 
-/** 这一页能选的 agent：这一页的目录（Genet 页只有 Genet，assistant/identity.ts）按锁定的工具过滤。下面各个口径都经它 */
-export function catalogForPage(agents: readonly AgentInfo[], pageId: string, s: Pick<AgentState, 'choice' | 'lock'>): readonly AgentInfo[] {
-  return agentsForPage(pageCatalog(agents, isAssistantPage(pageId, s)), s.lock)
+/** 这一页能选的 agent：这一页的目录（Genet 页只有 Genet；团队空间开着空间 AI 时追加它，assistant/identity.ts）按锁定的工具过滤。
+ *  下面各个口径都经它。spaceAi 缺省现读（React 侧传订阅到的值，变了才重算） */
+export function catalogForPage(
+  agents: readonly AgentInfo[],
+  pageId: string,
+  s: Pick<AgentState, 'choice' | 'lock'>,
+  spaceAi: SpaceAiInfo | null = spaceAiOfPage(pageId),
+): readonly AgentInfo[] {
+  return agentsForPage(pageCatalog(agents, isAssistantPage(pageId, s), spaceAi, s.lock), s.lock)
 }
 
 /** 这一页能选的 agent：非 React 消费方用（发送 / 斜杠命令） */
@@ -479,7 +494,11 @@ export function usePageAgents(pageId: string | undefined): { agents: readonly Ag
   )
   const lock = useSyncExternalStore(subscribe, () => (pageId ? agentStateFor(pageId).lock : ''))
   const choice = useSyncExternalStore(subscribe, () => (pageId ? agentStateFor(pageId).choice : null))
-  const filtered = useMemo(() => (pageId ? catalogForPage(agents, pageId, { choice, lock }) : agentsForPage(agents, lock)), [agents, pageId, choice, lock])
+  const spaceAi = useSpaceAi(pageId)
+  const filtered = useMemo(
+    () => (pageId ? catalogForPage(agents, pageId, { choice, lock }, spaceAi) : agentsForPage(agents, lock)),
+    [agents, pageId, choice, lock, spaceAi],
+  )
   return { agents: filtered, loaded, lock }
 }
 
@@ -522,7 +541,8 @@ export function setPageTools(pageId: string, profile: ToolProfile): void {
 export function regenerateReply(pageId: string, replyId: string): void {
   setAgentRunError(pageId, null)
   void api.regenerate(pageId, replyId).catch((err: unknown) => {
-    setAgentRunError(pageId, err instanceof Error ? `${COPY.run.regenerateFailed}：${err.message}` : COPY.run.regenerateFailed)
+    const off = replyOffText(pageId, err, replyId, agentStateFor(pageId).lock)
+    setAgentRunError(pageId, off ?? (err instanceof Error ? `${COPY.run.regenerateFailed}：${err.message}` : COPY.run.regenerateFailed))
   })
 }
 
@@ -534,7 +554,8 @@ export function resumeReply(pageId: string, replyId: string, orRegenerate = fals
   setAgentRunError(pageId, null)
   void api.resume(pageId, replyId).catch((err: unknown) => {
     if (orRegenerate && err instanceof ApiError && err.code === 'not-resumable') return regenerateReply(pageId, replyId)
-    setAgentRunError(pageId, err instanceof Error ? `${COPY.run.resumeFailed}：${err.message}` : COPY.run.resumeFailed)
+    const off = replyOffText(pageId, err, replyId, agentStateFor(pageId).lock)
+    setAgentRunError(pageId, off ?? (err instanceof Error ? `${COPY.run.resumeFailed}：${err.message}` : COPY.run.resumeFailed))
   })
 }
 

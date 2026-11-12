@@ -23,6 +23,7 @@ import { pagesRoutes } from './routes/pages.js'
 import { PAGE_CHANGES_PRUNE_MS, prunePageChanges } from './page-sync.js'
 import { blocksRoutes } from './routes/blocks.js'
 import { spacesRoutes } from './routes/spaces.js'
+import { spaceAiRoutes, watchSpaceAiConnections } from './routes/space-ai.js'
 import { importRoutes } from './routes/import.js'
 import { boardsRoutes } from './routes/boards.js'
 import { collectionRoutes } from './routes/collections.js'
@@ -77,6 +78,7 @@ import { isAssistantId, isAssistantPage } from './agents/assistant-agent.js'
 import { createSafeFetch, type SafeFetch } from './endpoint-guard.js'
 import { commentPosted, type PostedComment } from './triggers/sources/comment.js'
 import { GenetCalls } from './comments/genet-call.js'
+import { SpaceAiCalls } from './comments/space-ai-call.js'
 import { mentionWatch } from './triggers/sources/mention.js'
 import { PageWatch, type PageWatchDeps } from './triggers/sources/page-watch.js'
 import { rowChanged, rowsAdded, type CollectionEventDeps } from './triggers/sources/collection.js'
@@ -232,6 +234,7 @@ export function startServer(
   // 收件箱刷新信号：300ms 去抖合并，经 control:global 广播 'inbox'（不带内容，前端收到后重拉 GET /api/inbox）
   const inbox = new InboxPoke(() => notifyInboxChanged(hocuspocus))
   const offFirstUse = onMachineFirstUse(() => inbox.poke())
+  const offSpaceAiConnections = watchSpaceAiConnections(pool, () => notifyPagesChanged(hocuspocus))
   // 外来事件之后 Genet 动手前先问主人（routes/ramet-consent.ts）：读 Genet 页的活文档判，审批挂在 Ramet 自己的审批上（agentManager 后建，惰性取）
   const consent = new Consent({
     pool,
@@ -316,6 +319,8 @@ export function startServer(
       },
     ),
   )
+  // 空间 AI 的配置（每条路由自带 requireAuth）：改了经同一个广播让在线端重拉空间列表（列表里带 ai）
+  app.route('/', spaceAiRoutes(pool, () => notifyPagesChanged(hocuspocus)))
   // 目录树路由：目录 / 条目变更不广播，但删目录（树）会把页面移入回收站，页面树要跟着变，所以注入同一份页面广播回调
   app.route(
     '/',
@@ -463,9 +468,17 @@ export function startServer(
   // 评论里 @Genet（comments/genet-call.ts）：与任务回报同一条写 Genet 页的链；Genet 页上一轮结束时给呼叫收尾
   const genetCalls = new GenetCalls({ pool, notify: toolHost.tasks.notify, changed: commentsChanged })
   toolHost.tasks.onEnd((pageId, outcome, error, startedAt) => genetCalls.runEnded(pageId, outcome, error, startedAt))
+  // 评论里 @空间 AI（comments/space-ai-call.ts）：在中心直接跑一轮、以 AI 的名义回在串里；它的回复同样交给 posted（不会再叫醒它自己）
+  const spaceAiCalls = new SpaceAiCalls({
+    pool,
+    runner: (agent) => agentManager.spaceAiRunner(agent),
+    changed: commentsChanged,
+    posted: (c) => posted(c),
+  })
   const posted = (c: PostedComment): void => {
     triggers.background(() => commentPosted({ pool, hub: triggers }, c))
     triggers.background(() => genetCalls.posted(c))
+    triggers.background(() => spaceAiCalls.posted(c))
   }
   app.route('/', commentRoutes(pool, commentsChanged, posted))
   // 过程页 record（只读视图）
@@ -590,6 +603,8 @@ export function startServer(
       // 存量补传 + 定时探测 / 扫描：监听成功后才起，失败只记日志
       imgbed.start()
       triggers.start()
+      // 上一个进程没跑完的评论呼叫结成 failed（排队只在内存里）；只动这个进程开始之前写下的
+      await spaceAiCalls.recover().catch((err: unknown) => console.error('[space-ai] 收尾遗留的评论呼叫失败', err))
       resolve({
         port: actual,
         previewPort,
@@ -607,11 +622,14 @@ export function startServer(
           closed = true
           clearInterval(sweeper)
           clearInterval(pruner)
+          // 评论里叫空间 AI 的在跑的那几次停掉（它们挂在触发器的后台活里，不停的话下面要等模型说完）
+          spaceAiCalls.dispose()
           // 先停时钟、等在派发的那一趟做完（派发要写文档，必须在 hocuspocus.destroy 之前）
           await triggers.dispose()
           await imgbed.dispose()
           inbox.dispose()
           offFirstUse()
+          offSpaceAiConnections()
           // 先让在跑的 run 收尾：运行中的正文只在内存里，收尾要经机器人客户端写进文档，
           // 所以必须排在 hocuspocus.destroy 之前（之后就没有连接可写了）
           await agentManager.shutdown(SHUTDOWN_RUNS_MS)

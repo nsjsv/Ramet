@@ -14,6 +14,7 @@ import { rowIcon } from '../page-icon.js'
 // → 正文里各词出现次数之和（$5 = 小写的词）→ 正文最近改动（没有就用建页时间）→ id
 const SEARCH = `SELECT id, title, content_text, icon_emoji, icon_file_id, parent_id FROM live_pages p
   WHERE space_id IN (SELECT space_id FROM space_members WHERE user_id = $1)
+    AND ($9::text IS NULL OR space_id = $9)
     AND ($2 OR kind <> 'run')
     AND NOT EXISTS (
       SELECT 1 FROM unnest($4::text[]) pat WHERE NOT (p.title ILIKE pat ESCAPE '\\' OR coalesce(p.content_text, '') ILIKE pat ESCAPE '\\')
@@ -60,7 +61,8 @@ export async function searchPages(
   pool: Pool,
   user: { id: string },
   q: string,
-  opts: { includeAgent?: boolean; limit?: number } = {},
+  /** spaceId = 只搜这个空间（空间 AI 的凭证范围）；不给 = 自己是成员的全部空间 */
+  opts: { includeAgent?: boolean; limit?: number; spaceId?: string } = {},
 ): Promise<Array<{ id: string; title: string; snippet: string; icon: ReturnType<typeof rowIcon>; parent_id: string | null }>> {
   const limit = Math.min(Math.max(opts.limit ?? 50, 1), 50)
   const query = buildSearch(q)
@@ -72,7 +74,7 @@ export async function searchPages(
     icon_emoji: string | null
     icon_file_id: string | null
     parent_id: string | null
-  }>(SEARCH, [user.id, opts.includeAgent === true, limit, query.patterns, query.terms, query.full, query.prefix, query.contains])
+  }>(SEARCH, [user.id, opts.includeAgent === true, limit, query.patterns, query.terms, query.full, query.prefix, query.contains, opts.spaceId ?? null])
   // 命中带图标(下拉行显示页面身份);派生契约与页面列表同源
   const hitTerm = (text: string | null): string => query.terms.find((t) => text?.toLowerCase().includes(t)) ?? query.terms[0]!
   return rows.map((r) => ({ id: r.id, title: r.title, snippet: snippet(r.content_text, hitTerm(r.content_text)), icon: rowIcon(r), parent_id: r.parent_id }))

@@ -6,6 +6,7 @@ import { toolOf } from '@ramet/shared/reply-stats'
 import type { Pool } from 'pg'
 import type { DocWriter } from '../collab.js'
 import { grantUsable, type PageTool } from '../page-read.js'
+import { isSpaceAiId } from './space-ai.js'
 import type { MachinePass } from './machine-access.js'
 import type { RunState } from './run-state.js'
 import type { AgentPosture } from './posture.js'
@@ -82,7 +83,9 @@ export class AgentOfflineError extends Error {
 export class ToolLockedError extends Error {
   /** offline = 锁定的工具此刻一台能用的都没有（没指定 agent 时也不回落到别的工具） */
   constructor(readonly tool: string, offline = false) {
-    super(offline ? `这个对话用的是 ${tool}，现在没有可用的 ${tool}` : `这个对话用的是 ${tool}，换工具请新开一页`)
+    // 工具名会显示在失败条上：空间 AI 的工具名就是它的内部 id，换成叫法（各家 CLI 的工具名本来就是可读的）
+    const name = isSpaceAiId(tool) ? '空间 AI' : tool
+    super(offline ? `这个对话用的是 ${name}，现在没有可用的 ${name}` : `这个对话用的是 ${name}，换工具请新开一页`)
   }
 }
 
@@ -130,6 +133,8 @@ export type ResolvedAgent = {
   /** 中心自己跑的 Genet（assistant-agent.ts）：不在任何机器上，没有工作区（cwd 恒为空）、不记机器使用、不搬会话；
    *  只在发起人自己的 Genet 页上才解析得出来 */
   assistant?: true
+  /** 空间 AI（space-ai.ts，同时带 assistant）：页面所在的团队空间。凭证收窄到它，驱动按它认会话主体 */
+  space?: { id: string }
 }
 
 /** 这一轮的执行目标（resolveRun / resolveRedo 的产物）：agent + 生效 cwd + 消息级配置覆盖。

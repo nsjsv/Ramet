@@ -4,13 +4,21 @@
 import { randomUUID } from 'node:crypto'
 import type { Pool, PoolClient } from 'pg'
 import { withTransaction } from '../db.js'
+import { SPACE_AI_DEFAULT_NAME, spaceAiNames } from '../agents/space-ai.js'
 
+/** 人写的评论的作者 */
+export type UserAuthor = { id: string; name: string }
+/** 空间 AI 写的评论：没有用户 id，名字是页面所在空间的空间 AI 此刻的名字（改名后旧评论也跟着变） */
+export type AiAuthor = { ai: 'space'; name: string }
 /** null = 作者已注销（外键置空） */
-export type CommentAuthor = { id: string; name: string } | null
-/** 评论里 @Genet 的处理状态（comments/genet-call.ts）。回了（answered）不出：回复就在串里。
- *  waiting 给能看这个串的人都看（知道有回复要来）；没成的结局（done = 看过了但没回在这里、failed）与原因只给叫的人 */
-export type GenetCall = { state: 'waiting' | 'done' | 'failed'; reason: string }
-/** via = 'genet'：Genet 以作者的名义代发的（作者批过原文，或作者在串里叫了它），只做记录、界面上不另标；本人写的没有这个键 */
+export type CommentAuthor = UserAuthor | AiAuthor | null
+/** 评论里 @Genet / @空间 AI 的处理状态（comments/genet-call.ts、space-ai-call.ts）。回了（answered）不出：回复就在串里。
+ *  waiting 给能看这个串的人都看（知道有回复要来）。
+ *  Genet：没成的结局（done = 看过了但没回在这里、failed）与原因只给叫的人（那是他自己的 AI）；
+ *  空间 AI（ai = 它此刻的名字）：failed 与原因给所有能看这个串的人（它是空间共用的，没回成大家都该知道为什么） */
+export type CommentCall = { state: 'waiting' | 'done' | 'failed'; reason: string; ai?: string }
+/** via = 'genet'：Genet 以作者的名义代发的（作者批过原文，或作者在串里叫了它），只做记录、界面上不另标；本人写的没有这个键。
+ *  invoker：空间 AI 写的评论是谁叫它写的（他能删这条），人写的没有这个键 */
 export type Comment = {
   id: string
   author: CommentAuthor
@@ -19,7 +27,8 @@ export type Comment = {
   editedAt: string | null
   deleted: boolean
   via?: 'genet'
-  call?: GenetCall
+  invoker?: string
+  call?: CommentCall
 }
 /** from / to = base64 编码的 Y.RelativePosition；blockId + text + n 是相对位置解析不了时的文字兜底 */
 export type Anchor = { from: string; to: string; blockId: string; text: string; n: number }
@@ -30,13 +39,13 @@ export type Thread = {
   anchor: Anchor | null
   createdAt: string
   resolvedAt: string | null
-  resolvedBy: CommentAuthor
+  resolvedBy: UserAuthor | null
   readAt: string | null
   comments: Comment[]
 }
-/** 公开页的形状：作者只有名字，不带 user id */
-export type PublicAuthor = { name: string } | null
-export type PublicComment = Omit<Comment, 'author'> & { author: PublicAuthor }
+/** 公开页的形状：作者只有名字（空间 AI 另标 ai，好画机器人图标），不带任何 id */
+export type PublicAuthor = { name: string } | AiAuthor | null
+export type PublicComment = Omit<Comment, 'author' | 'invoker'> & { author: PublicAuthor }
 export type PublicThread = Omit<Thread, 'comments' | 'resolvedBy'> & { resolvedBy: null; comments: PublicComment[] }
 
 /** 单条评论上限（按码点数，不按 UTF-16 码元：中文与 emoji 都算一个字） */
@@ -70,30 +79,47 @@ export function parseAnchor(raw: unknown): Anchor | null {
   return { from: a.from, to: a.to, blockId: a.blockId, text: a.text, n: a.n }
 }
 
-// @[名字](user:<id>)：名字里可能带 `]`，所以按收口的 `](user:` 定位（非贪婪匹配到最近的那个），不按第一个 `]` 切
-const MENTION_RE = /@\[([^\n]*?)\]\(user:([A-Za-z0-9_-]{1,64})\)/g
+// 正文里的记号：@ 成员 `@[名字](user:<id>)`，叫 Genet / 空间 AI `@[名字](agent:ramet:assistant|space-ai)`（评论框里的 agent chip，
+// 口径同输入框的 agent_mention；别的 agent 在评论里叫不动，记号原样是文字）。
+// 名字里可能带 `]`，所以按收口的 `](` + 认得的目标定位（非贪婪匹配到最近的那个），不按第一个 `]` 切。
+// 几种记号必须用同一个正则一起扫：分开扫的话，前一种的非贪婪匹配会从别的记号的 `@[` 一直吃到自己的收口（`@[AI](agent:…) 和 @[bob](user:…)`）
+const MARK_RE = /@\[([^\n]*?)\]\((user:[A-Za-z0-9_-]{1,64}|agent:ramet:assistant|agent:ramet:space-ai)\)/g
+const GENET_TARGET = 'agent:ramet:assistant'
+const SPACE_AI_TARGET = 'agent:ramet:space-ai'
 
 /** body 里 @ 到的 user id（去重，未过滤） */
 export function mentionIds(body: string): string[] {
-  return [...new Set([...body.matchAll(MENTION_RE)].map((m) => m[2]!))]
+  const ids = [...body.matchAll(MARK_RE)].map((m) => m[2]!).filter((t) => t.startsWith('user:'))
+  return [...new Set(ids.map((t) => t.slice('user:'.length)))]
 }
 
-// 叫 Genet 的记号（评论框里的 Genet chip，口径同输入框的 agent_mention）。只认 Genet：别的 agent 在评论里叫不动
-const GENET_RE = /@\[([^\n]*?)\]\(agent:ramet:assistant\)/g
+const squeeze = (s: string): string => s.replace(/[ \t]+/g, ' ').trim()
+const calls = (body: string, target: string): boolean => [...body.matchAll(MARK_RE)].some((m) => m[2] === target)
+const without = (body: string, target: string): string => squeeze(body.replace(MARK_RE, (all, _name: string, t: string) => (t === target ? ' ' : all)))
 
 /** 这条评论叫了 Genet 没有 */
 export function callsGenet(body: string): boolean {
-  return [...body.matchAll(GENET_RE)].length > 0
+  return calls(body, GENET_TARGET)
 }
 
 /** 去掉叫 Genet 的记号：剩下的就是给它的要求 */
 export function withoutGenet(body: string): string {
-  return body.replace(GENET_RE, ' ').replace(/[ \t]+/g, ' ').trim()
+  return without(body, GENET_TARGET)
+}
+
+/** 这条评论叫了空间 AI 没有 */
+export function callsSpaceAi(body: string): boolean {
+  return calls(body, SPACE_AI_TARGET)
+}
+
+/** 去掉叫空间 AI 的记号：剩下的就是给它的要求 */
+export function withoutSpaceAi(body: string): string {
+  return without(body, SPACE_AI_TARGET)
 }
 
 /** 记号降成纯文字 `@名字`：公开页与收件箱摘要用，user id 不往外给 */
 export function plainMentions(body: string): string {
-  return body.replace(MENTION_RE, (_all, name: string) => `@${name}`).replace(GENET_RE, (_all, name: string) => `@${name}`)
+  return body.replace(MARK_RE, (_all, name: string) => `@${name}`)
 }
 
 /** 只留这个空间的成员：@ 一个外人既不能通知到他，也不该在库里记下他的 id */
@@ -128,9 +154,13 @@ type CommentRow = {
   edited_at: Date | null
   deleted_at: Date | null
   via: string | null
+  author_ai?: string | null
+  invoker_id?: string | null
   call_state?: string | null
   call_reason?: string | null
   call_at?: Date | null
+  ai_state?: string | null
+  ai_reason?: string | null
 }
 
 /** 串所属的那种评论在页面上开着（t = comment_threads、p = pages 的别名）。关掉的那种：列表、公开页、收件箱都不出，写入 403 */
@@ -145,41 +175,51 @@ const SELECT_THREADS = `SELECT t.id, t.kind, t.anchor, t.created_at, t.resolved_
   WHERE t.page_id = $1 AND ${KIND_ENABLED} AND ($3::text IS NULL OR t.id = $3) AND (NOT $4 OR t.resolved_at IS NULL)
   ORDER BY t.created_at, t.id`
 const SELECT_COMMENTS = `SELECT c.id, c.thread_id, c.author_id, u.username, c.body, c.created_at, c.edited_at, c.deleted_at, c.via,
-    g.state AS call_state, g.reason AS call_reason, g.created_at AS call_at
+    c.author_ai, c.invoker_id, g.state AS call_state, g.reason AS call_reason, g.created_at AS call_at, a.state AS ai_state, a.reason AS ai_reason
   FROM comments c
   JOIN comment_threads t ON t.id = c.thread_id
   JOIN pages p ON p.id = t.page_id
   LEFT JOIN users u ON u.id = c.author_id
   LEFT JOIN comment_genet_calls g ON g.comment_id = c.id
+  LEFT JOIN comment_ai_calls a ON a.comment_id = c.id
   WHERE t.page_id = $1 AND ${KIND_ENABLED} AND ($2::text IS NULL OR t.id = $2) AND (NOT $3 OR t.resolved_at IS NULL)
   ORDER BY c.created_at, c.id`
 
-const author = (id: string | null, name: string | null): CommentAuthor => (id && name !== null ? { id, name } : null)
+const author = (id: string | null, name: string | null): UserAuthor | null => (id && name !== null ? { id, name } : null)
 
 /** 叫了 Genet 却这么久还没结果：Genet 那一轮没能收尾（服务重启之类），不再显示「正在处理」 */
 export const CALL_STALE_MS = 30 * 60_000
 
-/** viewer = 读的人（公开页 null：不出状态） */
-function callOf(r: CommentRow, viewer: string | null): GenetCall | undefined {
-  if (viewer === null || !r.call_state || r.call_state === 'answered' || r.deleted_at) return undefined
+/** viewer = 读的人（公开页 null：不出状态）；aiName = 页面所在空间的空间 AI 此刻的名字。
+ *  一条评论同时叫了两个（手打了两种记号）时只出空间 AI 的：串里只能画一行 */
+function callOf(r: CommentRow, viewer: string | null, aiName: string): CommentCall | undefined {
+  if (viewer === null || r.deleted_at) return undefined
+  if (r.ai_state === 'waiting' || r.ai_state === 'failed') return { state: r.ai_state, reason: r.ai_state === 'failed' ? (r.ai_reason ?? '') : '', ai: aiName }
+  if (!r.call_state || r.call_state === 'answered') return undefined
   const stale = r.call_state === 'waiting' && !!r.call_at && Date.now() - r.call_at.getTime() > CALL_STALE_MS
   if (r.call_state === 'waiting' && !stale) return { state: 'waiting', reason: '' }
   if (viewer !== r.author_id) return undefined
   return stale ? { state: 'failed', reason: '等了太久没有结果' } : { state: r.call_state === 'done' ? 'done' : 'failed', reason: r.call_reason ?? '' }
 }
 
-function toComment(r: CommentRow, viewer: string | null = null): Comment {
-  const call = callOf(r, viewer)
+function toComment(r: CommentRow, viewer: string | null = null, aiName = SPACE_AI_DEFAULT_NAME): Comment {
+  const call = callOf(r, viewer, aiName)
   return {
     id: r.id,
-    author: author(r.author_id, r.username),
+    author: r.author_ai === 'space' ? { ai: 'space', name: aiName } : author(r.author_id, r.username),
     body: r.deleted_at ? '' : r.body,
     createdAt: r.created_at.toISOString(),
     editedAt: iso(r.edited_at),
     deleted: r.deleted_at !== null,
     ...(r.via === 'genet' ? { via: 'genet' as const } : {}),
+    ...(r.author_ai === 'space' && r.invoker_id ? { invoker: r.invoker_id } : {}),
     ...(call ? { call } : {}),
   }
+}
+
+/** 这一页所在空间的空间 AI 名字（不看启用没有：停用了，它写过的评论照样署这个名字）；没配过 = 缺省名 */
+async function aiNameOf(db: Pick<Pool, 'query'>, pageId: string): Promise<string> {
+  return (await spaceAiNames(db, [pageId])).get(pageId) ?? SPACE_AI_DEFAULT_NAME
 }
 
 async function loadThreads(
@@ -192,10 +232,12 @@ async function loadThreads(
   // 顺序查：db 可能是事务里的同一个连接，不能并发发两条
   const threads = await db.query<ThreadRow>(SELECT_THREADS, [pageId, opts.userId, only, openOnly])
   const comments = await db.query<CommentRow>(SELECT_COMMENTS, [pageId, only, openOnly])
+  // 只有串里出现过空间 AI（它写的评论 / 叫它的呼叫）才去查名字
+  const aiName = comments.rows.some((r) => r.author_ai || r.ai_state) ? await aiNameOf(db, pageId) : SPACE_AI_DEFAULT_NAME
   const byThread = new Map<string, Comment[]>()
   for (const r of comments.rows) {
     const list = byThread.get(r.thread_id) ?? []
-    list.push(toComment(r, opts.userId))
+    list.push(toComment(r, opts.userId, aiName))
     byThread.set(r.thread_id, list)
   }
   return threads.rows.map((t) => ({
@@ -219,7 +261,13 @@ export async function getThread(db: Pool | PoolClient, pageId: string, threadId:
   return (await loadThreads(db, pageId, { userId, threadId }))[0] ?? null
 }
 
-/** 公开页：只要未解决的串；作者只给名字，正文里的 @ 记号降成纯文字 */
+/** 公开页的作者：只留名字（空间 AI 另标 ai） */
+function publicAuthor(a: CommentAuthor): PublicAuthor {
+  if (!a) return null
+  return 'ai' in a ? { ai: a.ai, name: a.name } : { name: a.name }
+}
+
+/** 公开页：只要未解决的串；作者只给名字，正文里的 @ 记号降成纯文字，任何 id（作者、叫空间 AI 的人）都不出 */
 export async function publicThreads(pool: Pool, pageId: string): Promise<PublicThread[]> {
   const threads = await loadThreads(pool, pageId, { userId: null, openOnly: true })
   return threads.map((t) => ({
@@ -230,13 +278,16 @@ export async function publicThreads(pool: Pool, pageId: string): Promise<PublicT
     resolvedAt: null,
     resolvedBy: null,
     readAt: null,
-    comments: t.comments.map((c) => ({ ...c, body: plainMentions(c.body), author: c.author ? { name: c.author.name } : null })),
+    comments: t.comments.map(({ invoker: _invoker, ...c }) => ({ ...c, body: plainMentions(c.body), author: publicAuthor(c.author) })),
   }))
 }
 
 const UPSERT_READ = `INSERT INTO comment_reads (user_id, thread_id, read_at) VALUES ($1, $2, now())
   ON CONFLICT (user_id, thread_id) DO UPDATE SET read_at = now()`
 const INSERT_COMMENT = 'INSERT INTO comments (id, thread_id, author_id, body, mentions, via) VALUES ($1, $2, $3, $4, $5, $6)'
+const INSERT_AI_COMMENT = "INSERT INTO comments (id, thread_id, author_id, body, mentions, author_ai, invoker_id) VALUES ($1, $2, NULL, $3, $4, 'space', $5)"
+const SELECT_ONE = `SELECT c.id, c.thread_id, c.author_id, u.username, c.body, c.created_at, c.edited_at, c.deleted_at, c.via, c.author_ai, c.invoker_id
+  FROM comments c LEFT JOIN users u ON u.id = c.author_id WHERE c.id = $1`
 
 /** 新开一个串（连同首条评论）。发言人自己算已读 */
 export async function createThread(
@@ -269,13 +320,18 @@ export async function addReply(
     const mentions = await memberMentions(client, input.spaceId, input.body)
     await client.query(INSERT_COMMENT, [id, input.threadId, input.userId, input.body, mentions, input.via ?? null])
     await client.query(UPSERT_READ, [input.userId, input.threadId])
-    const { rows } = await client.query<CommentRow>(
-      `SELECT c.id, c.thread_id, c.author_id, u.username, c.body, c.created_at, c.edited_at, c.deleted_at, c.via
-       FROM comments c LEFT JOIN users u ON u.id = c.author_id WHERE c.id = $1`,
-      [id],
-    )
+    const { rows } = await client.query<CommentRow>(SELECT_ONE, [id])
     return toComment(rows[0]!)
   })
+}
+
+/** 空间 AI 回一条（作者是 AI、没有用户 id；invokerId = 叫它的人）。不记已读：AI 没有收件箱 */
+export async function addAiReply(pool: Pool, input: { pageId: string; spaceId: string; threadId: string; invokerId: string; body: string }): Promise<Comment> {
+  const id = randomUUID()
+  const mentions = await memberMentions(pool, input.spaceId, input.body)
+  await pool.query(INSERT_AI_COMMENT, [id, input.threadId, input.body, mentions, input.invokerId])
+  const { rows } = await pool.query<CommentRow>(SELECT_ONE, [id])
+  return toComment(rows[0]!, null, await aiNameOf(pool, input.pageId))
 }
 
 /** 解决 / 重新打开。已解决的再点解决不改时刻与人 */
@@ -299,7 +355,7 @@ export async function editComment(pool: Pool, commentId: string, spaceId: string
   const mentions = await memberMentions(pool, spaceId, body)
   const { rows } = await pool.query<CommentRow>(
     `WITH up AS (UPDATE comments SET body = $2, mentions = $3, edited_at = now() WHERE id = $1 AND deleted_at IS NULL RETURNING *)
-     SELECT up.id, up.thread_id, up.author_id, u.username, up.body, up.created_at, up.edited_at, up.deleted_at, up.via
+     SELECT up.id, up.thread_id, up.author_id, u.username, up.body, up.created_at, up.edited_at, up.deleted_at, up.via, up.author_ai, up.invoker_id
      FROM up LEFT JOIN users u ON u.id = up.author_id`,
     [commentId, body, mentions],
   )
@@ -328,7 +384,23 @@ export async function deleteComment(pool: Pool, commentId: string, threadId: str
 }
 
 export type ThreadContext = { threadId: string; pageId: string; spaceId: string; pageKind: string; kindEnabled: boolean }
-export type CommentContext = ThreadContext & { commentId: string; authorId: string | null; deleted: boolean }
+/** authorAi = 空间 AI 写的；invokerId = 叫它写的人；threadBy = 串的发起人（三者都只为判「AI 写的评论谁能删」） */
+export type CommentContext = ThreadContext & {
+  commentId: string
+  authorId: string | null
+  authorAi: boolean
+  invokerId: string | null
+  threadBy: string | null
+  deleted: boolean
+}
+
+/** 删一条评论：人写的 = 作者本人或空间 owner；空间 AI 写的（没有作者）= 串的发起人、叫它的人、空间 owner。
+ *  全局 admin 不是 owner 就没有这一条。AI 写的没人能编辑（编辑只认作者本人，它没有） */
+export function mayDelete(ctx: Pick<CommentContext, 'authorId' | 'authorAi' | 'invokerId' | 'threadBy'>, userId: string, role: string): boolean {
+  if (role === 'owner') return true
+  if (ctx.authorAi) return ctx.threadBy === userId || ctx.invokerId === userId
+  return ctx.authorId === userId
+}
 
 /** 串属于哪个页面（基表：活不活、能不能读由调用方的 pageAccess 判） */
 export async function threadContext(pool: Pool, threadId: string): Promise<ThreadContext | null> {
@@ -344,13 +416,17 @@ export async function commentContext(pool: Pool, commentId: string): Promise<Com
   const { rows } = await pool.query<{
     thread_id: string
     author_id: string | null
+    author_ai: string | null
+    invoker_id: string | null
+    created_by: string | null
     deleted: boolean
     page_id: string
     space_id: string
     kind: string
     enabled: boolean
   }>(
-    `SELECT c.thread_id, c.author_id, c.deleted_at IS NOT NULL AS deleted, t.page_id, p.space_id, p.kind, ${KIND_ENABLED} AS enabled
+    `SELECT c.thread_id, c.author_id, c.author_ai, c.invoker_id, t.created_by, c.deleted_at IS NOT NULL AS deleted, t.page_id, p.space_id, p.kind,
+       ${KIND_ENABLED} AS enabled
      FROM comments c JOIN comment_threads t ON t.id = c.thread_id JOIN pages p ON p.id = t.page_id WHERE c.id = $1`,
     [commentId],
   )
@@ -364,6 +440,9 @@ export async function commentContext(pool: Pool, commentId: string): Promise<Com
         pageKind: r.kind,
         kindEnabled: r.enabled,
         authorId: r.author_id,
+        authorAi: r.author_ai === 'space',
+        invokerId: r.invoker_id,
+        threadBy: r.created_by,
         deleted: r.deleted,
       }
     : null

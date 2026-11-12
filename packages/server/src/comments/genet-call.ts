@@ -65,6 +65,8 @@ export class GenetCalls {
   /** 一条刚写进去的评论：叫了 Genet 就发起一次（调用方不等） */
   async posted(c: PostedComment): Promise<void> {
     const { pool } = this.deps
+    // 空间 AI 写的（没有作者）：叫的是谁的 Genet 都说不上
+    if (c.authorId === null) return
     const call = (
       await pool.query<{ body: string; via: string | null; deleted: boolean; anchor: Anchor | null; page_id: string; title: string }>(SELECT_CALL, [
         c.commentId,

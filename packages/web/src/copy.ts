@@ -2,7 +2,7 @@
  * 按界面分组，带参数的串是函数。
  * 已迁入：外壳（侧栏、页面树 / 目录树、空间切换）、页面顶栏与分享、编辑方式、公开页，其余界面的串逐步迁入。
  * 收件箱的串在 inbox/inbox-copy.ts（并进 COPY.inbox；单独成文件是为了本文件不超过 800 行），
- * 公共记忆在 memory/memory-copy.ts，带队在 team/team-copy.ts，工具档位在 editor/tools-copy.ts，集合在 collection/collection-copy.ts，评论在 comments/comments-copy.ts，Genet 浮窗在 assistant/assistant-copy.ts，AI 页在 ai/ai-copy.ts，组件库的确认框 / Toast 在 ui/ui-copy.ts（同理）。 */
+ * 公共记忆在 memory/memory-copy.ts，带队在 team/team-copy.ts，工具档位在 editor/tools-copy.ts，集合在 collection/collection-copy.ts，评论在 comments/comments-copy.ts，Genet 浮窗在 assistant/assistant-copy.ts，空间 AI 在 assistant/space-ai-copy.ts，AI 页在 ai/ai-copy.ts，组件库的确认框 / Toast 在 ui/ui-copy.ts（同理）。 */
 import { CONNECT_COPY, CONNECTORS_COPY } from './connector-copy'
 import { INBOX_COPY } from './inbox/inbox-copy'
 import { MEMORY_COPY } from './memory/memory-copy'
@@ -12,6 +12,7 @@ import { COLLECTION_COPY } from './collection/collection-copy'
 import { COMMENTS_COPY } from './comments/comments-copy'
 import { DIALOG_COPY } from './ui/ui-copy'
 import { ASSISTANT_COPY } from './assistant/assistant-copy'
+import { SPACE_AI_COPY } from './assistant/space-ai-copy'
 import { AI_COPY } from './ai/ai-copy'
 import { QUICK_SETTINGS_COPY } from './quick-settings-copy'
 
@@ -24,6 +25,7 @@ export const COPY = {
   comments: COMMENTS_COPY,
   dialog: DIALOG_COPY,
   assistant: ASSISTANT_COPY,
+  spaceAi: SPACE_AI_COPY,
   ai: AI_COPY,
   untitled: '无标题',
   /** 浏览器标签页标题里空标题页的叫法 */

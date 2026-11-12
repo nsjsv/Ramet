@@ -82,7 +82,8 @@ export default function CommentPopover({ popover, threads, getView, ctx }: Props
       {thread ? (
         <CommentThread thread={thread} ctx={ctx} onEscape={closePopover} />
       ) : (
-        !ctx.readOnly && <DraftComposer anchor={anchor} ctx={ctx} />
+        // 预填的字不同（正文里 @AI 开的框 vs 划词开的框）就换一个新框：框只在建起来那一刻读 initial
+        !ctx.readOnly && <DraftComposer key={popover.kind === 'draft' ? (popover.initial ?? '') : ''} anchor={anchor} ctx={ctx} initial={popover.kind === 'draft' ? popover.initial : undefined} />
       )}
     </div>
   )

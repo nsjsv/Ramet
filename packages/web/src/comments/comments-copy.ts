@@ -12,9 +12,10 @@ export const COMMENTS_COPY = {
     inline && page ? '选中正文里的文字可以就地评论，也可以在页面底部参与讨论。' : inline ? '选中正文里的文字可以就地评论。' : '在页面底部参与讨论。',
   discussion: '讨论',
   resolvedFold: (n: number) => `已解决 ${n} 条`,
-  placeholder: '写评论，@ 提及成员或 Genet，Enter 发送，Shift+Enter 换行…',
+  /** ai = 这个空间的评论框里能 @ 的 AI（个人空间 Genet、团队空间的空间 AI；没开 = null） */
+  placeholder: (ai: string | null) => `写评论，@ 提及成员${ai ? `或 ${ai}` : ''}，Enter 发送，Shift+Enter 换行…`,
   replyPlaceholder: '回复，Enter 发送…',
-  pagePlaceholder: '参与讨论，@ 提及成员或 Genet，Enter 发送…',
+  pagePlaceholder: (ai: string | null) => `参与讨论，@ 提及成员${ai ? `或 ${ai}` : ''}，Enter 发送…`,
   send: '发送',
   reply: '回复',
   resolve: '解决',
@@ -42,6 +43,12 @@ export const COMMENTS_COPY = {
   callDone: 'Genet 看过了，没有回在这里',
   callFailed: (reason: string) => `Genet 没能处理：${reason || '出错了'}`,
   callOpen: '去对话里看',
+  /** 评论里 @空间 AI 之后那条评论下面的状态（name = 空间 AI 此刻的名字） */
+  aiCallWaiting: (name: string) => `${name} 正在回复…`,
+  aiCallFailed: (name: string, reason: string) => `${name} 没能回复：${reason || '出错了'}`,
+  /** 正文普通段落里 @空间 AI：在这一段上开评论框，开不了时的说明 */
+  aiNoText: '这里没法开评论：先写点内容再 @ AI',
+  aiNoInline: '这一页没有开划词评论，没法在正文里 @ AI（文档页可以在顶栏 ⋮ 菜单的「评论」里打开）',
   deleted: '评论已删除',
   deletedUser: '已注销用户',
   orphan: '原文已删除',

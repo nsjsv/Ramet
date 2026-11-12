@@ -11,6 +11,9 @@
 //
 // 工具档位（tool-profile.ts）为 none 时 Ramet 只当 UI：环境里只剩文档正文，不读记忆、不带过程摘要、
 // 块引用不跨页读原块（nestedAtoms：定位 + 提及自带的快照）。
+//
+// 空间 AI（space-ai.ts）的一轮带 scope：块引用与过程摘要只读这个空间里的页（别的空间的按读不到处理，与它的凭证同一个范围），
+// 每条用户消息带署名（speaker）：叫它的人在变，它要看得出每条是谁说的。别的 agent 不带 scope，提示词逐字节不变。
 
 import { createHash } from 'node:crypto'
 import * as Y from 'yjs'
@@ -20,6 +23,7 @@ import { memoryBlockOfPage } from '../memories.js'
 import type { AtomText } from '../updates.js'
 import { stepLine } from './doc.js'
 import { nestedAtoms, resolveRefs } from './refs.js'
+import { pageInSpace } from './space-ai.js'
 import type { ToolProfile } from './tool-profile.js'
 
 export type PromptEnv = {
@@ -31,6 +35,30 @@ export type PromptEnv = {
   memory: string
   /** 这一轮的工具档位：会话按它交付工具，收尾落库的会话记录也记它（none 只有正文，见文件头） */
   tools: ToolProfile
+  /** 用户消息的署名（发消息的人的用户名）；没有这一项 = 不署名 */
+  speaker?: (message: Y.XmlElement) => string | undefined
+}
+
+/** 这一轮收窄到哪个空间（空间 AI） */
+export type PromptScope = { space: string }
+
+/** 删了号的人发过的消息署这个名 */
+const GONE_USER = '已注销用户'
+
+/** 这页里各条用户消息的署名：author 属性 → 用户名。通知块（notice）不是人发的、没有 author 的不署名 */
+async function speakersOf(pool: Pool, fragment: Y.XmlFragment): Promise<(message: Y.XmlElement) => string | undefined> {
+  const ids = new Set<string>()
+  fragment.forEach((c) => {
+    if (c instanceof Y.XmlElement && c.nodeName === 'user_message' && attr(c, 'author')) ids.add(attr(c, 'author'))
+  })
+  const { rows } = ids.size
+    ? await pool.query<{ id: string; username: string }>('SELECT id, username FROM users WHERE id = ANY($1::text[])', [[...ids]])
+    : { rows: [] }
+  const names = new Map(rows.map((r) => [r.id, r.username]))
+  return (el) => {
+    const author = attr(el, 'author')
+    return author && !attr(el, 'notice') ? (names.get(author) ?? GONE_USER) : undefined
+  }
 }
 
 /** 全文重放时 agent 收到的内容：记忆在前、文档在后；没有记忆则原样 */
@@ -91,16 +119,22 @@ export async function resolvePromptEnv(
   /** 页面的工具档位；none = 只有正文，什么都不读 */
   tools: ToolProfile,
   getLiveDoc?: (docName: string) => Y.Doc | undefined,
+  scope?: PromptScope,
 ): Promise<PromptEnv> {
   if (tools === 'none') return { atoms: nestedAtoms, process: () => undefined, memory: '', tools }
-  const [atoms, memory] = await Promise.all([resolveRefs(pool, user, fragment, getLiveDoc), memoryBlockOfPage(pool, pageId)])
+  const inScope = scope ? (id: string) => pageInSpace(pool, id, scope.space) : undefined
+  const [atoms, memory, speaker] = await Promise.all([
+    resolveRefs(pool, user, fragment, getLiveDoc, inScope),
+    memoryBlockOfPage(pool, pageId),
+    scope ? speakersOf(pool, fragment) : undefined,
+  ])
   const summaries = new Map<string, string[] | undefined>()
   await Promise.all(
     runIdsOf(fragment).map(async (id) => {
-      if (!(await pageAccess(pool, id, user))) return
+      if (!(await pageAccess(pool, id, user)) || (inScope && !(await inScope(id)))) return
       const doc = await loadDocForRead(pool, `page:${id}`, getLiveDoc)
       summaries.set(id, summarizeProcess(id, doc.getXmlFragment('prosemirror')))
     }),
   )
-  return { atoms, process: (reply) => summaries.get(attr(reply, 'run')), memory, tools }
+  return { atoms, process: (reply) => summaries.get(attr(reply, 'run')), memory, tools, ...(speaker ? { speaker } : {}) }
 }

@@ -6,25 +6,28 @@
 // 或到步数上限。每一轮现建一个 Agent，历史在会话里；模型请求经 pi-models.ts（连接 → pi-ai、防护 fetch、HTTP 事实探针）。
 // 消息历史每一轮结束（含停止 / 出错）整份落库（assistant_sessions），进程重启 / 适配器被回收后由 loadSession 读回来。
 // 在飞计数 / 会话级状态的规则照旧在 DriverBase；Genet 自己不发审批：要批的操作（移入回收站等）在中心端点里，走 Ramet 自己的审批。
+// 空间 AI（agents/space-ai.ts）是同一个驱动的 space 模式，另起一个实例：会话属于凭证上的空间（同空间的成员接着同一段对话，
+// 叫它的人换了就换上他的凭证、MCP 进程按新凭证重起），模型连接每一轮现读空间配置，没有配置项，system 提示词是另一份。
 
 import { randomUUID } from 'node:crypto'
 import { Agent, type AgentEvent } from '@earendil-works/pi-agent-core'
 import type { AssistantMessage, Message } from '@earendil-works/pi-ai'
 import type { Pool } from 'pg'
-import { checkEndpoint, getSettings, KeyUnreadableError, listConnections, onConnectionsChanged, openConnection } from '../../../ai-connections.js'
+import { checkEndpoint, getSettings, KeyUnreadableError, listConnections, onConnectionsChanged, openConnection, type ConnectionRow } from '../../../ai-connections.js'
 import type { Resolver } from '../../../endpoint-guard.js'
-import { defaultModelCatalog, findModel, type ModelCatalog } from '../../../model-catalog.js'
-import { grantUser, type PageTool } from '../../../page-read.js'
+import { defaultModelCatalog, findModel, type ModelCatalog, type ModelMatch } from '../../../model-catalog.js'
+import { grantSpaceOf, grantUser, type PageTool } from '../../../page-read.js'
 import { createPiStream, failureOf, isRefusal, piModel, type PiStream } from '../../../pi-models.js'
 import { describeModelError, logSafeError, type ModelConnection, type Probe } from '../../../quick.js'
 import { loadSecretKeyFromEnv } from '../../../secret-box.js'
 import { ASSISTANT_ID } from '../../assistant-agent.js'
+import { SPACE_AI_ID, SPACE_AI_OFF, spaceAiConnection } from '../../space-ai.js'
 import type { ConfigOption, PromptBlock, PromptResult, TurnUsage } from '../../types.js'
 import { DriverBase } from '../base.js'
 import { forStorage, isStoredHistory, userTurn } from './history.js'
 import { PROVIDER_ID, resolveChoice, type AssistantChoice, type AssistantThinking, type ResolvedChoice } from './options.js'
 import { userTimeZone } from '../../../triggers/store.js'
-import { ASSISTANT_SYSTEM_PROMPT, clockLine } from './prompt.js'
+import { ASSISTANT_SYSTEM_PROMPT, clockLine, SPACE_AI_SYSTEM_PROMPT } from './prompt.js'
 import { agentTools, AssistantTools, resultFace, startFace } from './tools.js'
 
 /** 一轮里最多问几次模型（每次之后可以调一批工具）：到了就停下，告诉用户可以接着说 */
@@ -33,15 +36,21 @@ export const ASSISTANT_MAX_STEPS = 24
 const MCP_IDLE_MS = 10 * 60_000
 /** 每人留这么多个会话的历史，更早的删掉（删了的会话再加载不上，现有流程会新建会话、全文重放） */
 const SESSIONS_PER_USER = 20
+/** 空间 AI 每个空间留这么多个（一个空间里叫它的页面比一个人的 Genet 多） */
+const SESSIONS_PER_SPACE = 50
 
 export const NO_CONNECTION = 'Genet 还没有可用的模型：先在「设置 → Genet」里添加一个供应商'
-const NO_TOOLS = 'Genet 要用 Ramet 工具才能工作：把这一页的工具档位切回「完整」或「精简」'
+const noTools = (who: string): string => `${who} 要用 Ramet 工具才能工作：把这一页的工具档位切回「完整」或「精简」`
 const STEP_LIMIT = `已经连着调用了 ${ASSISTANT_MAX_STEPS} 轮工具，先停在这里；要接着做就再说一声。`
 
-const INSERT_SESSION = 'INSERT INTO assistant_sessions (id, user_id) VALUES ($1, $2)'
+// 会话的主体二选一：Genet 记 user_id，空间 AI 记 space_id
+const INSERT_SESSION = 'INSERT INTO assistant_sessions (id, user_id, space_id) VALUES ($1, $2, $3)'
 const PRUNE_SESSIONS = `DELETE FROM assistant_sessions WHERE user_id = $1 AND id NOT IN
   (SELECT id FROM assistant_sessions WHERE user_id = $1 ORDER BY updated_at DESC LIMIT $2)`
-const SELECT_SESSION = 'SELECT user_id, messages FROM assistant_sessions WHERE id = $1'
+const PRUNE_SPACE_SESSIONS = `DELETE FROM assistant_sessions WHERE space_id = $1 AND id NOT IN
+  (SELECT id FROM assistant_sessions WHERE space_id = $1 ORDER BY updated_at DESC LIMIT $2)`
+const SELECT_SESSION = 'SELECT user_id, space_id, messages FROM assistant_sessions WHERE id = $1'
+const DELETE_SESSION = 'DELETE FROM assistant_sessions WHERE id = $1'
 const SAVE_SESSION = 'UPDATE assistant_sessions SET messages = $2::jsonb, updated_at = now() WHERE id = $1'
 
 export type AssistantDeps = {
@@ -54,11 +63,16 @@ export type AssistantDeps = {
   resolve?: Resolver
   /** 公开模型目录（思考档位 / 上下文 / 输出上限）：undefined = 进程共用的那一份；null = 不用目录，按内置规则 */
   catalog?: ModelCatalog | null
+  /** genet（缺省）= 个人的 Genet；space = 空间 AI（见文件头） */
+  mode?: 'genet' | 'space'
 }
 
 type Session = {
   id: string
+  /** Genet：会话的主人；空间 AI：此刻交来凭证的人（叫它的人，换人就跟着换） */
   userId: string
+  /** 空间 AI 的会话主体；Genet 为 null */
+  spaceId: string | null
   /** 最近一次建 / 加载会话交来的凭证；MCP 进程用的是 mcpToken 那一把，不一样就重起 */
   tool: PageTool
   /** pi 的消息历史，不含 system（history.ts） */
@@ -74,9 +88,9 @@ type Session = {
 
 /** 模型侧的失败 → 给用户看的一句话（这句话进失败条、广播给页面上的人、留在过程记录里）。
  *  apiKey = 这一轮用的 key：describeModelError 把上游原文里回显的 key 抹掉 */
-function modelError(err: unknown, apiKey: string): string {
+function modelError(err: unknown, apiKey: string, who: string): string {
   const { code, message } = describeModelError(err, apiKey)
-  return code === 'unknown' ? 'Genet 调用模型时出错了，请稍后再试' : message
+  return code === 'unknown' ? `${who} 调用模型时出错了，请稍后再试` : message
 }
 
 function errText(err: unknown): string {
@@ -122,15 +136,21 @@ export class AssistantDriver extends DriverBase {
   private readonly secretKey: Buffer | null
   private readonly catalog: ModelCatalog | null
   private readonly unsubscribe: Array<() => void>
+  private readonly space: boolean
+  /** 失败文案里的称呼 */
+  private readonly who: string
 
   constructor(private readonly deps: AssistantDeps) {
     super()
     this.stream = deps.stream ?? createPiStream()
     this.secretKey = deps.secretKey === undefined ? loadSecretKeyFromEnv() : deps.secretKey
     this.catalog = deps.catalog === undefined ? defaultModelCatalog() : deps.catalog
+    this.space = deps.mode === 'space'
+    this.who = this.space ? '空间 AI' : 'Genet'
     // 设置里加 / 改 / 删了供应商、模型目录重拉到了：开着的 Genet 输入框立刻看到新列表 / 新档位，不用等下一轮
+    // （空间 AI 没有配置项，连接每一轮现读，不用刷新）
     this.unsubscribe = [
-      onConnectionsChanged((userId) => this.refreshAll((s) => s.userId === userId)),
+      onConnectionsChanged((userId) => this.refreshAll((s) => !s.spaceId && s.userId === userId)),
       ...(this.catalog ? [this.catalog.onUpdate(() => this.refreshAll(() => true))] : []),
     ]
   }
@@ -152,20 +172,28 @@ export class AssistantDriver extends DriverBase {
   }
 
   ready(): Promise<void> {
-    return this.dead ? Promise.reject(new Error('Genet 已停止')) : Promise.resolve()
+    return this.dead ? Promise.reject(new Error(`${this.who} 已停止`)) : Promise.resolve()
   }
 
-  /** 这个会话属于谁：只认签给 Genet 的凭证。没有凭证 = 这一页的工具档位是「无」，Genet 没法工作 */
-  private owner(tools: PageTool[]): { tool: PageTool; userId: string } {
+  /** 这个会话属于谁：只认签给这个驱动（Genet / 空间 AI）的凭证，空间 AI 还要凭证上带着空间。
+   *  没有凭证 = 这一页的工具档位是「无」，没法工作 */
+  private owner(tools: PageTool[]): { tool: PageTool; userId: string; spaceId: string | null } {
     const tool = tools[0]
-    if (!tool) throw new Error(NO_TOOLS)
-    const userId = grantUser(tool.mcp.token, ASSISTANT_ID)
-    if (!userId) throw new Error('Genet 的凭证已经失效，请再发一次')
-    return { tool, userId }
+    if (!tool) throw new Error(noTools(this.who))
+    const scope = this.space ? SPACE_AI_ID : ASSISTANT_ID
+    const userId = grantUser(tool.mcp.token, scope)
+    const spaceId = this.space ? grantSpaceOf(tool.mcp.token, scope) : null
+    if (!userId || (this.space && !spaceId)) throw new Error(`${this.who} 的凭证已经失效，请再发一次`)
+    return { tool, userId, spaceId }
   }
 
-  private open(id: string, userId: string, tool: PageTool, messages: Message[]): Session {
-    const s: Session = { id, userId, tool, messages, choice: { provider: null, effort: null }, mcp: null, mcpToken: '', turn: null, idle: null }
+  /** 会话是不是这个主体的：空间 AI 认空间（同空间的成员都能接着），Genet 认人 */
+  private owns(subject: { userId: string | null; spaceId: string | null }, userId: string, spaceId: string | null): boolean {
+    return spaceId ? subject.spaceId === spaceId : !subject.spaceId && subject.userId === userId
+  }
+
+  private open(id: string, userId: string, spaceId: string | null, tool: PageTool, messages: Message[]): Session {
+    const s: Session = { id, userId, spaceId, tool, messages, choice: { provider: null, effort: null }, mcp: null, mcpToken: '', turn: null, idle: null }
     this.sessions.set(id, s)
     this.sessionConfigs.set(id, [])
     return s
@@ -174,14 +202,13 @@ export class AssistantDriver extends DriverBase {
   /** 现读连接表，算出这个会话的两项配置项；变了就更新缓存、发 config 事件（会话镜像据此广播给页面上的人）。
    *  还没定供应商的会话就定成此刻算出来的那一个（设置里的当前连接）：之后设置里改当前连接只影响 ⌘J，Genet 听 chip 的 */
   private async refresh(s: Session): Promise<ResolvedChoice> {
-    const [rows, settings, index] = await Promise.all([
+    if (s.spaceId) return this.spaceChoice(s.spaceId)
+    const [rows, settings, lookup] = await Promise.all([
       listConnections(this.deps.pool, s.userId),
       getSettings(this.deps.pool, s.userId),
-      this.catalog ? this.catalog.get() : null,
+      this.lookup(),
     ])
-    const resolved = resolveChoice(rows, settings.activeConnectionId, s.choice, (r) =>
-      index ? findModel(index, { protocol: r.protocol, baseUrl: r.base_url, model: r.model }) : null,
-    )
+    const resolved = resolveChoice(rows, settings.activeConnectionId, s.choice, lookup)
     // 回落到了别的连接（或第一次定下来）：选择跟着改，在原来那个上选的思考档作废（resolveChoice 已按默认档算）
     if (resolved.row && resolved.row.id !== s.choice.provider) s.choice = { provider: resolved.row.id, effort: null }
     if (JSON.stringify(this.sessionConfigs.get(s.id)) !== JSON.stringify(resolved.options)) {
@@ -191,14 +218,28 @@ export class AssistantDriver extends DriverBase {
     return resolved
   }
 
+  /** 连接 → 它的模型在目录里的规格（目录这一刻有的话） */
+  private async lookup(): Promise<(r: ConnectionRow) => ModelMatch | null> {
+    const index = this.catalog ? await this.catalog.get() : null
+    return (r) => (index ? findModel(index, { protocol: r.protocol, baseUrl: r.base_url, model: r.model }) : null)
+  }
+
+  /** 空间 AI：连接是空间配置里 owner 指定的那一套，现读；不给配置项（成员不能换成 owner 的别的连接，也不改思考档，按默认档问） */
+  private async spaceChoice(spaceId: string): Promise<ResolvedChoice> {
+    const [row, lookup] = await Promise.all([spaceAiConnection(this.deps.pool, spaceId), this.lookup()])
+    if (!row) return { options: [], row: null }
+    return { ...resolveChoice([row], row.id, { provider: row.id, effort: null }, lookup), options: [] }
+  }
+
   // Genet 没有工作区：cwd 不用
   async newSession(_cwd: string, tools: PageTool[] = []): Promise<{ sessionId: string; configOptions: ConfigOption[] }> {
     await this.ready()
-    const { tool, userId } = this.owner(tools)
+    const { tool, userId, spaceId } = this.owner(tools)
     const id = randomUUID()
-    await this.deps.pool.query(INSERT_SESSION, [id, userId])
-    await this.deps.pool.query(PRUNE_SESSIONS, [userId, SESSIONS_PER_USER])
-    const s = this.open(id, userId, tool, [])
+    await this.deps.pool.query(INSERT_SESSION, [id, spaceId ? null : userId, spaceId])
+    if (spaceId) await this.deps.pool.query(PRUNE_SPACE_SESSIONS, [spaceId, SESSIONS_PER_SPACE])
+    else await this.deps.pool.query(PRUNE_SESSIONS, [userId, SESSIONS_PER_USER])
+    const s = this.open(id, userId, spaceId, tool, [])
     return { sessionId: id, configOptions: (await this.refresh(s)).options }
   }
 
@@ -206,20 +247,29 @@ export class AssistantDriver extends DriverBase {
     throw new Error('Genet 不做 ⌘J 的受限会话')
   }
 
-  /** 本进程里有就只换凭证；没有就从库里读回历史。不是这个人的、库里没有、或是认不出的历史形状，都抛错（调用方据此新建会话、全文重放） */
+  /** 本进程里有就只换凭证；没有就从库里读回历史。不是这个主体的、库里没有、或是认不出的历史形状，都抛错（调用方据此新建会话、全文重放）。
+   *  空间 AI 换了人叫它：换上这个人的凭证（下一轮 MCP 进程按它重起），之后的读写以他的权限为上限 */
   async loadSession(sessionId: string, _cwd: string, tools: PageTool[] = []): Promise<{ configOptions: ConfigOption[] }> {
     await this.ready()
-    const { tool, userId } = this.owner(tools)
+    const { tool, userId, spaceId } = this.owner(tools)
+    const missing = (): Error => new Error(`没有这个 ${this.who} 会话 ${sessionId}`)
     const existing = this.sessions.get(sessionId)
     if (existing) {
-      if (existing.userId !== userId) throw new Error(`没有这个 Genet 会话 ${sessionId}`)
+      if (!this.owns(existing, userId, spaceId)) throw missing()
       existing.tool = tool
+      existing.userId = userId
       return { configOptions: (await this.refresh(existing)).options }
     }
-    const row = (await this.deps.pool.query<{ user_id: string; messages: unknown }>(SELECT_SESSION, [sessionId])).rows[0]
-    if (!row || row.user_id !== userId || !isStoredHistory(row.messages)) throw new Error(`没有这个 Genet 会话 ${sessionId}`)
-    const s = this.open(sessionId, userId, tool, row.messages)
+    const row = (await this.deps.pool.query<{ user_id: string | null; space_id: string | null; messages: unknown }>(SELECT_SESSION, [sessionId])).rows[0]
+    if (!row || !this.owns({ userId: row.user_id, spaceId: row.space_id }, userId, spaceId) || !isStoredHistory(row.messages)) throw missing()
+    const s = this.open(sessionId, userId, spaceId, tool, row.messages)
     return { configOptions: (await this.refresh(s)).options }
+  }
+
+  /** 一次性的会话用完：丢掉进程里的状态，连库里的历史一起删（runOnce 用，不占每个空间的会话名额） */
+  async forget(sessionId: string): Promise<void> {
+    this.discardSession(sessionId)
+    await this.deps.pool.query(DELETE_SESSION, [sessionId])
   }
 
   /** 换供应商 / 思考程度。值必须在此刻的选项里（连接可能刚被删、换了协议思考档就不同），不在就抛错：
@@ -228,7 +278,7 @@ export class AssistantDriver extends DriverBase {
     const s = this.sessions.get(sessionId)
     if (!s) throw new Error(`Unsupported session ${sessionId}：先 newSession / loadSession`)
     const option = (await this.refresh(s)).options.find((o) => o.id === configId)
-    if (!option) throw new Error(`Genet 现在没有「${configId}」这一项`)
+    if (!option) throw new Error(`${this.who} 现在没有「${configId}」这一项`)
     if (!option.options.some((v) => v.value === value)) throw new Error(`「${option.name}」里没有这个选项`)
     if (configId === PROVIDER_ID) {
       if (value !== s.choice.provider) s.choice = { provider: value, effort: null }
@@ -278,7 +328,7 @@ export class AssistantDriver extends DriverBase {
     let asked = 0
     let limited = false
     const agent = new Agent({
-      initialState: { systemPrompt: ASSISTANT_SYSTEM_PROMPT, model, tools: agentTools(tools, specs), messages: s.messages },
+      initialState: { systemPrompt: this.space ? SPACE_AI_SYSTEM_PROMPT : ASSISTANT_SYSTEM_PROMPT, model, tools: agentTools(tools, specs), messages: s.messages },
       streamFn: (m, context, options) =>
         this.stream(conn, m as typeof model, context, {
           ...(conn.thinking ? { thinking: conn.thinking } : {}),
@@ -309,7 +359,7 @@ export class AssistantDriver extends DriverBase {
     }
     const last = s.messages.findLast((m): m is AssistantMessage => m.role === 'assistant')
     if (signal.aborted || last?.stopReason === 'aborted') return result('cancelled')
-    if (!last) throw new Error('Genet 调用模型时出错了，请稍后再试')
+    if (!last) throw new Error(`${this.who} 调用模型时出错了，请稍后再试`)
     if (last.stopReason === 'error') {
       if (isRefusal(last)) {
         if (!last.content.some((c) => c.type === 'text' && c.text)) throw new Error('模型拒绝了这个请求')
@@ -317,7 +367,7 @@ export class AssistantDriver extends DriverBase {
       }
       const failure = failureOf(last, probe)
       console.error(`[assistant] 会话 ${s.id} 模型调用失败：${logSafeError(failure)}`)
-      throw new Error(modelError(failure, conn.apiKey))
+      throw new Error(modelError(failure, conn.apiKey, this.who))
     }
     if (last.stopReason === 'length') return result('max_tokens')
     if (limited) {
@@ -379,7 +429,7 @@ export class AssistantDriver extends DriverBase {
 
   /** 这一轮用的模型连接：现解密，只活在这一轮里。没配连接、主密钥读不出、地址此刻不安全，都给能照着做的说明 */
   private async connection({ row, thinking, maxTokens }: Pick<ResolvedChoice, 'row' | 'thinking' | 'maxTokens'>): Promise<TurnModel> {
-    if (!row) throw new Error(NO_CONNECTION)
+    if (!row) throw new Error(this.space ? SPACE_AI_OFF : NO_CONNECTION)
     let conn: ModelConnection
     try {
       conn = openConnection(row, this.secretKey)
@@ -410,7 +460,7 @@ export class AssistantDriver extends DriverBase {
       return await starting
     } catch (err) {
       if (s.mcp === starting) s.mcp = null
-      throw new Error(`Genet 的工具没能起来：${errText(err)}`)
+      throw new Error(`${this.who} 的工具没能起来：${errText(err)}`)
     }
   }
 

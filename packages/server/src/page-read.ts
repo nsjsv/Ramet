@@ -90,6 +90,11 @@ export type GrantCtx = {
   /** 精简档（agents/tool-profile.ts）的凭证：只认 read_page / read_image / edit_page，/api/ramet/* 的其余端点一律 403。
    *  没有这一项 = 完整档；无档不签凭证（不挂 MCP） */
   profile?: 'minimal'
+  /** 空间 AI（agents/space-ai.ts）的凭证：读写范围收窄到这个空间（别的空间的页一律当不存在），/api/ramet/* 只放行白名单。
+   *  权限上限仍是凭证的 userId（叫它的人），这一项只做交集 */
+  space?: string
+  /** 只读凭证：改页面 403，/api/ramet/* 的白名单再去掉有副作用的那几个 */
+  readOnly?: true
 }
 
 type Grant = { userId: string; scope: string; expiresAt: number; ctx: GrantCtx }
@@ -120,6 +125,8 @@ export function mintPageToken(userId: string, scope: string, ctx: Partial<GrantC
       canDispatch: ctx.canDispatch ?? false,
       ...(ctx.team ? { team: ctx.team } : {}),
       ...(ctx.profile ? { profile: ctx.profile } : {}),
+      ...(ctx.space ? { space: ctx.space } : {}),
+      ...(ctx.readOnly ? { readOnly: true as const } : {}),
     },
   })
   return token
@@ -133,6 +140,11 @@ export function revokeTeamGrants(runId: string): void {
 /** 撤销某适配器名下全部凭证（凭证不该活过适配器进程） */
 export function revokePageTokens(scope: string): void {
   for (const [token, g] of grants) if (g.scope === scope) grants.delete(token)
+}
+
+/** 撤销一把凭证（一次性用途用完就收回，比如评论里叫空间 AI 的那一轮） */
+export function revokePageToken(token: string): void {
+  grants.delete(token)
 }
 
 /** 撤销某人在某适配器名下的全部凭证（他在那台机器上的授权被收回），同一适配器上别人的凭证不动 */
@@ -163,6 +175,19 @@ export function grantUsable(token: string): boolean {
 export function grantUser(token: string, scope: string): string | null {
   const grant = grants.get(token)
   return grant && grant.scope === scope && grant.expiresAt > Date.now() ? grant.userId : null
+}
+
+/** 凭证绑的空间（空间 AI 的会话主体）：同 grantUser 的口径，只认签给 scope、还没过期的；不是空间凭证 = null */
+export function grantSpaceOf(token: string, scope: string): string | null {
+  const grant = grants.get(token)
+  return grant && grant.scope === scope && grant.expiresAt > Date.now() ? (grant.ctx.space ?? null) : null
+}
+
+/** 收窄过范围的凭证（空间 / 只读）：/api/ramet/* 的白名单闸门每个请求都过一次，所以只查内存。没收窄 / 无效凭证 = null */
+export function narrowedGrant(token: string): { space: string | null; readOnly: boolean } | null {
+  const grant = grants.get(token)
+  if (!grant || grant.expiresAt <= Date.now() || (!grant.ctx.space && !grant.ctx.readOnly)) return null
+  return { space: grant.ctx.space ?? null, readOnly: grant.ctx.readOnly === true }
 }
 
 /** 凭证 → 请求者 + 会话上下文。坏凭证 / 过期凭证 / 账号已删一律 null（调用方转 401，不透露任何页面信息） */
@@ -248,19 +273,20 @@ export function pageReadRoutes(
 ) {
   const app = new Hono()
 
-  /** Authorization: Bearer → 请求者。坏凭证 / 缺凭证一律 null（调用方转 401） */
-  async function bearerUser(c: Context) {
+  /** Authorization: Bearer → 请求者 + 凭证上下文。坏凭证 / 缺凭证一律 null（调用方转 401） */
+  async function bearerGrant(c: Context) {
     const header = c.req.header('authorization') ?? ''
     const token = header.startsWith('Bearer ') ? header.slice(7).trim() : ''
-    return token ? await pageReadUser(pool, token) : null
+    return token ? await pageGrantOf(pool, token) : null
   }
 
   app.get(READ_PAGE_PATH, async (c) => {
-    const user = await bearerUser(c)
-    if (!user) return c.json({ error: 'unauthorized' }, 401)
+    const g = await bearerGrant(c)
+    if (!g) return c.json({ error: 'unauthorized' }, 401)
     const { offset, limit } = normalizeReadParams(c.req.query('offset'), c.req.query('limit'))
     const block = c.req.query('block') || undefined
-    const result = await readPageForUser(pool, user, c.req.param('id'), offset, limit, getLiveDoc, block)
+    // 空间 AI 的凭证：别的空间的页与不存在同一个 404
+    const result = await readPageForUser(pool, g.user, c.req.param('id'), offset, limit, getLiveDoc, block, g.ctx.space)
     // 页面不存在 / 已回收 / 非成员一律同一个 404，不泄露存在性。页面读得到、块不在了是另一个 404
     if (result === NO_BLOCK) return c.json({ error: 'block not found' }, 404)
     return result ? c.json(result) : c.json({ error: 'page not found' }, 404)
@@ -269,8 +295,7 @@ export function pageReadRoutes(
   // AI 取图走独立路径 /api/files/:id/ai，与公开页看图的 GET /api/files/:id 互不影响。
   // 图片字节本身不含权限语义，凭证有效即可
   app.get(READ_IMAGE_PATH, async (c) => {
-    const user = await bearerUser(c)
-    if (!user) return c.json({ error: 'unauthorized' }, 401)
+    if (!(await bearerGrant(c))) return c.json({ error: 'unauthorized' }, 401)
     const img = await loadAiImage(pool, c.req.param('id'))
     // 不存在和不是图片都是 404，不区分
     if (img.error === 'not_found') return c.json({ error: 'image not found' }, 404)
@@ -281,9 +306,7 @@ export function pageReadRoutes(
   // AI 写回文档：ops 在一个 Yjs 事务里，失败不改文档（见 page-write.ts）。
   // 权限沿用 pages.ts 的 writable：非成员 / 不存在 404，viewer 403
   app.post(EDIT_PAGE_PATH, async (c) => {
-    const header = c.req.header('authorization') ?? ''
-    const token = header.startsWith('Bearer ') ? header.slice(7).trim() : ''
-    const g = token ? await pageGrantOf(pool, token) : null
+    const g = await bearerGrant(c)
     if (!g) return c.json({ error: 'unauthorized' }, 401)
     const body = await c.req.json().catch(() => null)
     if (!body || typeof body !== 'object' || !('ops' in body)) return c.json({ error: 'body 需要 ops 数组' }, 400)
@@ -294,12 +317,18 @@ export function pageReadRoutes(
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 400)
     }
     const pageId = c.req.param('id')
+    // 收窄过的凭证：页面不在凭证的空间里与不存在同一个 404（先于只读的 403，不泄露存在性）；只读凭证改不了任何页
+    if (g.ctx.space || g.ctx.readOnly) {
+      const visible = (await pool.query(SELECT_READABLE, [pageId, g.user.id, g.ctx.space ?? null])).rowCount
+      if (!visible) return c.json({ error: 'page not found' }, 404)
+      if (g.ctx.readOnly) return c.json({ error: 'forbidden', message: '这个会话只能读，不能改页面' }, 403)
+    }
     const run = async (): Promise<Outcome> => {
       const outcome = await editPageForUser(pool, g.user, pageId, ops, write ?? unavailableWriter)
       return 'ok' in outcome ? { status: 200, body: { ok: true } } : { status: outcome.status, body: { error: outcome.error } }
     }
     if (consent) {
-      const title = (await pool.query<{ title: string }>(SELECT_READABLE, [pageId, g.user.id])).rows[0]?.title
+      const title = (await pool.query<{ title: string }>(SELECT_READABLE, [pageId, g.user.id, null])).rows[0]?.title
       // 看不到的页先照常 404（不为它弹审批）
       if (title !== undefined) return consent.guarded(c, g, `改页面《${title || '无标题'}》`, run)
     }
@@ -311,9 +340,11 @@ export function pageReadRoutes(
 }
 
 /** 活页面 + 可见性：必须是该页所在空间的成员，全局 admin 也不例外。
- *  不存在 / 已回收（live_pages 打不上）/ 非成员一律查不到，调用方转 404，不泄露存在性。 */
+ *  不存在 / 已回收（live_pages 打不上）/ 非成员一律查不到，调用方转 404，不泄露存在性。
+ *  $3 = 凭证收窄到的空间（空间 AI）：不在这个空间的页同样查不到；null = 不收窄 */
 const SELECT_READABLE = `SELECT p.title FROM live_pages p
-  WHERE p.id = $1 AND p.space_id IN (SELECT space_id FROM space_members WHERE user_id = $2)`
+  WHERE p.id = $1 AND p.space_id IN (SELECT space_id FROM space_members WHERE user_id = $2)
+    AND ($3::text IS NULL OR p.space_id = $3)`
 
 /** offset / limit 归一化：非法值回落缺省，limit 截到上限。offset 从 1 开始 */
 function normalizeReadParams(
@@ -343,8 +374,9 @@ async function readPageForUser(
   limit: number,
   getLiveDoc?: (docName: string) => Y.Doc | undefined,
   blockId?: string,
+  space?: string,
 ): Promise<PageReadResult | typeof NO_BLOCK | null> {
-  const { rows } = await pool.query<{ title: string }>(SELECT_READABLE, [pageId, user.id])
+  const { rows } = await pool.query<{ title: string }>(SELECT_READABLE, [pageId, user.id, space ?? null])
   const row = rows[0]
   if (!row) return null
   const body = (await loadDocForRead(pool, `page:${pageId}`, getLiveDoc)).getXmlFragment('prosemirror')

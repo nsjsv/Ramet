@@ -15,9 +15,8 @@ function mentionsIn(msg: PMNode): string[] {
   return out
 }
 
-/** 这条回复失败后，被点名的 agent 还剩几个没轮到。只有它是文档里最后一条回复才算（之后又有回复 / 新消息，
- *  这条失败就不再是链停住的地方），没有链或链走完了返回 0 */
-export function chainRestAfter(doc: PMNode, replyId: string): number {
+/** 顶层块摊成 ChainBlock，顺带记下最后一条回复的块 id */
+function chainBlocks(doc: PMNode): { blocks: ChainBlock[]; lastReply: string } {
   const blocks: ChainBlock[] = []
   let lastReply = ''
   doc.forEach((node) => {
@@ -27,5 +26,18 @@ export function chainRestAfter(doc: PMNode, replyId: string): number {
       lastReply = typeof node.attrs.id === 'string' ? node.attrs.id : ''
     } else blocks.push({ kind: 'other' })
   })
+  return { blocks, lastReply }
+}
+
+/** 这条回复失败后，被点名的 agent 还剩几个没轮到。只有它是文档里最后一条回复才算（之后又有回复 / 新消息，
+ *  这条失败就不再是链停住的地方），没有链或链走完了返回 0 */
+export function chainRestAfter(doc: PMNode, replyId: string): number {
+  const { blocks, lastReply } = chainBlocks(doc)
   return lastReply === replyId ? chainRest(mentionChainOf(blocks)) : 0
+}
+
+/** 下一轮会跑谁（服务端点名优先于消息 chip 与请求体）：最后一条用户消息点名的、还没轮到的第一家；没有链 / 轮完了是空串 */
+export function nextMention(doc: PMNode): string {
+  const chain = mentionChainOf(chainBlocks(doc).blocks)
+  return chain && chain.replied < chain.agents.length ? (chain.agents[chain.replied] ?? '') : ''
 }

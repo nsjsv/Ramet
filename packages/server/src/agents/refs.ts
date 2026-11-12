@@ -107,6 +107,8 @@ export async function resolveRefs(
   user: { id: string; role: string },
   fragment: Y.XmlFragment,
   getLiveDoc?: (docName: string) => Y.Doc | undefined,
+  /** 只读这个范围里的页（空间 AI：凭证收窄到的空间）；范围外的按读不到处理 */
+  inScope?: (pageId: string) => Promise<boolean>,
 ): Promise<AtomText> {
   const found: Collected = { blocks: new Map(), mentions: new Set() }
   fragment.forEach((child) => collect(child as Y.XmlElement | Y.XmlText, found))
@@ -116,7 +118,7 @@ export async function resolveRefs(
 
   const current = new Map<string, string>()
   for (const [pageId, list] of byPage) {
-    if (!(await pageAccess(pool, pageId, user))) continue
+    if (!(await pageAccess(pool, pageId, user)) || (inScope && !(await inScope(pageId)))) continue
     const body = (await loadDocForRead(pool, `page:${pageId}`, getLiveDoc)).getXmlFragment('prosemirror')
     for (const ref of list) {
       const el = findBlockElement(body, ref.blockId)

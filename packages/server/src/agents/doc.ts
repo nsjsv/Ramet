@@ -99,7 +99,7 @@ export function noticeLine(kind?: string): string {
 
 /** 一个块 → 提示词口径的文字（markdown 形状）。`atoms` = 原子节点的替代文字（引用解析，见 refs.ts）。
  *  serializeDoc 拼整页、块引用取原块内容、read_page 按块读都用这一个。 */
-export function blockMarkdown(el: Y.XmlElement, atoms?: AtomText): string {
+export function blockMarkdown(el: Y.XmlElement, atoms?: AtomText, speaker?: PromptEnv['speaker']): string {
   switch (el.nodeName) {
     case 'user_message': {
       // 用户消息在提示词里就是 '>> ' 行（前端独立节点，见 message-blocks.ts）。
@@ -108,6 +108,9 @@ export function blockMarkdown(el: Y.XmlElement, atoms?: AtomText): string {
       const blocks = childBlocks(el, atoms)
       const notice: unknown = el.getAttribute('notice')
       if (typeof notice === 'string' && notice) blocks.unshift(noticeLine(notice))
+      // 署名（只有空间 AI 的一轮有）：好几个人在跟同一个 AI 说话，每条要看得出是谁发的；写法与 SPACE_AI_SYSTEM_PROMPT 同改
+      const who = speaker?.(el)
+      if (who) blocks.unshift(`[来自 ${who}]`)
       if (typeof ctx === 'string' && ctx) blocks.push(focusLine(ctx))
       const inner = blocks.join('\n\n')
       return inner
@@ -256,7 +259,7 @@ export function serializeBlocks(
       return
     }
     const el = c as Y.XmlElement
-    const text = blockMarkdown(el, env?.atoms)
+    const text = blockMarkdown(el, env?.atoms, env?.speaker)
     const process = el.nodeName === 'agent_reply' ? env?.process(el) : undefined
     out.push({ el, text: process ? `${process.map((line) => `> ${line}`).join('\n')}\n${text}` : text })
   })

@@ -24,6 +24,7 @@ import { buildTeamStrip, disposeTeamStrips } from '../team/team-mount'
 import { buildFailStrip, buildStoppedStrip, failText, isFailedReply, isStoppedReply } from './reply-fail'
 import { lastReply, resumableReply, resumes } from './reply-target'
 import { ensureAgentsLoaded, subscribeAgentList, subscribeDefaultAgent } from '../default-agent'
+import { subscribeSpaceAi } from '../assistant/space-ai'
 
 const logoListeners = new Set<() => void>()
 let wired = false
@@ -32,13 +33,14 @@ function notifyLogo(): void {
   logoListeners.forEach((l) => l())
 }
 
-/** 目录 / 默认 agent 变化时重算装饰（派发空事务触发 update，装饰由各插件的 plugin state 重算）。
- * 两个事实源的模块级订阅在首个消费者出现时接上。 */
+/** 目录 / 默认 agent / 空间 AI（开关、改名）变化时重算装饰（派发空事务触发 update，装饰由各插件的 plugin state 重算）。
+ * 这几个事实源的模块级订阅在首个消费者出现时接上。 */
 export function watchAgentLogo(view: EditorView): () => void {
   if (!wired) {
     wired = true
     subscribeAgentList(notifyLogo)
     subscribeDefaultAgent(notifyLogo)
+    subscribeSpaceAi(notifyLogo)
   }
   const cb = () => {
     if (!view.isDestroyed) view.dispatch(view.state.tr)
@@ -78,7 +80,8 @@ const agentReplyKey = new PluginKey<DecorationSet>('agentReplyHead')
 // ---------- 回复抬头行（文档 / 对话两种模式同一套，样式在 chat.css 的 .reply-head） ----------
 // 图标 + 名字靠左；右端 .reply-end 是悬停才出现的操作行（doc-acts.ts / chat-acts.ts）+ 停靠的岛（hud/dock.ts）。
 // 两种模式结构相同，文档 / 对话切换时整行平移（view-morph.ts 按「块 id@head」配对）。
-export function buildReplyHead(agentId: string, end: Array<HTMLElement | null>): HTMLElement {
+// pageId = 回复所在的页：空间 AI 的名字跟着这一页所在的空间（agent-badge.ts 的 agentName）
+export function buildReplyHead(agentId: string, end: Array<HTMLElement | null>, pageId?: string): HTMLElement {
   const badge = agentBadge(agentId)
   const head = document.createElement('div')
   head.className = 'reply-head'
@@ -92,7 +95,7 @@ export function buildReplyHead(agentId: string, end: Array<HTMLElement | null>):
   logo.append(glyph)
   const name = document.createElement('span')
   name.className = 'reply-name'
-  name.textContent = agentName(agentId)
+  name.textContent = agentName(agentId, pageId)
   const tail = document.createElement('span')
   tail.className = 'reply-end'
   for (const el of end) if (el) tail.append(el)
@@ -114,15 +117,16 @@ function replyChipDecorations(doc: PMNode, pageId: string, acts: HeadActs | null
     const agentId = typeof agent === 'string' ? agent : ''
     const withActs = Boolean(acts) && decodeStats(stats).o !== 'run'
     const badge = agentBadge(agentId)
-    const look = `${badge.kind === 'mark' ? badge.key : badge.text}:${agentName(agentId)}`
+    const look = `${badge.kind === 'mark' ? badge.key : badge.text}:${agentName(agentId, pageId)}`
     decos.push(
       Decoration.widget(
         offset + 1,
         () =>
-          buildReplyHead(agentId, [
-            withActs && acts ? acts(node) : null,
-            buildDock({ id, agent, stats, plan, run }, pageId),
-          ]),
+          buildReplyHead(
+            agentId,
+            [withActs && acts ? acts(node) : null, buildDock({ id, agent, stats, plan, run }, pageId)],
+            pageId,
+          ),
         {
           side: -1,
           key: `head:${String(id)}:${String(stats)}:${String(run)}:${String(plan)}:${withActs}:${look}`,

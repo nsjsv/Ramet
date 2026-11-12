@@ -55,7 +55,8 @@ export function pickAgent(list: readonly AgentInfo[], ...prefs: string[]): strin
   for (const id of prefs.length > 0 ? prefs : [getDefaultAgent()]) {
     if (id && usable.some((a) => a.id === id)) return id
   }
-  return usable[0]?.id ?? ''
+  // 只能点名的（空间 AI）不当回落：没人 @ 它、没人选它，就不该花空间所有者的额度
+  return usable.find((a) => !a.optIn)?.id ?? ''
 }
 
 /** 一页只用一种工具（服务端按第一块回复定，经 SSE 的 tool_lock 给）：锁定后只留这个工具在各台机器上的 agent，
@@ -91,14 +92,15 @@ export function agentList(): AgentInfo[] {
   return state.agents
 }
 
-/** 按 id 认 agent：目录里的，或前端自带的（中心里的 Genet 不进目录，见 assistant/identity.ts）；认不出 undefined */
-export function findAgent(id: string): AgentInfo | undefined {
-  return state.agents.find((a) => a.id === id) ?? builtinAgent(id)
+/** 按 id 认 agent：目录里的，或前端自带的（中心里的 Genet、空间 AI 不进目录，见 assistant/identity.ts）；认不出 undefined。
+ *  pageId：空间 AI 的名字跟着页面所在的空间，不给就是缺省名 */
+export function findAgent(id: string, pageId?: string): AgentInfo | undefined {
+  return state.agents.find((a) => a.id === id) ?? builtinAgent(id, pageId)
 }
 
 /** AI 写的署名：目录里的名字，对不上就写「AI」，不借用当前默认 agent（更新流水、「上次编辑」、集合的最后编辑者共用） */
-export function agentLabel(id: string | null): string {
-  const label = id ? findAgent(id)?.label?.trim() : ''
+export function agentLabel(id: string | null, pageId?: string): string {
+  const label = id ? findAgent(id, pageId)?.label?.trim() : ''
   return label || 'AI'
 }
 

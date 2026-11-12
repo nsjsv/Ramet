@@ -202,6 +202,22 @@
   font-size: var(--t-xs);
 }
 
+/* 空间 AI 写的评论：机器人图标占头像位（同尺寸的圆），不画用户头像 */
+.cm-ai-avatar {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--bg-sunk);
+  font-size: 12px;
+}
+
+.cm-ai-avatar .agent-mark {
+  background-color: var(--ink-2);
+}
+
 .cm-name {
   color: var(--ink);
   font-weight: 600;

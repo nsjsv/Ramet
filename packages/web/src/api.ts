@@ -156,6 +156,19 @@ export interface Space {
   is_personal: boolean
   created_at: string
   my_role: MySpaceRole
+  /** 空间 AI（只有空间列表接口带；建空间 / 改名的响应、老的本地缓存里没有）：个人空间 null，团队空间没配过是 { enabled: false, name: 'AI' } */
+  ai?: SpaceAiBrief | null
+}
+
+/** 空间列表里的空间 AI：@ 菜单、回复抬头的名字都用它，不另拉 */
+export interface SpaceAiBrief {
+  enabled: boolean
+  name: string
+}
+
+/** GET / PUT /api/spaces/:id/ai：owner 另有 connectionId（此刻生效的那个连接；没启用 / 连接没了是 null），成员没有这个键 */
+export interface SpaceAiConfig extends SpaceAiBrief {
+  connectionId?: string | null
 }
 
 export interface SpaceMember {
@@ -399,6 +412,8 @@ export interface AgentInfo {
   unavailable?: string
   /** 只有前端自带的目录项（服务端目录里不列的，如中心里的 Genet，assistant/identity.ts）才有：缺省 = 全都有 */
   caps?: AgentCaps
+  /** 只在被 @ 点名 / 被选成来源时才用，不当回落（空间 AI：花的是空间所有者的额度，没人叫它就不该跑） */
+  optIn?: boolean
 }
 
 /** 发起控件里哪些对这个 agent 有意义：工作区（它在哪台机器的哪个目录跑）、工具档位、带队 */
@@ -812,6 +827,11 @@ export const api = {
       body: JSON.stringify({ role }),
     }),
   listSpaceInvites: (id: string) => request<SpaceInvite[]>(`/api/spaces/${id}/invites`),
+  /** 空间 AI 的配置：非成员 / 个人空间 404 */
+  getSpaceAi: (id: string) => request<SpaceAiConfig>(`/api/spaces/${id}/ai`),
+  /** 只给要改的那项；只有 owner 能改（403），连接必须是自己的（400），名字 1–20 字（400） */
+  setSpaceAi: (id: string, patch: { connectionId?: string | null; name?: string }) =>
+    request<SpaceAiConfig>(`/api/spaces/${id}/ai`, { method: 'PUT', body: JSON.stringify(patch) }),
   revokeInvite: (token: string) => request<unknown>(`/api/invites/${token}`, { method: 'DELETE' }),
   invitePreview: (token: string) => request<InvitePreview>(`/api/invites/${token}`),
   acceptInvite: (token: string) =>

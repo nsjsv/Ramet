@@ -14,7 +14,9 @@
  * Genet 的定时器（set_timer 等）在 timer-tools.ts、盯页面（watch_page 等）在 watch-tools.ts，注册在这个 app 上，闸门同派活。
  * Genet 读到外来事件（别人的评论、外部请求）之后、主人亲自说话之前，有副作用的端点（建 / 移 / 改名 / 删页、派活、定时器增删改）
  * 先在 Genet 页弹审批（ramet-consent.ts 的 guard；删页合进它原有的那张卡）。mark_handled（「不用处理」）在 mark-handled.ts；
- * reply_comment（以主人的名义回复评论，每次都先给主人看原文）在 comment-reply.ts。 */
+ * reply_comment（以主人的名义回复评论，每次都先给主人看原文）在 comment-reply.ts。
+ * 空间 AI（agents/space-ai.ts）的凭证收窄到一个空间：闸门只放行白名单里的端点，页面类端点再逐个判「这一页在不在这个空间」，
+ * 不在的与不存在同一个 404；它弹的审批只给叫它的人批（only）。 */
 
 import { randomUUID } from 'node:crypto'
 import { Hono, type Context } from 'hono'
@@ -35,8 +37,9 @@ import { TeamToolError } from '../agents/team.js'
 import { TeamPlanError } from '../agents/team-plan.js'
 import { SubRunError } from '../agents/sub-run.js'
 import { createDocPage } from '../page-create.js'
-import { isMinimalGrant, pageGrantOf, type GrantCtx } from '../page-read.js'
+import { isMinimalGrant, narrowedGrant, pageGrantOf, type GrantCtx } from '../page-read.js'
 import { MINIMAL_TOOLS } from '../agents/tool-profile.js'
+import { narrowedAllowed, pageInSpace, spaceTools } from '../agents/space-ai.js'
 import {
   SELECT,
   SET_PARENT,
@@ -147,19 +150,33 @@ export function rametToolRoutes(
 
   // 工具档位闸门（agents/tool-profile.ts）：精简档的凭证在这里只能问工具清单，其余端点一律 403 ——
   // 不只靠 MCP 进程不列出（凭证在 agent 那台机器上，绕过 MCP 直接打端点也得拦住）。读 / 图 / 写三个端点在 page-read.ts，不经这里
+  // 空间 AI 的凭证同理，而且是白名单（space-ai.ts 的 narrowedAllowed）：以后新加的 /api/ramet/* 端点默认对它 403
   app.use('/api/ramet/*', async (c, next) => {
-    if (c.req.path !== '/api/ramet/tools' && isMinimalGrant(bearer(c))) {
+    const token = bearer(c)
+    if (c.req.path !== '/api/ramet/tools' && isMinimalGrant(token)) {
       return c.json({ error: 'forbidden', message: '当前工具档位不提供这个工具' }, 403)
+    }
+    const narrowed = narrowedGrant(token)
+    if (narrowed && !narrowedAllowed(c.req.method, c.req.path, narrowed.readOnly)) {
+      return c.json({ error: 'forbidden', message: '这个会话不提供这个工具' }, 403)
     }
     return next()
   })
 
-  /** 这把凭证用的空间 skill 库：凭证绑的那页所在的空间（没绑页面 = 发起人的个人空间），发起人必须仍是成员 */
+  /** 这把凭证用的空间 skill 库：空间 AI = 凭证上的空间；别的 = 凭证绑的那页所在的空间（没绑页面 = 发起人的个人空间）。发起人必须仍是成员 */
   async function grantSpace(g: Granted): Promise<string | null> {
-    const page = g.ctx.pageId ? (await pool.query<PageRow>(SELECT, [g.ctx.pageId])).rows[0] : undefined
-    const spaceId = g.ctx.pageId ? (page?.space_id ?? null) : await myPersonalSpaceId(pool, g.user.id)
+    const page = !g.ctx.space && g.ctx.pageId ? (await pool.query<PageRow>(SELECT, [g.ctx.pageId])).rows[0] : undefined
+    const spaceId = g.ctx.space ?? (g.ctx.pageId ? (page?.space_id ?? null) : await myPersonalSpaceId(pool, g.user.id))
     return spaceId && (await roleInSpace(pool, g.user, spaceId)) !== null ? spaceId : null
   }
+
+  /** 空间 AI 的凭证碰到别的空间的页：与不存在同响应（其余凭证不收窄） */
+  async function outsideSpace(g: Granted, pageId: string): Promise<boolean> {
+    return g.ctx.space !== undefined && !(await pageInSpace(pool, pageId, g.ctx.space))
+  }
+
+  /** 要等人批准的工具弹的卡：空间 AI 的只给叫它的人批（别的成员看得到这一页，但这是他叫的、按他的权限执行） */
+  const onlyInvoker = (g: Granted): { only?: string } => (g.ctx.space ? { only: g.user.id } : {})
 
   /** 在 parentId 下（没有 = 空间顶层）建一页：标题 + markdown 正文（page-create.ts） */
   async function insertPage(id: string, user: Granted['user'], parentId: string | null, spaceId: string, title: string, text: string): Promise<void> {
@@ -167,11 +184,11 @@ export function rametToolRoutes(
     extra.created?.(parentId, [id], user.id)
   }
 
-  /** 页面闸门：存在 + 可见（不存在 / 非成员同响应 404）+ 可写（viewer 403） */
-  async function writablePage(user: Granted['user'], id: string): Promise<{ page: PageRow } | { status: 403 | 404; error: string }> {
+  /** 页面闸门：存在 + 可见（不存在 / 非成员 / 不在空间 AI 凭证的空间里同响应 404）+ 可写（viewer 403） */
+  async function writablePage(user: Granted['user'], id: string, space?: string): Promise<{ page: PageRow } | { status: 403 | 404; error: string }> {
     const page = (await pool.query<PageRow>(SELECT, [id])).rows[0]
     const role = page ? await pageRole(pool, user, page) : null
-    if (!page || role === null) return { status: 404, error: 'page not found' }
+    if (!page || role === null || (space !== undefined && page.space_id !== space)) return { status: 404, error: 'page not found' }
     if (!writable(role)) return { status: 403, error: 'forbidden' }
     return { page }
   }
@@ -187,11 +204,17 @@ export function rametToolRoutes(
     const g = await granted(pool, c)
     if (!g) return c.json({ error: 'unauthorized' }, 401)
     if (g.ctx.profile === 'minimal') return c.json({ tools: MINIMAL_TOOLS, agents: [], skills: [] })
+    const skillsOf = async (spaceId: string | null) =>
+      spaceId ? (await listSkills(pool, spaceId)).slice(0, SKILL_INDEX_MAX).map((s) => ({ name: s.name, description: s.description })) : []
+    // 空间 AI：只有这个空间的读写工具（只读凭证只有读的），不列可叫的 agent
+    if (g.ctx.space || g.ctx.readOnly) {
+      const skills = await skillsOf(await grantSpace(g))
+      return c.json({ tools: spaceTools(g.ctx.readOnly === true, skills.length > 0), agents: [], skills })
+    }
     const agents = g.ctx.canDispatch && g.ctx.pageId ? await host().agentsFor(g.user, g.ctx.agentId) : []
     // Genet 派活（dispatch_task）而不同步叫人（run_agent）；可派的 agent 一个都没有也列出来，Genet 才能如实告诉用户
     const dispatcher = isAssistantId(g.ctx.agentId) && g.ctx.pageId !== null
-    const spaceId = await grantSpace(g)
-    const skills = spaceId ? (await listSkills(pool, spaceId)).slice(0, SKILL_INDEX_MAX).map((s) => ({ name: s.name, description: s.description })) : []
+    const skills = await skillsOf(await grantSpace(g))
     // 带队的组长凭证（只在对应的计划轮 / 执行轮、那一轮还在飞时）多一个工具：submit_plan / send_back；别的会话（含组员）没有
     const team = g.ctx.team ? await host().team.round(g.ctx.team, g.user, g.ctx.pageId) : null
     return c.json({
@@ -259,7 +282,8 @@ export function rametToolRoutes(
     const query = typeof body.query === 'string' ? body.query.trim() : ''
     if (!query) return c.json({ error: 'query required' }, 400)
     const limit = typeof body.limit === 'number' && Number.isFinite(body.limit) ? Math.min(Math.max(Math.floor(body.limit), 1), 30) : 10
-    const hits = await searchPages(pool, g.user, query, { limit })
+    // 空间 AI 只搜得到它的空间
+    const hits = await searchPages(pool, g.user, query, { limit, ...(g.ctx.space ? { spaceId: g.ctx.space } : {}) })
     return c.json({ results: hits.map((h) => ({ id: h.id, title: h.title, snippet: h.snippet })) })
   })
 
@@ -273,10 +297,13 @@ export function rametToolRoutes(
     const parentId = typeof body.parentId === 'string' && body.parentId ? body.parentId : g.ctx.pageId
     let spaceId: string
     if (parentId) {
-      const parent = await writablePage(g.user, parentId)
+      const parent = await writablePage(g.user, parentId, g.ctx.space)
       if (!('page' in parent)) return c.json({ error: parent.error }, parent.status)
       if (!parent.page.space_id) return c.json({ error: 'parent has no space' }, 400)
       spaceId = parent.page.space_id
+    } else if (g.ctx.space) {
+      // 空间 AI 没绑页面时建在它的空间顶层，不建到叫它的人的个人空间
+      spaceId = g.ctx.space
     } else {
       const personal = await myPersonalSpaceId(pool, g.user.id)
       if (!personal) return c.json({ error: 'personal space unavailable' }, 500)
@@ -295,10 +322,11 @@ export function rametToolRoutes(
     const g = await granted(pool, c)
     if (!g) return c.json({ error: 'unauthorized' }, 401)
     const id = c.req.param('id')
-    const found = await writablePage(g.user, id)
+    const found = await writablePage(g.user, id, g.ctx.space)
     if (!('page' in found)) return c.json({ error: found.error }, found.status)
     const body = (await c.req.json().catch(() => ({}))) as { parentId?: unknown }
     const parentId = typeof body.parentId === 'string' && body.parentId ? body.parentId : null
+    if (parentId && (await outsideSpace(g, parentId))) return c.json({ error: 'parent not found' }, 404)
     if (!(await parentOk(pool, g.user, parentId, found.page.space_id))) return c.json({ error: 'parent not found (or in another space)' }, 400)
     if (!(await validParent(pool, id, parentId))) return c.json({ error: 'parent would create a cycle' }, 400)
     return guard(c, g, `把《${found.page.title || '无标题'}》移到${parentId ? ` page:${parentId} 之下` : '空间顶层'}`, async () => {
@@ -312,7 +340,7 @@ export function rametToolRoutes(
     const g = await granted(pool, c)
     if (!g) return c.json({ error: 'unauthorized' }, 401)
     const id = c.req.param('id')
-    const found = await writablePage(g.user, id)
+    const found = await writablePage(g.user, id, g.ctx.space)
     if (!('page' in found)) return c.json({ error: found.error }, found.status)
     const body = (await c.req.json().catch(() => ({}))) as { title?: unknown }
     const title = typeof body.title === 'string' ? body.title.trim() : ''
@@ -329,7 +357,7 @@ export function rametToolRoutes(
     const g = await granted(pool, c)
     if (!g) return c.json({ error: 'unauthorized' }, 401)
     const id = c.req.param('id')
-    const found = await writablePage(g.user, id)
+    const found = await writablePage(g.user, id, g.ctx.space)
     if (!('page' in found)) return c.json({ error: found.error }, found.status)
     const pageId = g.ctx.pageId
     // 没有绑页面 = 没有地方弹审批：不能静默放行
@@ -339,9 +367,9 @@ export function rametToolRoutes(
     const what = `把页面「${found.page.title || '无标题'}」移入回收站`
     const cause = extra.consent ? await extra.consent.cause(g) : null
     return heartbeatJson(c, async () => {
-      const allowed = await host().approvals.request(
+      const { allowed } = await host().approvals.decide(
         { pageId, agentId: g.ctx.agentId },
-        { title: cause ? consentTitle(cause, what) : what, toolCall: { kind: 'delete', title: '移入回收站', rawInput: { page: label } } },
+        { title: cause ? consentTitle(cause, what) : what, toolCall: { kind: 'delete', title: '移入回收站', rawInput: { page: label } }, ...onlyInvoker(g) },
         c.req.raw.signal,
       )
       if (!allowed) return { rejected: true }
@@ -357,7 +385,7 @@ export function rametToolRoutes(
     const pageId = g.ctx.pageId
     // 没有绑页面 = 没有地方弹确认：不能静默写入
     if (!pageId) return c.json({ error: '这个会话没有绑定页面，没法弹出确认，不能提议记忆' }, 403)
-    const found = await writablePage(g.user, pageId)
+    const found = await writablePage(g.user, pageId, g.ctx.space)
     if (!('page' in found)) return c.json({ error: found.error }, found.status)
     const spaceId = found.page.space_id
     if (!spaceId) return c.json({ error: '这个页面不在任何空间里，没法记忆' }, 400)
@@ -373,13 +401,14 @@ export function rametToolRoutes(
           title: `记住这条？「${brief.length > 60 ? `${brief.slice(0, 60)}…` : brief}」`,
           toolCall: { kind: 'other', title: '记住这条', content: [{ type: 'content', content: { type: 'text', text } }] },
           labels: { allow: '记住', reject: '不用' },
+          ...onlyInvoker(g),
         },
         c.req.raw.signal,
       )
       if (!decision.allowed || !decision.by) return { declined: true }
-      // 等待期间页面可能被回收 / 搬走：写入时按页面此刻所在的空间再判一次
+      // 等待期间页面可能被回收 / 搬走：写入时按页面此刻所在的空间再判一次（空间 AI 的页搬出了它的空间就不记）
       const now = (await pool.query<PageRow>(SELECT, [pageId])).rows[0]
-      if (!now?.space_id) return { error: '页面已经不存在了，没有记下' }
+      if (!now?.space_id || (g.ctx.space && now.space_id !== g.ctx.space)) return { error: '页面已经不存在了，没有记下' }
       const res = await addMemory(pool, now.space_id, text, decision.by, pageId)
       if (!res.ok) return { error: res.message }
       notifyMemories?.()

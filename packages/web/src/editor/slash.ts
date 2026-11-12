@@ -434,7 +434,7 @@ function buildSlashMenu(
     const team = capsOf(pageAgents(actions.pageId).find((a) => a.id === agent)).team
     all = [...blocks, ...cmds, ...rametItems(full, team), ...(full ? skillItems(skills) : [])]
     items = all.filter((item) => matches(item, query))
-    agentTitle = COPY.slash.agent(agentName(agent) || agent)
+    agentTitle = COPY.slash.agent(agentName(agent, actions.pageId) || agent)
     render()
   }
   /** 换查询词：重新筛选并重画，返回筛出来几项（0 = 宿主收起并结束会话） */

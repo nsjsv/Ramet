@@ -14,13 +14,12 @@
 
 import { Fragment, useEffect, useLayoutEffect, useReducer, useRef, useState, type KeyboardEvent } from 'react'
 import type { EditorView } from '@milkdown/kit/prose/view'
-import { Avatar } from '../Avatar'
 import { COPY } from '../copy'
 import { flip } from '../motion'
 import { subscribePeople } from '../people'
 import { relativeTime } from '../UpdatesFeed'
 import CommentBody from './CommentBody'
-import CommentThread, { DraftComposer, personFor, type CommentCtx } from './CommentThread'
+import CommentThread, { CommentAvatar, DraftComposer, type CommentCtx } from './CommentThread'
 import { commentRange, onCommentDocChange } from './comment-anchor'
 import type { Anchor, Comment, Thread } from './comments-api'
 import { DRAFT_ID, closePopover, hoverThread, openThread, setWide, useComments } from './comments-store'
@@ -59,7 +58,7 @@ function PreviewItem({ comment, ctx }: { comment: Comment; ctx: CommentCtx }) {
   return (
     <div className="cm-item">
       <div className="cm-meta">
-        <Avatar person={personFor(comment.author, ctx.spaceId)} size={20} />
+        <CommentAvatar author={comment.author} spaceId={ctx.spaceId} />
         <span className="cm-name">{comment.author?.name ?? C.deletedUser}</span>
         <span className="cm-time">{relativeTime(comment.createdAt)}</span>
       </div>
@@ -218,6 +217,7 @@ export default function CommentMargin({ pageId, getColumn, getView, ctx, ready }
       {placed.map(({ id, top }) => {
         const thread = byId.get(id)
         const draft = id === DRAFT_ID && popover?.kind === 'draft' ? popover.anchor : null
+        const initial = popover?.kind === 'draft' ? popover.initial : undefined
         if (!thread && !draft) return null
         const active = id === activeId
         const ref = (el: HTMLDivElement | null): void => {
@@ -229,7 +229,8 @@ export default function CommentMargin({ pageId, getColumn, getView, ctx, ready }
         if (draft) {
           return (
             <div key={id} ref={ref} className="cm-card is-active is-draft" style={style} role="dialog" aria-label={C.drawer}>
-              <DraftComposer anchor={draft} ctx={ctx} />
+              {/* 预填的字不同就换一个新框：框只在建起来那一刻读 initial */}
+              <DraftComposer key={initial ?? ''} anchor={draft} ctx={ctx} initial={initial} />
             </div>
           )
         }

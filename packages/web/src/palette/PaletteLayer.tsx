@@ -59,7 +59,7 @@ export default function PaletteLayer({ pages, spaceId, canWritePage, onCreated }
       {
         pageId,
         canWrite: pageId ? canWritePage(pageId) : false,
-        run: live ? { agentLabel: agentName(live.agent ?? current) || live.agent || current, now: nowOf(live.state).text, asking: agent.permissions.length > 0 } : null,
+        run: live ? { agentLabel: agentName(live.agent ?? current, pageId ?? undefined) || live.agent || current, now: nowOf(live.state).text, asking: agent.permissions.length > 0 } : null,
         hud: { available: live !== null || hud.open, open: hud.open },
         project: { available: target !== null, open: shell.open },
         chatMode: pageId ? readViewMode(pageId) : null,

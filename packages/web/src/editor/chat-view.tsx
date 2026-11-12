@@ -43,12 +43,11 @@ import { useChatFollow } from './chat-follow'
 import ComposerInput, { type ComposerInputHandle } from './composer-input'
 import { rewriteDraft } from './quick-draft'
 import { isQuickKey } from './quick-keys'
-import { useAgents } from '../default-agent'
 import MentionMenu from './mention-menu'
 import { ModeHint } from './mode-hint'
 import { candidatesFor, mentionLabel, mentionQuery, type Candidate, type MentionCategory, type MentionQuery } from './mention-query'
 import { mentionKey, type MentionKeyAction } from './mention-nav'
-import { mentionSources, warmMentionSources } from './mention-sources'
+import { mentionSources, useMentionAgents, warmMentionSources } from './mention-sources'
 import { advance, type Session } from './trigger-session'
 import { chatUnits, registerChatUnits } from './view-morph'
 import { flyFrom } from '../motion'
@@ -176,7 +175,7 @@ function buildBubble(
     if (kind === 'ai') {
       row?.classList.add('is-head')
       const agentId: unknown = node.attrs.agent
-      dom.append(buildReplyHead(typeof agentId === 'string' ? agentId : '', [row, chip]), bubble)
+      dom.append(buildReplyHead(typeof agentId === 'string' ? agentId : '', [row, chip], retry.pageId), bubble)
     } else {
       // 一条用户消息是附件悬停联动的一个单元（att-hover.ts）
       dom.dataset.attUnit = ''
@@ -238,7 +237,7 @@ function chatDecorations(
     const agentId: unknown = node.attrs.agent
     const id = typeof agentId === 'string' ? agentId : ''
     const badge = isAi ? agentBadge(id) : null
-    const name = isAi ? agentName(id) : ''
+    const name = isAi ? agentName(id, retry.pageId) : ''
     const live = isAi && slot ? slot.attach(node) : null
     // @ 点名链停在这条失败回复后还剩几个（只有最后一条回复算，其余 0）
     const replyId: unknown = node.attrs.id
@@ -407,8 +406,8 @@ export default function ChatView({
   // skill / 成员从缓存同步取，会话开启时后台补取，到了靠它重画一次
   const [, setSourcesTick] = useState(0)
   const mentionSession = useRef<Session | null>(null)
-  // @ 候选列全部工具：显式 @ 点名不受本页的工具锁定（它用自己的会话，对话内容靠补发带过去）
-  const { agents } = useAgents()
+  // @ 候选列全部工具：显式 @ 点名不受本页的工具锁定（它用自己的会话，对话内容靠补发带过去）；团队空间里另有空间 AI
+  const agents = useMentionAgents(pageId)
   const matches =
     mention && pages ? candidatesFor(mention, mentionSources(pages, agents, pageId), mention.trigger === '@' ? mentionCat : null) : []
   /** 输入框内容 / 光标变了，按会话推进（typed 表示这次是键入，不是粘贴 / 拖放 / 删字 / 挪光标） */

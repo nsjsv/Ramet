@@ -9,6 +9,7 @@ import Sidebar from './Sidebar'
 import EditorPage from './Editor'
 import CollectionPage from './collection/CollectionPage'
 import { resetCollectionCache, syncCollectionPages, syncCollectionSpaces } from './collection/collection-store'
+import { syncSpaceAi } from './assistant/space-ai'
 import { resetCachedLoads } from './cached-load'
 import { spaceReadOnly } from './space-role'
 import { Icon } from './icons'
@@ -401,6 +402,8 @@ function Shell({ user }: { user: User }) {
   }, [pages])
   // 正文里的集合块按集合所在空间的角色决定给不给编辑入口（不按宿主页）：空间列表也喂一份给 store
   useEffect(() => syncCollectionSpaces(spaces), [spaces])
+  // 空间 AI 按页面所在空间认名字与开关（@ 候选、来源目录、回复抬头）：两份列表都喂给它
+  useEffect(() => syncSpaceAi(spaces, pages), [spaces, pages])
 
   // 页面列表走增量同步（page-sync.ts）：changed 信号来了只拉变过的页并进当前列表；游标过旧 / 成员关系变了服务端回整表。
   // 单飞：在途时再来的 refresh 记一笔，完成后再同步一次。每次同步成功把服务端确认过的列表连同游标回写 localStorage；

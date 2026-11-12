@@ -1,8 +1,9 @@
 /* ---------- 评论输入框 ----------
  * 就是对话输入框（editor/composer-input.tsx：段落 + 提及 chip，对外是记号文字），这里只接两件事：
- *   - `@` 只出「成员」（本空间成员，去掉自己）与 Genet（固定在最前，查询词对得上才出）：查询解析、一次性触发会话、键位、菜单都用
+ *   - `@` 只出「成员」（本空间成员，去掉自己）与一个 AI（固定在最前，查询词对得上才出）：查询解析、一次性触发会话、键位、菜单都用
  *     对话输入框那一套（mention-query / trigger-session / mention-nav / mention-menu），候选源只给成员，分类固定在 person；
- *     选中 Genet 落成 GENET_MARK（框里是 agent chip），发出去就叫自己的 Genet 处理这个串（服务端 comments/genet-call.ts）；
+ *     AI 是哪一个看空间（comment-ai.ts）：个人空间是 Genet，选中落成 GENET_MARK，发出去叫自己的 Genet 处理这个串（服务端 comments/genet-call.ts）；
+ *     团队空间是空间 AI（开着时），落成它的记号，发出去叫空间 AI 回这个串（服务端 comments/space-ai-call.ts）；框里都是 agent chip；
  *   - Enter 发送、Shift+Enter 换行、Esc 取消；
  *   - 代回复（draftFor）：收件箱点「代回复」生成的草稿（reply-draft.ts）流式写进框里，下面一行显示进度 / 失败原因；
  *     框里原来有字、或用户在生成过程中动了框，就不再往里写（停掉生成），不跟用户抢。 */
@@ -17,8 +18,9 @@ import { advance, type Session } from '../editor/trigger-session'
 import { COPY } from '../copy'
 import { loadSpaceMembers, selfId, spaceMembers } from '../people'
 import { openSettings } from '../settings-bus'
-import { ASSISTANT_AGENT } from '../assistant/identity'
-import { COMMENT_MAX, GENET_MARK } from './comments-api'
+import { useSpaceAiOfSpace } from '../assistant/space-ai'
+import { commentAi } from './comment-ai'
+import { COMMENT_MAX } from './comments-api'
 import { stopReplyDraft, useReplyDraft, type DraftKey, type ReplyDraft } from './reply-draft'
 
 const C = COPY.comments
@@ -28,7 +30,8 @@ interface Props {
   getSchema: () => Schema | undefined
   tick: number
   spaceId: string | null
-  placeholder: string
+  /** 函数 = 按这个空间能 @ 的 AI 的名字拼（没有 = null） */
+  placeholder: string | ((ai: string | null) => string)
   initial?: string
   autoFocus?: boolean
   /** 失败时抛错（输入框保留原文、显示错误） */
@@ -118,6 +121,7 @@ export default function CommentComposer({ getSchema, tick, spaceId, placeholder,
     if (draft) stopReplyDraft(draft.target)
   }
 
+  const ai = commentAi(useSpaceAiOfSpace(spaceId))
   const me = selfId()
   const sources: MentionSources = {
     pages: null,
@@ -126,11 +130,9 @@ export default function CommentComposer({ getSchema, tick, spaceId, placeholder,
     people: spaceId ? (spaceMembers(spaceId) ?? []).filter((p) => p.id !== me) : [],
     recent: [],
   }
-  const genet: Candidate[] =
-    mention && ASSISTANT_AGENT.label.toLowerCase().includes(mention.query.trim().toLowerCase())
-      ? [{ kind: 'agent', id: ASSISTANT_AGENT.id, label: ASSISTANT_AGENT.label }]
-      : []
-  const matches: Candidate[] = mention ? [...genet, ...candidatesFor(mention, sources, 'person')] : []
+  const aiCand: Candidate[] =
+    mention && ai && ai.label.toLowerCase().includes(mention.query.trim().toLowerCase()) ? [{ kind: 'agent', id: ai.id, label: ai.label }] : []
+  const matches: Candidate[] = mention ? [...aiCand, ...candidatesFor(mention, sources, 'person')] : []
 
   const closeMention = (): void => {
     session.current = null
@@ -153,8 +155,9 @@ export default function CommentComposer({ getSchema, tick, spaceId, placeholder,
     const q = mention
     const composer = ref.current
     closeMention()
-    if (!q || !composer || (cand.kind !== 'person' && cand.kind !== 'agent')) return
-    composer.replace(q.base + q.start, q.base + q.end, cand.kind === 'agent' ? `${GENET_MARK} ` : `@[${cand.person.username}](user:${cand.person.id}) `)
+    const text = cand.kind === 'agent' ? (ai ? `${ai.mark} ` : null) : cand.kind === 'person' ? `@[${cand.person.username}](user:${cand.person.id}) ` : null
+    if (!q || !composer || !text) return
+    composer.replace(q.base + q.start, q.base + q.end, text)
     composer.focus()
   }
 
@@ -191,7 +194,7 @@ export default function CommentComposer({ getSchema, tick, spaceId, placeholder,
           getSchema={getSchema}
           tick={tick}
           initial={initial}
-          placeholder={placeholder}
+          placeholder={typeof placeholder === 'string' ? placeholder : placeholder(ai?.label ?? null)}
           onChange={(text, typed) => {
             onDraftEdit(text)
             setEmpty(!text.trim())

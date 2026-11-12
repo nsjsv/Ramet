@@ -64,7 +64,8 @@ export async function runResume(
     loadToolProfile(host.pool, pageId),
     loadOwnSession(host.pool, pageId, agent.id, user.id),
   ])
-  const env = await resolvePromptEnv(host.pool, user, fragment, pageId, profile, (name) => host.getLiveDoc(name))
+  const scope = agent.space ? { space: agent.space.id } : undefined
+  const env = await resolvePromptEnv(host.pool, user, fragment, pageId, profile, (name) => host.getLiveDoc(name), scope)
   const target = targetOrThrow(resumeTarget(fragment, replyId))
   // 只接这块回复自己的档案（agent 也对得上）；读不到（过程页被删了 / 没有过程）就不接，收尾按普通一轮新建过程页
   // 原机器不在线时续跑换到了同一工具的另一台（reply-target.ts）：档案照样接（同一个工具），会话从中心下发过去

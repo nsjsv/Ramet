@@ -7,6 +7,7 @@ import { COPY } from './copy'
 import { Card, ConfirmButton, Row } from './ui/form-kit'
 import { Icon } from './icons'
 import { Select } from './ui/Select'
+import SpaceAiCard from './SpaceAiCard'
 
 /** 加成员 / 邀请链接的角色选项 */
 const JOIN_ROLES = [
@@ -18,6 +19,7 @@ const JOIN_ROLES = [
  * - 所有成员（含只读成员）可看成员列表
  * - owner：改成员角色、按用户名添加成员、移除成员、生成 / 撤销邀请链接、改名（行内编辑）、删空间
  * - member/viewer：退出空间（自己移除自己）
+ * - 团队空间多一张「空间 AI」卡（SpaceAiCard.tsx）：owner 选连接 / 改名字，其他人只读
  * 危险动作用行内两步确认（ui/form-kit.tsx ConfirmButton），不弹 window.confirm。
  * 外壳（遮罩 / 导航 / 标题）在 SettingsModal，这里只管内容与权限。 */
 export default function SpaceSettings({
@@ -113,6 +115,8 @@ export default function SpaceSettings({
           <span className={'role-badge' + (space.my_role === 'owner' ? ' is-owner' : '')}>{SPACE_ROLE_LABELS[space.my_role]}</span>
         </Row>
       </Card>
+
+      <SpaceAiCard space={space} onChanged={onChanged} />
 
       <Card title={members ? `成员（${members.length}）` : '成员'}>
         {members === null && <p className="set-empty">加载中…</p>}

@@ -5,6 +5,7 @@ import { withTransaction } from '../db.js'
 import { purgeSpace } from '../page-purge.js'
 import { requireAuth, USERNAME_MAX, type AuthEnv, type AuthUser } from '../auth.js'
 import { deleteMemberConnectors } from '../agents/connectors.js'
+import { SPACE_AI_DEFAULT_NAME, SPACE_AI_JOIN } from '../agents/space-ai.js'
 
 // 用 type 而非 interface:pg 的 query<T> 约束要求隐式索引签名(同 pages.ts)
 type SpaceRow = {
@@ -17,6 +18,8 @@ type SpaceRow = {
 
 // 列表/详情行:my_role = 我在该空间的实际角色;非成员为 null(列表只含自己参与的空间)
 type MySpaceRow = SpaceRow & { my_role: 'owner' | 'member' | 'viewer' | null }
+// 列表另带空间 AI 的两列(生效判定见 agents/space-ai.ts 的 SPACE_AI_JOIN),响应里收成 ai 字段
+type ListedSpaceRow = MySpaceRow & { ai_name: string | null; ai_enabled: boolean }
 
 // avatar = 头像的 files.id(NULL = 没上传):对话气泡按发言人画头像,成员之间可见
 type MemberRow = {
@@ -39,8 +42,10 @@ type InvitePreviewRow = {
 
 // ---------- SQL 常量 ----------
 
-const SELECT_MY_SPACES = `SELECT s.id, s.name, s.owner_id, s.is_personal, s.created_at, m.role AS my_role
+const SELECT_MY_SPACES = `SELECT s.id, s.name, s.owner_id, s.is_personal, s.created_at, m.role AS my_role,
+    sa.name AS ai_name, sc.id IS NOT NULL AS ai_enabled
   FROM spaces s JOIN space_members m ON m.space_id = s.id AND m.user_id = $1
+  ${SPACE_AI_JOIN}
   ORDER BY s.created_at, s.id`
 const SELECT_SPACE_BY_ID = 'SELECT id, name, owner_id, is_personal, created_at FROM spaces WHERE id = $1'
 // LEFT JOIN:不存在的成员行不该吞掉空间本身,my_role 为 null 交由调用方判定
@@ -107,9 +112,15 @@ export function spacesRoutes(
 
   app.get('/api/spaces', async (c) => {
     const user = c.get('user')
-    // 列表隔离在 SQL 层:所有人(含 admin)都只看自己是成员的空间
-    const rows = await pool.query<MySpaceRow>(SELECT_MY_SPACES, [user.id])
-    return c.json(rows.rows)
+    // 列表隔离在 SQL 层:所有人(含 admin)都只看自己是成员的空间。
+    // ai:团队空间的空间 AI(启用没有 + 名字,@ 菜单与回复抬头不另拉);个人空间没有空间 AI,为 null
+    const rows = await pool.query<ListedSpaceRow>(SELECT_MY_SPACES, [user.id])
+    return c.json(
+      rows.rows.map(({ ai_name, ai_enabled, ...row }) => ({
+        ...row,
+        ai: row.is_personal ? null : { enabled: ai_enabled, name: ai_name ?? SPACE_AI_DEFAULT_NAME },
+      })),
+    )
   })
 
   app.post('/api/spaces', async (c) => {

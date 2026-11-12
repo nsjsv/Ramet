@@ -6,6 +6,7 @@
 // 只列活页面（live_pages）且我仍是其空间成员的（列举类：全局 admin 也不例外）。只是视图，按钮走评论接口自己的判定。
 // 页面关掉的那种评论不列：页面上已收起，点进去看不到、也读不掉这条
 import type { Pool } from 'pg'
+import { SPACE_AI_DEFAULT_NAME, spaceAiNames } from '../agents/space-ai.js'
 import { KIND_ENABLED, plainMentions } from './store.js'
 
 export type CommentInboxItem = {
@@ -15,7 +16,8 @@ export type CommentInboxItem = {
   pageId: string
   pageTitle: string
   threadId: string
-  author: { id: string; name: string } | null
+  /** 空间 AI 写的：{ ai: 'space', name }（名字按页面空间现取）；null = 已注销用户 */
+  author: { id: string; name: string } | { ai: 'space'; name: string } | null
   excerpt: string
   reason: 'reply' | 'mention' | 'new_thread'
 }
@@ -34,7 +36,7 @@ export function commentReason(who: string): string {
 }
 
 const SELECT_COMMENT_ITEMS = `SELECT * FROM (
-  SELECT DISTINCT ON (t.id) t.id AS thread_id, p.id AS page_id, p.title, c.body, c.created_at, c.author_id, u.username, why.reason
+  SELECT DISTINCT ON (t.id) t.id AS thread_id, p.id AS page_id, p.title, c.body, c.created_at, c.author_id, c.author_ai, u.username, why.reason
   FROM comment_threads t
   JOIN live_pages p ON p.id = t.page_id
   JOIN space_members m ON m.space_id = p.space_id AND m.user_id = $1
@@ -65,9 +67,12 @@ export async function commentItems(pool: Pool, user: { id: string }): Promise<Co
     body: string
     created_at: Date
     author_id: string | null
+    author_ai: string | null
     username: string | null
     reason: CommentInboxItem['reason']
   }>(SELECT_COMMENT_ITEMS, [user.id])
+  const aiPages = rows.filter((r) => r.author_ai).map((r) => r.page_id)
+  const aiNames = aiPages.length > 0 ? await spaceAiNames(pool, aiPages) : new Map<string, string>()
   return rows.map((r) => ({
     type: 'comment' as const,
     key: `comment:${r.thread_id}`,
@@ -75,7 +80,11 @@ export async function commentItems(pool: Pool, user: { id: string }): Promise<Co
     pageId: r.page_id,
     pageTitle: r.title,
     threadId: r.thread_id,
-    author: r.author_id && r.username !== null ? { id: r.author_id, name: r.username } : null,
+    author: r.author_ai
+      ? { ai: 'space' as const, name: aiNames.get(r.page_id) ?? SPACE_AI_DEFAULT_NAME }
+      : r.author_id && r.username !== null
+        ? { id: r.author_id, name: r.username }
+        : null,
     excerpt: excerptOf(r.body),
     reason: r.reason,
   }))

@@ -34,8 +34,9 @@ export function agentBadge(agentId: string): AgentBadge {
 }
 
 /** 这块 AI 回复顶栏显示的名字：产出者在目录里的 label，不认识则回落默认 agent 的 label，再没有就空串
- *  （公开页不拉目录，顶栏只剩 icon）。回落口径与 agentBadge 一致 */
-export function agentName(agentId: string): string {
-  const label = (id: string): string => findAgent(id)?.label?.trim() ?? ''
+ *  （公开页不拉目录，顶栏只剩 icon）。回落口径与 agentBadge 一致。
+ *  pageId = 回复所在的页：空间 AI 的名字按这一页所在的空间现取（改名后新旧回复都是新名字），不给就是缺省名 */
+export function agentName(agentId: string, pageId?: string): string {
+  const label = (id: string): string => findAgent(id, pageId)?.label?.trim() ?? ''
   return label(agentId) || label(getDefaultAgent())
 }

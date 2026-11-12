@@ -230,7 +230,7 @@ export default function EditorPage({
     async (): Promise<boolean> => {
       const editor = getEditor()
       if (!editor || !id) return false
-      const label = (agentId: string): string => agentName(agentId) || agentId
+      const label = (agentId: string): string => agentName(agentId, id) || agentId
       try {
         const { warnings, truncated } = await exportZip(editor, id, label)
         // 部分没导出不算失败，但要读完：停留时间同出错

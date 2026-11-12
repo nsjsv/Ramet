@@ -4,6 +4,7 @@
 import type { Pool, PoolClient } from 'pg'
 import { toolOf } from '@ramet/shared/reply-stats'
 import type { ResolvedAgent, SavedSession } from './manager-types.js'
+import { isSpaceAiId } from './space-ai.js'
 import { toolProfileOf, type ToolProfile } from './tool-profile.js'
 
 const SELECT_STATE = 'SELECT agent_session FROM pages WHERE id = $1'
@@ -154,10 +155,12 @@ export async function loadCurrent(pool: Pool, pageId: string, tool: string): Pro
   return rows[0]?.current ?? null
 }
 
-/** 该用户能复用的会话记录：只有 MCP 凭证就是他的那个会话才算（见 SavedSession.userId），别人的当作没有 */
+/** 该用户能复用的会话记录：只有 MCP 凭证就是他的那个会话才算（见 SavedSession.userId），别人的当作没有。
+ *  空间 AI 例外：会话属于空间，同空间的成员接着同一段对话；加载时驱动换上这个人的凭证（MCP 进程按它重起），
+ *  它从会话里看到的只有这个空间的内容（凭证收窄），换人接着用不会把上一个人的权限带过来 */
 export async function loadOwnSession(pool: Pool, pageId: string, agentId: string, userId: string): Promise<SavedSession | null> {
   const saved = await loadSessionState(pool, pageId, agentId)
-  return saved && saved.userId === userId ? saved : null
+  return saved && (saved.userId === userId || isSpaceAiId(agentId)) ? saved : null
 }
 
 export async function loadConfigs(pool: Pool, pageId: string, agentId: string): Promise<Record<string, string>> {

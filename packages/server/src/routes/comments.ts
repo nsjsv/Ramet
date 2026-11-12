@@ -4,8 +4,8 @@
  * POST   /api/comment-threads/:tid/replies {body} → 201 { comment }
  * POST   /api/comment-threads/:tid/resolve {resolved} → { thread }
  * POST   /api/comment-threads/:tid/read           → {}
- * PATCH  /api/comments/:cid {body}                → { comment }：只有作者本人
- * DELETE /api/comments/:cid                       → { threadDeleted }：作者本人或空间 owner
+ * PATCH  /api/comments/:cid {body}                → { comment }：只有作者本人（空间 AI 写的没人能改）
+ * DELETE /api/comments/:cid                       → { threadDeleted }：作者本人或空间 owner；空间 AI 写的另有串的发起人、叫它的人（store.ts 的 mayDelete）
  * 判定：能读这个页面的空间成员（含 viewer）都能看、发、回复、解决——评论不改文档，所以不要写权；全局 admin 不例外。
  * 页面不存在 / 已在回收站 / 非成员 / 串或评论不属于可读页面 一律 404（不泄露存在性）；不是 doc 页（过程页 / skill / 集合）发不了，400。
  * 两种评论各有页面开关（pages.inline_comments / page_comments）：关掉的那种列表里不出，发、回复、解决、编辑都 403
@@ -27,6 +27,7 @@ import {
   editComment,
   listThreads,
   markRead,
+  mayDelete,
   parseAnchor,
   parseBody,
   setResolved,
@@ -132,7 +133,7 @@ export function commentRoutes(pool: Pool, changed: (pageId: string) => void = ()
     const user = c.get('user')
     const ctx = await commentContext(pool, c.req.param('cid'))
     if (!ctx || ctx.deleted || !(await pageAccess(pool, ctx.pageId, user))) return c.json(NOT_FOUND, 404)
-    if (ctx.authorId !== user.id) return c.json({ error: 'forbidden' }, 403)
+    if (ctx.authorAi || ctx.authorId !== user.id) return c.json({ error: 'forbidden' }, 403)
     if (!ctx.kindEnabled) return c.json(COMMENTS_OFF, 403)
     const parsed = parseBody((await readJson(c))?.body)
     if ('error' in parsed) return c.json(parsed, 400)
@@ -148,7 +149,7 @@ export function commentRoutes(pool: Pool, changed: (pageId: string) => void = ()
     const role = ctx && !ctx.deleted ? await pageAccess(pool, ctx.pageId, user) : null
     if (!ctx || !role) return c.json(NOT_FOUND, 404)
     // 空间 owner 能删任何人的（管内容）；全局 admin 不是 owner 就没有这一条
-    if (ctx.authorId !== user.id && role !== 'owner') return c.json({ error: 'forbidden' }, 403)
+    if (!mayDelete(ctx, user.id, role)) return c.json({ error: 'forbidden' }, 403)
     const result = await deleteComment(pool, ctx.commentId, ctx.threadId)
     changed(ctx.pageId)
     return c.json(result)

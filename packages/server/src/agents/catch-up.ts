@@ -33,7 +33,7 @@ function attr(el: Y.XmlElement, name: string): string {
 
 /** 读好这页里出现的作者与 agent 的名字（用户消息的 author 属性、回复块的 agent 属性）。agent 名的原料来自 agent-names.ts
  *  （服务端唯一的来源），这里的写法：connector 上的 = `名字（机器名）` */
-export async function resolveNames(pool: Pool, fragment: Y.XmlFragment, agentHost: AgentNameHost): Promise<Names> {
+export async function resolveNames(pool: Pool, fragment: Y.XmlFragment, agentHost: AgentNameHost, pageId?: string): Promise<Names> {
   const users = new Set<string>()
   const agents = new Set<string>()
   fragment.forEach((c) => {
@@ -45,7 +45,7 @@ export async function resolveNames(pool: Pool, fragment: Y.XmlFragment, agentHos
     users.size
       ? pool.query<{ id: string; username: string }>('SELECT id, username FROM users WHERE id = ANY($1::text[])', [[...users]])
       : { rows: [] },
-    agentNames(pool, agentHost, agents),
+    agentNames(pool, agentHost, agents, pageId),
   ])
   const usernames = new Map(u.rows.map((r) => [r.id, r.username]))
   return {

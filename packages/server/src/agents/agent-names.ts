@@ -1,11 +1,13 @@
 // ---------- agent 的显示名：服务端唯一的来源 ----------
 // 收件箱条目的 agentName（inbox.ts）、补发内容里给别的 agent 的回复署名（catch-up.ts）都从这里取原料：
-// 中心自己的 Genet 是固定的名字；本机 agent 用配置里的名字；connector 上的取机器名 + 它上报的名字（在线时以此刻的清单为准，
+// 中心自己的 Genet 是固定的名字；空间 AI 是页面所在空间配置里的名字（没配过 / 不知道是哪一页写缺省的「AI」）；
+// 本机 agent 用配置里的名字；connector 上的取机器名 + 它上报的名字（在线时以此刻的清单为准，
 // 不在线用库里最近一次上报的）。怎么拼成一句（「机器 · 名字」还是「名字（机器）」）由调用方定，两边各自的写法不同。
 
 import type { Pool } from 'pg'
 import { ASSISTANT_LABEL, isAssistantId } from './assistant-agent.js'
 import { parseRemoteId } from './manager-types.js'
+import { isSpaceAiId, SPACE_AI_DEFAULT_NAME, spaceAiNames } from './space-ai.js'
 import type { ConnectorAgentInfo } from './protocol.js'
 
 /** label = agent 自己的名字；machine = 它所在的 connector 的名字（本机 agent / Genet 没有） */
@@ -18,13 +20,19 @@ export type AgentNameHost = {
   onlineAgents(connectorId: string): ConnectorAgentInfo[] | undefined
 }
 
-/** 这些 catalog id 的显示名；认不出的（不存在的机器等）不在结果里，调用方自己回落 */
-export async function agentNames(pool: Pick<Pool, 'query'>, host: AgentNameHost, ids: Iterable<string>): Promise<Map<string, AgentName>> {
+/** 这些 catalog id 的显示名；认不出的（不存在的机器等）不在结果里，调用方自己回落。
+ *  pageId = 这些 agent 出现在哪一页（空间 AI 的名字按那一页所在的空间取） */
+export async function agentNames(pool: Pick<Pool, 'query'>, host: AgentNameHost, ids: Iterable<string>, pageId?: string): Promise<Map<string, AgentName>> {
   const names = new Map<string, AgentName>()
   const remote = new Map<string, Array<{ id: string; agentId: string }>>()
   for (const id of new Set(ids)) {
     if (isAssistantId(id)) {
       names.set(id, { label: ASSISTANT_LABEL })
+      continue
+    }
+    if (isSpaceAiId(id)) {
+      const named = pageId ? (await spaceAiNames(pool, [pageId])).get(pageId) : undefined
+      names.set(id, { label: named ?? SPACE_AI_DEFAULT_NAME })
       continue
     }
     const local = host.localAgents().find((a) => a.id === id)

@@ -60,7 +60,8 @@ export type InboxItem =
       pageId: string
       pageTitle: string
       threadId: string
-      author: { id: string; name: string } | null
+      /** 空间 AI 写的：{ ai: 'space', name }（没有 id）；null = 已注销用户 */
+      author: { id: string; name: string } | { ai: 'space'; name: string } | null
       excerpt: string
       reason: 'reply' | 'mention' | 'new_thread'
     }
