@@ -16,7 +16,7 @@ const SEARCH = `SELECT id, title, content_text, icon_emoji, icon_file_id, parent
   WHERE space_id IN (SELECT space_id FROM space_members WHERE user_id = $1)
     AND ($2 OR kind <> 'run')
     AND NOT EXISTS (
-      SELECT 1 FROM unnest($4::text[]) pat WHERE NOT (p.title ILIKE pat ESCAPE '\\' OR p.content_text ILIKE pat ESCAPE '\\')
+      SELECT 1 FROM unnest($4::text[]) pat WHERE NOT (p.title ILIKE pat ESCAPE '\\' OR coalesce(p.content_text, '') ILIKE pat ESCAPE '\\')
     )
   ORDER BY
     CASE WHEN lower(title) = $6 THEN 0 WHEN title ILIKE $7 ESCAPE '\\' THEN 1 WHEN title ILIKE $8 ESCAPE '\\' THEN 2 ELSE 3 END,

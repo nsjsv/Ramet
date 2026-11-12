@@ -5,7 +5,7 @@
  *   3) hub 发帧闸：凭据必须是真的（instanceof，`as` 伪造的普通对象不行）、签给这台机器的、scope 够、帧里的 actor 与凭据一致。
  * 端到端矩阵在 ../machine-access.test.ts；这里盯各层自己的边界。 */
 import { randomUUID } from 'node:crypto'
-import { afterAll, afterEach, expect, test } from 'vitest'
+import { afterAll, afterEach, beforeEach, expect, test } from 'vitest'
 import type { WebSocket } from 'ws'
 import { closePool, getPool, initDb } from '../db.js'
 import { truncateAll } from '../test-helpers.js'
@@ -30,6 +30,10 @@ if (!process.env.DATABASE_URL) {
 }
 const pool = getPool()
 await initDb(pool)
+// 每个 worker 的库是几个测试文件轮流用的：前一个文件留下的行（比如同名用户）会让这里第一个用例撞唯一键，所以开头也清一次
+beforeEach(async () => {
+  await truncateAll(pool)
+})
 afterEach(async () => {
   await truncateAll(pool)
 })

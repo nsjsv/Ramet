@@ -210,3 +210,14 @@ test('空 q 返回空数组;无命中返回空数组', async () => {
     expect(await res.json()).toEqual([])
   }
 })
+
+test('正文还没建索引（content_text 为空）的页：标题对不上就不命中，标题对得上照样命中', async () => {
+  await insertUser('alice')
+  const cookie = await login('alice')
+  const { id } = await createPage(cookie)
+  await pool.query("UPDATE pages SET title = '周报', content_text = NULL WHERE id = $1", [id])
+  const hits = async (q: string): Promise<PageHit[]> =>
+    (await (await fetch(`${base}/api/search?q=${encodeURIComponent(q)}`, { headers: { cookie } })).json()) as PageHit[]
+  expect((await hits('不存在的词')).map((h) => h.id)).toEqual([])
+  expect((await hits('周报')).map((h) => h.id)).toEqual([id])
+})
