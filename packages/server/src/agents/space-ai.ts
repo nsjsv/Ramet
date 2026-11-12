@@ -1,10 +1,11 @@
-// ---------- 空间 AI：每个团队空间一个、跑在中心里的 AI（身份、配置与凭证范围的唯一定义） ----------
+// ---------- 空间 AI：每个空间一个、跑在中心里的 AI（身份、配置与凭证范围的唯一定义） ----------
 // 与 Genet 共用同一个驱动（drivers/assistant/driver.ts 的 space 模式），差别全在「主体」：
 //   - 代表空间，不代表某个人：会话属于空间（同空间的成员接着同一段对话），模型连接是空间 owner 在配置里指定的、他自己的那一套；
 //   - 权限 = 空间 ∩ 叫它的人：凭证的 userId 是叫它的人（上限），凭证上另带 space（范围），中心端点两样都判；
 //   - 不碰机器、不派活、没有定时器 / 自动化 / 代发评论：凭证只放行白名单里的 /api/ramet/* 端点，以后新加的端点默认被拦。
-// 只有一个 catalog id，按页面所在的空间解析：chip 随页面搬到别的团队空间就是那个空间的 AI，搬到个人空间就解析不出来（同未知 agent）。
-// 生效 = 团队空间 + 有配置 + 连接还在且属于此刻的空间 owner（owner 删了连接、删号转交都会让它停用）。
+// 只有一个 catalog id，按页面所在的空间解析：chip 随页面搬到别的空间就是那个空间的 AI（那里没开就解析不出来，同未知 agent）。
+// 个人空间也能开：个人空间同样能加成员一起用，开不开由 owner 决定；不开时那里照旧只有 Genet。
+// 生效 = 有配置 + 连接还在且属于此刻的空间 owner（owner 删了连接、删号转交都会让它停用）。
 // 别处只调这里的判定，不另写。
 
 import type { Pool } from 'pg'
@@ -29,7 +30,7 @@ export function isSpaceAiId(agentId: string): boolean {
 
 /** 空间 AI 的生效判定（SQL 片段，别名 s = spaces）：sc 打得上 = 生效。列表、解析、取连接都拼它，判定只有这一份 */
 export const SPACE_AI_JOIN = `LEFT JOIN space_ai sa ON sa.space_id = s.id
-  LEFT JOIN user_ai_connections sc ON sc.id = sa.connection_id AND sc.user_id = s.owner_id AND NOT s.is_personal`
+  LEFT JOIN user_ai_connections sc ON sc.id = sa.connection_id AND sc.user_id = s.owner_id`
 
 // 页面所在空间的空间 AI（生效的才有行）；$2 = 叫它的人，必须是那个空间的成员
 const SELECT_RESOLVABLE = `SELECT s.id FROM live_pages p JOIN spaces s ON s.id = p.space_id
@@ -45,13 +46,13 @@ const IN_SPACE = 'SELECT 1 FROM live_pages WHERE id = $1 AND space_id = $2'
 
 export type SpaceAi = { spaceId: string; ownerId: string; connectionId: string; name: string }
 
-/** 这一页所在空间的空间 AI（生效的）；个人空间 / 没配 / 连接没了 = null */
+/** 这一页所在空间的空间 AI（生效的）；没配 / 连接没了 = null */
 export async function spaceAiOf(pool: Pool, pageId: string): Promise<SpaceAi | null> {
   const row = (await pool.query<{ space_id: string; owner_id: string; connection_id: string; name: string }>(SELECT_OF_PAGE, [pageId])).rows[0]
   return row ? { spaceId: row.space_id, ownerId: row.owner_id, connectionId: row.connection_id, name: row.name } : null
 }
 
-/** 空间 AI 的执行目标：页面所在的团队空间启用了它、发起人是那个空间的成员才有，否则 null（调用方当未知 agent）。
+/** 空间 AI 的执行目标：页面所在的空间启用了它、发起人是那个空间的成员才有，否则 null（调用方当未知 agent）。
  *  凭据同 Genet（不在任何机器上跑）；space 决定凭证的范围与驱动的会话主体 */
 export async function resolveSpaceAi(pool: Pool, user: { id: string }, pageId: string): Promise<ResolvedAgent | null> {
   const row = (await pool.query<{ id: string }>(SELECT_RESOLVABLE, [pageId, user.id])).rows[0]

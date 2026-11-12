@@ -13,20 +13,23 @@ const comment = (patch: Partial<Comment>): Comment => ({
 })
 
 describe('评论框 @ 菜单里的 AI', () => {
-  it('个人空间（或还不知道是团队空间）是 Genet，落成 Genet 的记号', () => {
-    expect(commentAi(null)).toEqual({ id: 'ramet:assistant', label: 'Genet', mark: '@[Genet](agent:ramet:assistant)' })
+  it('个人空间没开空间 AI（或还不知道是哪个空间）：是 Genet，落成 Genet 的记号', () => {
+    const genet = { id: 'ramet:assistant', label: 'Genet', mark: '@[Genet](agent:ramet:assistant)' }
+    expect(commentAi(null)).toEqual(genet)
+    expect(commentAi({ spaceId: 'me', enabled: false, name: 'AI', personal: true })).toEqual(genet)
   })
 
-  it('团队空间开着空间 AI：换成它（名字跟配置），落成它的记号', () => {
-    expect(commentAi({ spaceId: 's1', enabled: true, name: '小助手' })).toEqual({
+  it('开着空间 AI（个人空间也一样）：换成它（名字跟配置），落成它的记号', () => {
+    expect(commentAi({ spaceId: 'me', enabled: true, name: '我的助手', personal: true })?.id).toBe('ramet:space-ai')
+    expect(commentAi({ spaceId: 's1', enabled: true, name: '小助手', personal: false })).toEqual({
       id: 'ramet:space-ai',
       label: '小助手',
       mark: '@[小助手](agent:ramet:space-ai)',
     })
   })
 
-  it('团队空间没开：两个都不给（不出个人 Genet）', () => {
-    expect(commentAi({ spaceId: 's1', enabled: false, name: 'AI' })).toBeNull()
+  it('自建的空间没开：两个都不给（不出个人 Genet）', () => {
+    expect(commentAi({ spaceId: 's1', enabled: false, name: 'AI', personal: false })).toBeNull()
   })
 })
 

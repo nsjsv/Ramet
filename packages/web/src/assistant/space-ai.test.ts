@@ -26,18 +26,19 @@ const NONE = { choice: null, lock: '' }
 const ids = (list: readonly AgentInfo[]) => list.map((a) => a.id)
 
 describe('空间 AI 的数据：按页面所在空间', () => {
-  test('个人空间没有空间 AI；团队空间没配过 / 老缓存里没有 ai 按没启用、名字 AI', () => {
-    expect(spaceAiOfSpace(MINE)).toBeNull()
+  test('每个空间都有（个人空间也能开）；没配过 / 老缓存里没有 ai 按没启用、名字 AI', () => {
+    expect(spaceAiOfSpace(MINE)).toEqual({ spaceId: 'mine', enabled: false, name: 'AI', personal: true })
     expect(spaceAiOfSpace(undefined)).toBeNull()
-    expect(spaceAiOfSpace(TEAM_ON)).toEqual({ spaceId: 'team', enabled: true, name: '小助手' })
-    expect(spaceAiOfSpace(space('old', undefined))).toEqual({ spaceId: 'old', enabled: false, name: 'AI' })
+    expect(spaceAiOfSpace(TEAM_ON)).toEqual({ spaceId: 'team', enabled: true, name: '小助手', personal: false })
+    expect(spaceAiOfSpace(space('old', undefined))).toEqual({ spaceId: 'old', enabled: false, name: 'AI', personal: false })
+    expect(spaceAiOfSpace(space('mine-on', { enabled: true, name: '我的助手' }, true))).toMatchObject({ enabled: true, personal: true })
   })
 
   test('页面 → 空间 → 空间 AI；不知道这一页在哪（公开页、列表没到）是 null', () => {
     syncSpaceAi([TEAM_ON, TEAM_OFF, MINE], PAGES)
     expect(spaceAiOfPage('p-team')).toMatchObject({ enabled: true, name: '小助手' })
     expect(spaceAiOfPage('p-off')).toMatchObject({ enabled: false })
-    expect(spaceAiOfPage('p-mine')).toBeNull()
+    expect(spaceAiOfPage('p-mine')).toMatchObject({ enabled: false, personal: true })
     expect(spaceAiOfPage('nowhere')).toBeNull()
     expect(spaceAiOfPage(undefined)).toBeNull()
   })
@@ -96,7 +97,7 @@ describe('空间 AI 的身份：名字跟着页面所在的空间', () => {
 })
 
 describe('这一页的目录：空间 AI 追加在末尾，只能点名 / 选中', () => {
-  test('团队空间开着才有；没开、个人空间、不知道在哪的页都没有', () => {
+  test('空间 AI 开着才有（个人空间同理）；没开、不知道在哪的页都没有', () => {
     syncSpaceAi([TEAM_ON, TEAM_OFF, MINE], PAGES)
     expect(ids(catalogForPage(catalog, 'p-team', NONE))).toEqual(['c:m1:codex', 'claude', SPACE_AI_ID])
     expect(catalogForPage(catalog, 'p-team', NONE).at(-1)?.label).toBe('小助手')
@@ -136,8 +137,8 @@ describe('这一页的目录：空间 AI 追加在末尾，只能点名 / 选中
 })
 
 describe('没启用时开跑失败的说法', () => {
-  const on = { spaceId: 'team', enabled: true, name: 'AI' }
-  const off = { spaceId: 'team', enabled: false, name: 'AI' }
+  const on = { spaceId: 'team', enabled: true, name: 'AI', personal: false }
+  const off = { spaceId: 'team', enabled: false, name: 'AI', personal: false }
 
   test('团队空间没开、这次又是叫它：说清楚原因；别的情况交还原来的说法', () => {
     expect(spaceAiOffReason(off, 'unknown agent', true)).toBe('这个空间还没有启用 AI')

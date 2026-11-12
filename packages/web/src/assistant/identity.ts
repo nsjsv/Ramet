@@ -1,10 +1,10 @@
 /* ---------- 中心里跑的 agent（Genet、空间 AI）在前端的身份：唯一的定义处 ----------
  * Genet 是中心里跑的 agent（服务端 agents/assistant-agent.ts），不在 GET /api/agents 的目录里，只在主人自己的 Genet 页上用得了。
- * 空间 AI（服务端 agents/space-ai.ts）同样不在目录里：每个团队空间一个，id 只有一个，名字与开没开都跟着页面所在的空间（space-ai.ts）。
+ * 空间 AI（服务端 agents/space-ai.ts）同样不在目录里：每个空间一个，id 只有一个，名字与开没开都跟着页面所在的空间（space-ai.ts）。
  * 前端各处认 agent 都经两条路，这两个都接在这两条路上，别处不写 `=== 'ramet:assistant'` / `=== 'ramet:space-ai'`：
  *  - 按 id 认名字 / 头像：default-agent.ts 的 findAgent 先查目录，查不到再问 builtinAgent（空间 AI 的名字要带上页面）；
  *  - 这一页能选哪些 agent：agent-bar.tsx 的 catalogForPage 经 pageCatalog 拿目录。Genet 页的目录就是 Genet 一个，
- *    于是回落（pickAgent）、消息 chip 的失效值收敛这些按目录判的逻辑都不用特判；团队空间里空间 AI 开着时追加在目录末尾，
+ *    于是回落（pickAgent）、消息 chip 的失效值收敛这些按目录判的逻辑都不用特判；空间 AI 开着时追加在目录末尾，
  *    但它只能点名 / 选中（optIn），不当回落。@ 候选列全部工具，不走这里（mention-sources.ts 的 mentionAgents 另把空间 AI 加进去）。
  * 发起控件里哪些对它们没意义（工作区、工具档位、带队）写在目录项的 caps 上，控件按 caps 显隐。 */
 import type { AgentCaps, AgentInfo } from '../api'
@@ -50,7 +50,7 @@ function spaceAiAgent(name: string, fallback = false): AgentInfo {
   return hit
 }
 
-/** 空间 AI 在这一页上叫什么：页面所在团队空间配的名字，取不到（不知道这一页在哪、个人空间、公开页）写「AI」。
+/** 空间 AI 在这一页上叫什么：页面所在空间配的名字，取不到（不知道这一页在哪、公开页）写「AI」。
  *  名字每次现取，改名后新旧回复的抬头都是新名字 */
 export function spaceAiName(pageId?: string): string {
   return spaceAiOfPage(pageId)?.name ?? SPACE_AI_DEFAULT_NAME
@@ -81,7 +81,7 @@ export function isAssistantPage(pageId: string, state: { choice: string | null; 
 
 const ONLY_ASSISTANT: readonly AgentInfo[] = [ASSISTANT_AGENT]
 
-/** 这一页的目录（锁定过滤之前）：Genet 页只有 Genet；别的页面是服务端目录，团队空间里空间 AI 开着时追加在末尾。
+/** 这一页的目录（锁定过滤之前）：Genet 页只有 Genet；别的页面是服务端目录，空间 AI 开着时追加在末尾。
  *  lock = 这一页锁定的工具：锁成空间 AI 时它是回落，否则只能点名 / 选中 */
 export function pageCatalog(agents: readonly AgentInfo[], assistantPage: boolean, spaceAi: SpaceAiInfo | null = null, lock = ''): readonly AgentInfo[] {
   if (assistantPage) return ONLY_ASSISTANT

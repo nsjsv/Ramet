@@ -113,12 +113,12 @@ export function spacesRoutes(
   app.get('/api/spaces', async (c) => {
     const user = c.get('user')
     // 列表隔离在 SQL 层:所有人(含 admin)都只看自己是成员的空间。
-    // ai:团队空间的空间 AI(启用没有 + 名字,@ 菜单与回复抬头不另拉);个人空间没有空间 AI,为 null
+    // ai:这个空间的空间 AI(启用没有 + 名字,@ 菜单与回复抬头不另拉);个人空间也有,没配过就是没启用
     const rows = await pool.query<ListedSpaceRow>(SELECT_MY_SPACES, [user.id])
     return c.json(
       rows.rows.map(({ ai_name, ai_enabled, ...row }) => ({
         ...row,
-        ai: row.is_personal ? null : { enabled: ai_enabled, name: ai_name ?? SPACE_AI_DEFAULT_NAME },
+        ai: { enabled: ai_enabled, name: ai_name ?? SPACE_AI_DEFAULT_NAME },
       })),
     )
   })

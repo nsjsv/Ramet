@@ -39,7 +39,7 @@ export function warmMentionSources(pages: readonly Page[] | null, pageId: string
 }
 
 /** 消息里（对话输入框、文档 `>>` 消息块）能 @ 的 agent：全部目录（显式点名不受本页的工具锁定），
- *  加上这一页所在团队空间的空间 AI（开着时）。正文普通段落不走这里：那里 @ 了 agent 也不会触发什么 */
+ *  加上这一页所在空间的空间 AI（开着时）。正文普通段落不走这里：那里 @ 了 agent 也不会触发什么 */
 export function mentionAgents(agents: readonly AgentInfo[], pageId: string): readonly AgentInfo[] {
   return withSpaceAi(agents, spaceAiOfPage(pageId))
 }

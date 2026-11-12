@@ -8,11 +8,13 @@
 import { useCallback, useSyncExternalStore } from 'react'
 import type { Page, Space } from '../api'
 
-/** 团队空间里的空间 AI；个人空间没有（null） */
+/** 一个空间的空间 AI（个人空间也有：个人空间也能加成员一起用，开不开由 owner 决定） */
 export interface SpaceAiInfo {
   spaceId: string
   enabled: boolean
   name: string
+  /** 个人空间：空间 AI 没开时，评论里叫的是写评论的人自己的 Genet（comments/comment-ai.ts） */
+  personal: boolean
 }
 
 /** 服务端没配过名字时的叫法，与服务端 SPACE_AI_DEFAULT_NAME 一致 */
@@ -20,10 +22,10 @@ export const SPACE_AI_DEFAULT_NAME = 'AI'
 /** 名字上限，与服务端 SPACE_AI_NAME_MAX 一致（码点） */
 export const SPACE_AI_NAME_MAX = 20
 
-/** 一个空间的空间 AI：个人空间、还不知道是哪个空间 = null。列表接口之外来的空间对象（老缓存）没有 ai，按没启用算 */
+/** 一个空间的空间 AI：还不知道是哪个空间 = null。列表接口之外来的空间对象（老缓存）没有 ai，按没启用算 */
 export function spaceAiOfSpace(space: Space | undefined): SpaceAiInfo | null {
-  if (!space || space.is_personal) return null
-  return { spaceId: space.id, enabled: space.ai?.enabled === true, name: space.ai?.name.trim() || SPACE_AI_DEFAULT_NAME }
+  if (!space) return null
+  return { spaceId: space.id, enabled: space.ai?.enabled === true, name: space.ai?.name.trim() || SPACE_AI_DEFAULT_NAME, personal: space.is_personal }
 }
 
 /** 名字是否合法：trim、压空白后 1–20 个码点（同服务端 normalizeSpaceAiName） */
@@ -42,7 +44,7 @@ let bySpace = new Map<string, SpaceAiInfo>()
 const listeners = new Set<() => void>()
 
 function sameInfo(a: SpaceAiInfo | undefined, b: SpaceAiInfo): boolean {
-  return a !== undefined && a.enabled === b.enabled && a.name === b.name
+  return a !== undefined && a.enabled === b.enabled && a.name === b.name && a.personal === b.personal
 }
 
 /** App 喂进来的最新列表。只在页面归属或空间 AI 真变了时通知 */
@@ -77,14 +79,14 @@ export function subscribeSpaceAi(cb: () => void): () => void {
   }
 }
 
-/** 这一页所在团队空间的空间 AI；个人空间 / 不知道这一页在哪（公开页、列表还没到）= null */
+/** 这一页所在空间的空间 AI；不知道这一页在哪（公开页、列表还没到）= null */
 export function spaceAiOfPage(pageId: string | undefined): SpaceAiInfo | null {
   if (!pageId) return null
   const space = pageSpace.get(pageId)
   return space ? (bySpace.get(space) ?? null) : null
 }
 
-/** 按空间 id 取：团队空间（不管开没开）有，个人空间 / 还不知道这个空间 = null。评论框只知道空间，不知道页面 */
+/** 按空间 id 取（不管开没开都有），还不知道这个空间 = null。评论框只知道空间，不知道页面 */
 export function spaceAiOfSpaceId(spaceId: string | null | undefined): SpaceAiInfo | null {
   return spaceId ? (bySpace.get(spaceId) ?? null) : null
 }

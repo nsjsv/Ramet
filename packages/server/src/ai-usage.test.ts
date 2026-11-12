@@ -2,7 +2,7 @@
  * 记账：空间 AI 一轮记在空间 owner 名下、带叫它的人和空间；Genet 一轮记在主人名下；⌘J 站点通道一次、AI 属性一次各一行；
  *   上游没报用量（全 0）不记。
  * 汇总：我的用量只看花我连接的（成员叫空间 AI 不算成员的）；按天每天一行、窗口外的不算；按来源 / 模型分。
- *   空间 AI 用量只给 owner（成员 403、非成员 / 个人空间 404），按叫它的成员分。 */
+ *   空间 AI 用量只给 owner（成员 403、非成员 404；个人空间也能开空间 AI，同样给 owner 看），按叫它的成员分。 */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { insertConnection } from './ai-connections.js'
 import { generateText } from './ai-gen.js'
@@ -113,7 +113,7 @@ describe('汇总', () => {
     expect((await get(w.cookie, '/api/me/ai-usage?days=7')).json.byDay).toHaveLength(7)
   })
 
-  it('空间 AI 用量：只给 owner，按叫它的成员分；成员 403，非成员 / 个人空间 404', async () => {
+  it('空间 AI 用量：只给 owner，按叫它的成员分；成员 403，非成员 404；个人空间的 owner 也看得到', async () => {
     const w = await world()
     for (const [actor, input] of [[w.bobId, 100], [w.bobId, 50], [w.aliceId, 30]] as const) {
       await recordUsage(pool, { payerId: w.aliceId, actorId: actor, spaceId: w.spaceId, source: 'space_ai', model: 'm', requests: 1, input, output: 0, cacheRead: 0, cacheWrite: 0 })
@@ -132,6 +132,6 @@ describe('汇总', () => {
     const carol = await login('carol')
     expect((await get(carol, `/api/spaces/${w.spaceId}/ai/usage`)).status).toBe(404)
     const personal = (await pool.query<{ id: string }>('SELECT id FROM spaces WHERE owner_id = $1 AND is_personal', [w.aliceId])).rows[0]!.id
-    expect((await get(w.cookie, `/api/spaces/${personal}/ai/usage`)).status).toBe(404)
+    expect((await get(w.cookie, `/api/spaces/${personal}/ai/usage`)).status).toBe(200)
   })
 })

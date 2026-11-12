@@ -1,6 +1,6 @@
 /* ---------- 空间 AI 的配置（团队空间设置里的「空间 AI」卡） ----------
  * GET /api/spaces/:id/ai → 成员：{ enabled, name }；owner 另有 connectionId（他选的、此刻还属于他的那个连接，否则 null）。
- *   非成员 / 不存在 / 个人空间同一个 404（个人空间没有空间 AI，就用 Genet）。
+ *   非成员 / 不存在同一个 404。个人空间与自建的空间一样能开（个人空间也能加成员）。
  * PUT /api/spaces/:id/ai { connectionId?: string | null, name?: string } → 同 GET 的 owner 形状。只给的那项改，没给的不动。
  *   只有空间 owner 能改（成员 403，全局 admin 也不例外）；连接必须是 owner 自己的（别人的 / 不存在的 400）；名字 trim 后 1–20 字（400）。
  *   改完经 notify 广播，在线端重拉空间列表（列表里带 ai，@ 菜单与回复抬头用它）。
@@ -13,9 +13,9 @@ import { getConnection, onConnectionsChanged } from '../ai-connections.js'
 import { requireAuth, type AuthEnv } from '../auth.js'
 import { normalizeSpaceAiName, SPACE_AI_DEFAULT_NAME, SPACE_AI_JOIN, SPACE_AI_NAME_MAX } from '../agents/space-ai.js'
 
-type ConfigRow = { owner_id: string; is_personal: boolean; my_role: string | null; name: string | null; connection_id: string | null }
+type ConfigRow = { owner_id: string; my_role: string | null; name: string | null; connection_id: string | null }
 
-const SELECT_CONFIG = `SELECT s.owner_id, s.is_personal, m.role AS my_role, sa.name, sc.id AS connection_id
+const SELECT_CONFIG = `SELECT s.owner_id, m.role AS my_role, sa.name, sc.id AS connection_id
   FROM spaces s LEFT JOIN space_members m ON m.space_id = s.id AND m.user_id = $2
   ${SPACE_AI_JOIN} WHERE s.id = $1`
 const UPSERT = `INSERT INTO space_ai (space_id, connection_id, name) VALUES ($1, $2, $3)
@@ -43,10 +43,10 @@ export function spaceAiRoutes(pool: Pool, notify?: () => void) {
   const app = new Hono<AuthEnv>()
   const auth = requireAuth(pool)
 
-  /** 空间 + 我的角色；非成员 / 不存在 / 个人空间 = null（同一个 404） */
+  /** 空间 + 我的角色；非成员 / 不存在 = null（同一个 404） */
   async function load(c: Context<AuthEnv>): Promise<ConfigRow | null> {
     const row = (await pool.query<ConfigRow>(SELECT_CONFIG, [c.req.param('id') ?? '', c.get('user').id])).rows[0]
-    return row && row.my_role !== null && !row.is_personal ? row : null
+    return row && row.my_role !== null ? row : null
   }
 
   function view(row: ConfigRow, userId: string): SpaceAiView {

@@ -64,7 +64,7 @@ describe('空间 AI 模式', () => {
     const out = await runOnce(d, { url: base, token: grant(t.bobId, t.pageId, t.spaceId, true).mcp.token, blocks: [{ type: 'text', text: '问一句' }] })
     expect(out).toEqual({ text: '这是答案', stopReason: 'end_turn' })
     expect(fake.calls[0]!.apiKey).toBe(OWNER_KEY)
-    expect(fake.calls[0]!.system).toContain('团队空间共用的 AI')
+    expect(fake.calls[0]!.system).toContain('这个空间共用的 AI')
     // 只读凭证：工具里只有读的
     const names = fake.calls[0]!.tools.map((x) => x.name)
     expect(names).toEqual(expect.arrayContaining(['read_page', 'search_pages']))

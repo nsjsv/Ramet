@@ -10,12 +10,11 @@ import { SpaceAiUsageCard } from './usage/UsageView'
 
 const C = COPY.spaceAi
 
-/** 空间设置里的「空间 AI」卡：只在团队空间出现（个人空间没有空间 AI，就用 Genet）。
+/** 空间设置里的「空间 AI」卡：每个空间都有（个人空间也能加成员一起用，开不开由 owner 决定）。
  * - owner：从自己在「设置 → Genet」里添加的模型连接里选一个启用（或不启用）、改名字。空间 AI 花的是 owner 自己的额度，
  *   别人的连接选不了（服务端也拦）。保存后用返回值刷新；服务端随即广播，在线成员的 @ 菜单与回复抬头跟着变。
  * - 成员 / 只读成员：只看开没开、叫什么（空间列表里就有，不另发请求）。 */
 export default function SpaceAiCard({ space, onChanged }: { space: Space; onChanged: () => void }) {
-  if (space.is_personal) return null
   if (space.my_role !== 'owner') return <MemberCard space={space} />
   // 用量只给 owner：成员叫空间 AI 花的是他的模型连接
   return (

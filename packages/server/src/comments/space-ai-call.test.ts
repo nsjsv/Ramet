@@ -140,7 +140,7 @@ describe('评论里 @空间 AI', () => {
 
     const first = calls[0]!
     expect(first.apiKey).toBe(ALICE_KEY)
-    expect(first.system).toContain('团队空间共用的 AI')
+    expect(first.system).toContain('这个空间共用的 AI')
     const prompt = JSON.stringify(first.messages)
     expect(prompt).toContain('[来自 bob]')
     expect(prompt).toContain('carol：这里对吗')
@@ -178,7 +178,7 @@ describe('评论里 @空间 AI', () => {
     expect(ai!.body).not.toContain('我先读一下')
   })
 
-  it('没启用 / 个人空间：记 failed「这个空间还没有启用 AI」，成员都看得到原因；模型不被调用', async () => {
+  it('没启用（含没开的个人空间）：记 failed「这个空间还没有启用 AI」，成员都看得到原因；模型不被调用', async () => {
     const w = await world({ enable: false })
     const calls = script(say('不该到这里'))
     const t = await newThread(w.bob, w.pageId, `${AI} 在吗`)
@@ -187,7 +187,7 @@ describe('评论里 @空间 AI', () => {
     expect(await callState(asked.id)).toEqual({ state: 'failed', reason: SPACE_AI_OFF })
     expect((await commentsOf(w.carol, w.pageId, t.id))[0]?.call).toEqual({ state: 'failed', reason: SPACE_AI_OFF, ai: 'AI' })
 
-    // bob 的个人空间：手打了记号也一样
+    // bob 的个人空间（没开）：手打了记号也一样
     const personal = (await (await postJson('/api/pages', w.bob, {})).json()) as { id: string }
     const pt = await newThread(w.bob, personal.id, `${AI} 在吗`)
     await waitFor(async () => (await callState(pt.comments[0]!.id))?.state === 'failed')

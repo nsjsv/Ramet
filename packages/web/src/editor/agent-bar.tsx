@@ -13,7 +13,7 @@ import { upgradeMentions } from './mention-upgrade'
 import { selfId } from '../people'
 import { isAssistantPage, pageCatalog } from '../assistant/identity'
 import { spaceAiOfPage, useSpaceAi, type SpaceAiInfo } from '../assistant/space-ai'
-import { continueOffText, replyOffText } from './space-ai-run'
+import { continueOffText, mentionedNext, replyOffText } from './space-ai-run'
 
 // ---------- agent 交互层 ----------
 // SSE（GET /api/pages/:id/agent-events）推 status / permission / permission_resolved / commands / config 等事件；
@@ -437,7 +437,8 @@ export function useAgentRunError(pageId: string): string | null {
 export function runAgent(pageId: string, agent: string): void {
   // 锁定的工具一台都不在线时照样交给服务端：消息里显式 @ 了别的 agent 就照常跑（@ 不受锁定），没有 @ 服务端回「现在没有可用的 …」
   const lock = agentStateFor(pageId).lock
-  if (!agent && !lock) {
+  // 消息里 @ 了谁就交给服务端按点名链挑：空间 AI 只能点名、不当回落，页面上没有别的 agent 时这里挑不出来，但点名了它照样能跑
+  if (!agent && !lock && !mentionedNext(pageId)) {
     // 空间 AI 开着却没回落到它：它只在被 @ / 被选成来源时才用，告诉用户怎么叫它
     const spaceAi = spaceAiOfPage(pageId)
     setAgentRunError(

@@ -30,10 +30,15 @@ function offText(pageId: string, code: string, agent: string, lock: string): str
   return spaceAiOffReason(spaceAiOfPage(pageId), code, named)
 }
 
+/** 这一页最后一条用户消息里 @ 点名、还没轮到的下一家（没有 = ''）。服务端开跑时点名优先于请求体（manager.resolveRun） */
+export function mentionedNext(pageId: string): string {
+  const doc = pageView(pageId)?.state.doc
+  return doc ? nextMention(doc) : ''
+}
+
 /** 发消息 / 继续（POST /continue）失败：agent = 请求体里的，lock = 这一页锁定的工具 */
 export function continueOffText(pageId: string, err: unknown, agent: string, lock: string): string | null {
-  const doc = pageView(pageId)?.state.doc
-  return offText(pageId, codeOf(err), (doc && nextMention(doc)) || agent, lock)
+  return offText(pageId, codeOf(err), mentionedNext(pageId) || agent, lock)
 }
 
 /** 这块回复是哪个 agent 写的（找不到是空串） */

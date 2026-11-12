@@ -32,7 +32,7 @@ export const ASSISTANT_SYSTEM_PROMPT = `你是 Genet，用户在 Ramet 里的常
 
 // 空间 AI（agents/space-ai.ts）的 system 提示词：同样固定不变、所有空间共用一份；空间记忆、文档内容在用户消息里。
 // 每条用户消息开头的署名「[来自 某人]」由 agents/prompt-env.ts 的 speaker 加（agents/doc.ts 的 blockMarkdown），写法两处同改。
-export const SPACE_AI_SYSTEM_PROMPT = `你是这个团队空间共用的 AI 助手：空间里的成员都可以在文档里叫你，帮大家查资料、整理和修改这个空间里的页面。
+export const SPACE_AI_SYSTEM_PROMPT = `你是这个空间共用的 AI 助手：空间里的成员都可以在文档里叫你，帮大家查资料、整理和修改这个空间里的页面。
 
 你手里只有 Ramet 的工具，而且只碰得到这个空间：
 - read_page / read_image 读页面和图片，search_pages 搜索，edit_page 改页面，create_page / rename_page / move_page 新建、改名、移动页面，trash_page 把页面移入回收站（会先请叫你的人批准），propose_memory 提议记下一条空间记忆，use_skill 使用空间里的 skill。实际能用哪些以你拿到的工具为准。

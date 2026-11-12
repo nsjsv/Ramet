@@ -137,7 +137,7 @@ describe('空间 AI 的配置', () => {
     await putJson(`/api/spaces/${t.spaceId}/ai`, t.alice, { name: 'AI 秘书' })
     expect((await getJson(`/api/spaces/${t.spaceId}/ai`, t.alice)).body).toEqual({ enabled: true, name: 'AI 秘书', connectionId: t.connectionId })
 
-    // 非成员 / 不存在同一个 404；个人空间没有空间 AI
+    // 非成员 / 不存在同一个 404；个人空间也能开（个人空间也能加成员一起用）
     await insertUser('dave')
     const dave = await login('dave')
     expect((await getJson(`/api/spaces/${t.spaceId}/ai`, dave)).status).toBe(404)
@@ -145,13 +145,13 @@ describe('空间 AI 的配置', () => {
     expect((await getJson('/api/spaces/no-such/ai', t.alice)).status).toBe(404)
     await postJson('/api/pages', t.alice, {})
     const personal = (await pool.query<{ id: string }>('SELECT id FROM spaces WHERE owner_id = $1 AND is_personal', [t.aliceId])).rows[0]!.id
-    expect((await getJson(`/api/spaces/${personal}/ai`, t.alice)).status).toBe(404)
-    expect((await putJson(`/api/spaces/${personal}/ai`, t.alice, { connectionId: t.connectionId })).status).toBe(404)
+    expect((await getJson(`/api/spaces/${personal}/ai`, t.alice)).body).toEqual({ enabled: false, name: 'AI', connectionId: null })
+    expect((await putJson(`/api/spaces/${personal}/ai`, t.alice, { connectionId: t.connectionId })).status).toBe(200)
 
     const list = (await getJson<Array<{ id: string; ai: unknown }>>('/api/spaces', bob.cookie)).body
     expect(list.find((s) => s.id === t.spaceId)?.ai).toEqual({ enabled: true, name: 'AI 秘书' })
     const own = (await getJson<Array<{ id: string; ai: unknown }>>('/api/spaces', t.alice)).body
-    expect(own.find((s) => s.id === personal)?.ai).toBeNull()
+    expect(own.find((s) => s.id === personal)?.ai).toEqual({ enabled: true, name: 'AI' })
 
     // owner 删了连接：停用（列表与 GET 都是），名字留着
     await deleteConnection(pool, t.aliceId, t.connectionId)
@@ -185,7 +185,7 @@ describe('>> 里 @AI', () => {
     const req = calls[0]!
     expect(req.apiKey).toBe(ALICE_KEY)
     expect(req.model).toBe('claude-opus-5-5')
-    expect(req.system).toContain('团队空间共用的 AI')
+    expect(req.system).toContain('这个空间共用的 AI')
     const last = JSON.stringify(req.messages[req.messages.length - 1])
     expect(last).toContain('[来自 bob]')
     expect(last).toContain('帮我总结一下')
@@ -259,13 +259,18 @@ describe('>> 里 @AI', () => {
     const daveId = await insertUser('dave')
     expect(await resolveSpaceAi(pool, { id: daveId }, t.pageId)).toBeNull()
 
-    // 个人空间的页：没有空间 AI
+    // 个人空间的页：没开就没有空间 AI；开了就解析得出来（同别的空间）
     const personal = (await (await postJson('/api/pages', t.alice, {})).json()) as { id: string }
     const pdoc = await connectDoc(personal.id, t.alice)
     message(pdoc.document, t.aliceId, '在吗', { mention: SPACE_AI_ID })
     expect(await continuePage(personal.id, t.alice)).toBe(400)
     expect(await resolveSpaceAi(pool, { id: t.aliceId }, personal.id)).toBeNull()
     expect((await postJson(`/api/pages/${personal.id}/agent-choice`, t.alice, { agent: SPACE_AI_ID })).status).toBe(400)
+    const personalSpace = (await pool.query<{ space_id: string }>('SELECT space_id FROM pages WHERE id = $1', [personal.id])).rows[0]!.space_id
+    // 上面已经删了那个连接，另配一个
+    const again = await insertConnection(pool, t.aliceId, { name: 'b', protocol: 'anthropic', baseUrl: null, model: 'claude-opus-5-5' }, ALICE_KEY, assistantSecret)
+    expect((await putJson(`/api/spaces/${personalSpace}/ai`, t.alice, { connectionId: again.id })).status).toBe(200)
+    expect(await resolveSpaceAi(pool, { id: t.aliceId }, personal.id)).toMatchObject({ id: SPACE_AI_ID, space: { id: personalSpace } })
     pdoc.destroy()
     doc.destroy()
   })
