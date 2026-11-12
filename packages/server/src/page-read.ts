@@ -26,6 +26,9 @@ import { fragmentSpans } from './updates.js'
 import { editPageForUser, parseOps } from './page-write.js'
 import { findBlockElement } from './block-ids.js'
 import { standaloneMarkdown } from './agents/refs.js'
+import { rowForAi, type AiRow } from './collections/ai-read.js'
+import { selectCollection } from './collections/store.js'
+import { tzOffset, userTimeZone } from './triggers/store.js'
 import type { Consent, Outcome } from './routes/ramet-consent.js'
 
 /** 端点路径与环境变量名的契约在本文件（MCP 进程不 import 这里，工具名在 mcp/tools/*.mjs） */
@@ -55,6 +58,10 @@ export type PageReadResult = {
   /** 页面正文字数（content_text 的行数） */
   total: number
   lines: string[]
+  /** 这一页是合集（正文恒为空，属性和行要用 read_collection 读） */
+  collection?: true
+  /** 这一页是合集里的一行：所在的合集与这一行的属性值（只在从第 1 行读整页时给，翻页不重复） */
+  row?: { collection: { id: string; title: string }; values: AiRow['values'] }
 }
 
 /** 给 AI 看的一张图（read_image 与提示词里的图片块共用）：有 webp 展示版就用它（与 /display 同一份产物），
@@ -342,7 +349,7 @@ export function pageReadRoutes(
 /** 活页面 + 可见性：必须是该页所在空间的成员，全局 admin 也不例外。
  *  不存在 / 已回收（live_pages 打不上）/ 非成员一律查不到，调用方转 404，不泄露存在性。
  *  $3 = 凭证收窄到的空间（空间 AI）：不在这个空间的页同样查不到；null = 不收窄 */
-const SELECT_READABLE = `SELECT p.title FROM live_pages p
+const SELECT_READABLE = `SELECT p.title, p.kind, p.parent_id FROM live_pages p
   WHERE p.id = $1 AND p.space_id IN (SELECT space_id FROM space_members WHERE user_id = $2)
     AND ($3::text IS NULL OR p.space_id = $3)`
 
@@ -376,7 +383,7 @@ async function readPageForUser(
   blockId?: string,
   space?: string,
 ): Promise<PageReadResult | typeof NO_BLOCK | null> {
-  const { rows } = await pool.query<{ title: string }>(SELECT_READABLE, [pageId, user.id, space ?? null])
+  const { rows } = await pool.query<{ title: string; kind: string; parent_id: string | null }>(SELECT_READABLE, [pageId, user.id, space ?? null])
   const row = rows[0]
   if (!row) return null
   const body = (await loadDocForRead(pool, `page:${pageId}`, getLiveDoc)).getXmlFragment('prosemirror')
@@ -392,5 +399,11 @@ async function readPageForUser(
   const all = text ? text.split('\n') : []
   // 起点超过总行数 = 空窗而不是错误，AI 多翻一页不必区分读完了还是读不到
   const from = Math.min(offset - 1, all.length)
-  return { title: row.title, offset, limit, total: all.length, lines: all.slice(from, from + limit) }
+  const result: PageReadResult = { title: row.title, offset, limit, total: all.length, lines: all.slice(from, from + limit) }
+  if (row.kind === 'collection') return { ...result, collection: true }
+  // 合集的行：属性不在正文里，不附上 agent 就只看得到正文。放在行之外，edit_page 的匹配口径不变
+  const parent = !blockId && offset === 1 && row.parent_id ? await selectCollection(pool, row.parent_id) : null
+  if (!parent) return result
+  const facts = await rowForAi(pool, getLiveDoc, parent, pageId, tzOffset(await userTimeZone(pool, user.id), new Date()))
+  return facts ? { ...result, row: { collection: { id: parent.id, title: parent.title }, values: facts.values } } : result
 }

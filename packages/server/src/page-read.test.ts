@@ -444,7 +444,7 @@ test('MCP 进程：listTools 暴露页面内容 / 图片 / 知识中枢工具，
   const tools = await client.listTools()
   // 没绑页面、不能叫人的凭证：页面内容 + 图片 + 知识中枢工具，没有 run_agent（它要 canDispatch 且有别的 agent 可叫）
   expect(tools.tools.map((t) => t.name).sort()).toEqual(
-    ['create_page', 'edit_page', 'move_page', 'read_image', 'read_page', 'rename_page', 'search_pages', 'trash_page'],
+    ['create_page', 'edit_page', 'move_page', 'read_collection', 'read_image', 'read_page', 'rename_page', 'search_pages', 'set_props', 'trash_page'],
   )
   expect(tools.tools.find((t) => t.name === 'read_page')!.inputSchema).toMatchObject({ type: 'object', required: ['pageId'] })
   expect(tools.tools.find((t) => t.name === 'read_image')!.inputSchema).toMatchObject({ type: 'object', required: ['fileId'] })

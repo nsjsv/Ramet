@@ -19,7 +19,9 @@ import { between, compareRows } from '@ramet/shared/collection-query'
 import { copyPageTree } from '../clone.js'
 import { loadDocForRead, writeDocState } from '../collab.js'
 import { withTransaction } from '../db.js'
+import type { Block } from '@ramet/shared/markdown-blocks'
 import { newPageDoc } from '../agents/markdown.js'
+import { textOf } from '../updates.js'
 import { rowIcon } from '../page-icon.js'
 import { newCollectionDoc } from './init-doc.js'
 
@@ -44,7 +46,7 @@ const INSERT_COLLECTION = 'INSERT INTO collections (page_id, inline, ref_host) V
 // 不会在已进回收站的集合下长出活的行（活页面的父必然活着）
 const LOCK_LIVE_COLLECTION = `SELECT 1 FROM pages WHERE id = $1 AND kind = 'collection' AND deleted_at IS NULL FOR SHARE`
 const INSERT_ROW_PAGE = `INSERT INTO pages (id, parent_id, owner_id, space_id, in_page_tree, kind, title, position, content_text)
-  VALUES ($1, $2, $3, $4, true, 'doc', $5, $6, '')`
+  VALUES ($1, $2, $3, $4, true, 'doc', $5, $6, $7)`
 const DELETE_DOC_STATE = 'DELETE FROM yjs_documents WHERE doc_name = $1'
 
 // 正文里有没有字：content_text 由 collab.ts 的 syncContentText 在每次存文档时刷新（不含标题）；
@@ -432,6 +434,8 @@ export type NewRow = {
   title: string
   /** 已校验、已去掉 null 的初始值 */
   props: Record<string, PropValue>
+  /** 初始正文（agent 建行时带的 markdown 解析成的块）；缺省 = 空正文 */
+  blocks?: Block[]
   after: string | null
   before: string | null
   /** 集合有自动编号属性：同一事务里取号，响应里的行就带着号 */
@@ -445,11 +449,13 @@ export async function createRow(pool: Pool, input: NewRow): Promise<{ id: string
   const id = input.id ?? randomUUID()
   // 先查占用再写文档状态：占用的 id 写下去会覆盖别人页面的正文
   if (input.id !== undefined && (await pool.query(PAGE_ID_TAKEN, [id])).rows.length > 0) return 'taken'
-  const doc = newPageDoc(input.title, [])
+  const doc = newPageDoc(input.title, input.blocks ?? [])
   const props = doc.getMap<unknown>('props')
   doc.transact(() => {
     for (const [key, value] of Object.entries(input.props)) props.set(key, value)
   })
+  // 正文索引与文档同时落：留空的话带正文建的行要等下次存文档才搜得到
+  const contentText = input.blocks?.length ? textOf(doc.getXmlFragment('prosemirror')) : ''
   const docName = `page:${id}`
   await writeDocState(pool, docName, doc)
   let created: { id: string; renumbered: boolean } | null
@@ -462,7 +468,7 @@ export async function createRow(pool: Pool, input: NewRow): Promise<{ id: string
           ? { at: undefined, renumbered: false }
           : await slotBetween(client, input.collectionId, id, input.after, input.before)
       const at = slot.at ?? (await tailPosition(client, input.collectionId, id))
-      await client.query(INSERT_ROW_PAGE, [id, input.collectionId, input.ownerId, input.spaceId, input.title, at])
+      await client.query(INSERT_ROW_PAGE, [id, input.collectionId, input.ownerId, input.spaceId, input.title, at, contentText])
       await writeReplica(client, id, props.toJSON(), false)
       if (input.numbered) await assignNumbers(client, input.collectionId)
       return { id, renumbered: slot.renumbered }

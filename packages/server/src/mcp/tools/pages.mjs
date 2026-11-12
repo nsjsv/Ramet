@@ -3,10 +3,18 @@
 import { broken, call, declined, failure, reply } from '../lib.mjs'
 
 /** 中心返回的 JSON → MCP 文本内容（页面按行读取的契约见 page-read.ts） */
-function render(body, blockId) {
+function render(body, blockId, pageId) {
   const title = blockId ? `${body.title}（块 ${blockId}）` : body.title
-  if (body.lines.length === 0) return `# ${title}\n(共 ${body.total} 行；本次范围为空)`
-  const head = `# ${title}\n行 ${body.offset}–${body.offset + body.lines.length - 1}/${body.total}\n`
+  // 合集页没有正文：只说明它是什么、该用哪个工具，不报「本次范围为空」让 agent 以为页面是空的
+  if (body.collection) return `# ${title}\n这是一个合集（像数据库的一张表），没有正文；它的属性和行用 read_collection 读（collectionId 填 ${pageId}）。`
+  // 合集的行：属性写在标题下、行号之外（不是正文，edit_page 改不到它们）
+  const row = body.row
+    ? `这一页是合集「${body.row.collection.title || '无标题'}」（collection:${body.row.collection.id}）里的一行。属性：${
+        body.row.values.length ? body.row.values.map(([name, text]) => `${name}：${text}`).join('；') : '（都是空的）'
+      }\n`
+    : ''
+  if (body.lines.length === 0) return `# ${title}\n${row}(共 ${body.total} 行；本次范围为空)`
+  const head = `# ${title}\n${row}行 ${body.offset}–${body.offset + body.lines.length - 1}/${body.total}\n`
   return head + body.lines.map((line, i) => `${body.offset + i}\t${line}`).join('\n')
 }
 
@@ -29,7 +37,7 @@ async function readPage(args) {
     return reply(r.json?.error === 'block not found' ? `页面 ${pageId} 里没有块 ${blockId}（可能已被删除）。` : `没有找到页面 ${pageId}。`)
   }
   if (!r.ok) throw new Error(`读取页面失败：${r.status} ${r.raw}`)
-  return reply(render(r.json, blockId))
+  return reply(render(r.json, blockId, pageId))
 }
 
 async function editPage({ pageId, ops }) {

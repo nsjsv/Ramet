@@ -35,13 +35,15 @@ export const tools = [
       name: 'create_page',
       description:
         '新建一个页面。默认放在当前页下（当前页 = 这一轮对话所在的页面）；给 parentId 则放在那个页面下，同一个空间。' +
-        'text 是页面正文（markdown；单独一行 image:<uuid> 落图片，page:<uuid> 落页面提及）。返回新页面的 id。',
+        'text 是页面正文（markdown；单独一行 image:<uuid> 落图片，page:<uuid> 落页面提及）。返回新页面的 id。' +
+        'parentId 是合集时新建的是合集里的一行：title 是这一行的名称，props 填属性值（写法同 set_props）。',
       inputSchema: {
         type: 'object',
         properties: {
           title: { type: 'string', description: '页面标题' },
           text: { type: 'string', description: '正文（markdown），缺省为空页面' },
-          parentId: { type: 'string', description: '放在哪个页面下（页面 id）；缺省 = 当前页下' },
+          parentId: { type: 'string', description: '放在哪个页面下（页面 id，或合集的 collection:<id>）；缺省 = 当前页下' },
+          props: { type: 'object', description: '只在 parentId 是合集时用：新行的属性名 → 值（写法同 set_props）', additionalProperties: true },
         },
         required: ['title'],
       },
@@ -49,7 +51,12 @@ export const tools = [
     run: async (args) => {
       const r = await call('/api/ramet/pages', {
         method: 'POST',
-        body: { title: String(args.title ?? ''), text: typeof args.text === 'string' ? args.text : undefined, parentId: args.parentId },
+        body: {
+          title: String(args.title ?? ''),
+          text: typeof args.text === 'string' ? args.text : undefined,
+          parentId: args.parentId,
+          ...(args.props !== undefined ? { props: args.props } : {}),
+        },
       })
       if (declined(r)) return declined(r)
       if (broken(r)) return failure('新建页面失败', r)

@@ -30,6 +30,7 @@ import { memberRowsAmong, readSchema } from '../../collections/store.js'
 import { rawText, referenced, rowTexts, type TextCtx } from '../../collections/value-text.js'
 import type { Editor } from '../../edit-marks.js'
 import type { TriggerHub } from '../hub.js'
+import { tzOffset } from '../store.js'
 import type { EventPayload } from '../payload.js'
 
 export type CollectionOn = 'added' | 'edited'
@@ -157,29 +158,6 @@ function payloadOf(
       ['合集', `《${collection || '无标题'}》（page:${collectionId}）`],
       ['链接', `/page/${row.id}`],
     ],
-  }
-}
-
-/** 时区 → 比 UTC 快多少分钟（条件里「今天」之类按主人的时区算） */
-function tzOffset(tz: string, at: Date): number {
-  try {
-    const parts = Object.fromEntries(
-      new Intl.DateTimeFormat('en-US', {
-        timeZone: tz,
-        hourCycle: 'h23',
-        year: 'numeric',
-        month: 'numeric',
-        day: 'numeric',
-        hour: 'numeric',
-        minute: 'numeric',
-      })
-        .formatToParts(at)
-        .map((p) => [p.type, p.value]),
-    )
-    const local = Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day), Number(parts.hour), Number(parts.minute))
-    return Math.round((local - Math.floor(at.getTime() / 60_000) * 60_000) / 60_000)
-  } catch {
-    return 0
   }
 }
 

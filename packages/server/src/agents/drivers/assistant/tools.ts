@@ -21,9 +21,11 @@ const CALL_TIMEOUT_MS = 24 * 60 * 60 * 1000
 const KINDS: Record<string, StepKind> = {
   read_page: 'read',
   read_image: 'read',
+  read_collection: 'read',
   use_skill: 'read',
   search_pages: 'search',
   edit_page: 'edit',
+  set_props: 'edit',
   create_page: 'edit',
   rename_page: 'edit',
   move_page: 'move',
@@ -31,7 +33,7 @@ const KINDS: Record<string, StepKind> = {
 }
 
 /** 输入里拿来当一行标题的字段，按先后取第一个有值的 */
-const TITLE_KEYS = ['title', 'query', 'name', 'pageId', 'fileId', 'text']
+const TITLE_KEYS = ['title', 'query', 'name', 'pageId', 'collectionId', 'fileId', 'text']
 
 export type AssistantImage = { mimeType: string; data: string }
 export type AssistantToolSpec = { name: string; description: string; inputSchema: Record<string, unknown> }

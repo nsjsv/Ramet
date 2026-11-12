@@ -24,6 +24,10 @@ describe('凭证白名单', () => {
   it('只读再去掉有副作用的', () => {
     expect(narrowedAllowed('POST', '/api/ramet/search', true)).toBe(true)
     expect(narrowedAllowed('GET', '/api/ramet/skills/x', true)).toBe(true)
+    expect(narrowedAllowed('GET', '/api/ramet/collections/c1', true)).toBe(true)
+    expect(narrowedAllowed('GET', '/api/ramet/collections/c1/rows', true)).toBe(false)
+    expect(narrowedAllowed('POST', '/api/ramet/rows/set', false)).toBe(true)
+    expect(narrowedAllowed('POST', '/api/ramet/rows/set', true)).toBe(false)
     expect(narrowedAllowed('POST', '/api/ramet/pages', true)).toBe(false)
     expect(narrowedAllowed('POST', '/api/ramet/pages/abc/trash', true)).toBe(false)
     expect(narrowedAllowed('POST', '/api/ramet/memories/propose', true)).toBe(false)
@@ -32,8 +36,8 @@ describe('凭证白名单', () => {
 
 describe('工具清单与凭证上下文', () => {
   it('读写全有 / 只读只有读的；有 skill 才列 use_skill', () => {
-    expect(spaceTools(false, false)).toEqual(['read_page', 'read_image', 'search_pages', 'edit_page', 'create_page', 'move_page', 'rename_page', 'trash_page', 'propose_memory'])
-    expect(spaceTools(true, true)).toEqual(['read_page', 'read_image', 'search_pages', 'use_skill'])
+    expect(spaceTools(false, false)).toEqual(['read_page', 'read_image', 'read_collection', 'search_pages', 'edit_page', 'set_props', 'create_page', 'move_page', 'rename_page', 'trash_page', 'propose_memory'])
+    expect(spaceTools(true, true)).toEqual(['read_page', 'read_image', 'read_collection', 'search_pages', 'use_skill'])
   })
 
   it('空间 AI 的凭证带空间、不能叫人；别的 agent 同原来', () => {

@@ -269,6 +269,7 @@ export function startServer(
         comments: { changed: (pageId) => commentsChanged(pageId), posted: (c) => posted(c), calls: () => genetCalls },
         names: () => agentNameHost,
         created: rowsAddedTo,
+        projector,
       },
     ),
   )

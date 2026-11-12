@@ -61,6 +61,8 @@ import type { AgentNameHost } from '../agents/agent-names.js'
 import { heartbeatJson, consentTitle, type Consent, type Outcome } from './ramet-consent.js'
 import { markHandled } from './mark-handled.js'
 import { commentReplyRoutes } from './comment-reply.js'
+import { collectionToolRoutes, rowCreator } from './collection-tools.js'
+import type { Projector } from '../collections/projector.js'
 import type { GenetCalls } from '../comments/genet-call.js'
 import type { PostedComment } from '../triggers/sources/comment.js'
 import type { DocWriter } from '../collab.js'
@@ -95,8 +97,8 @@ export type ToolHost = {
   }
 }
 
-/** 读页面 / 读图片 / 改页面三个基础工具 + 知识中枢；run_agent 与 use_skill 按凭证 / 空间再加（见 GET /api/ramet/tools） */
-const BASE_TOOLS = ['read_page', 'read_image', 'edit_page', 'search_pages', 'create_page', 'move_page', 'rename_page', 'trash_page']
+/** 读页面 / 读图片 / 改页面三个基础工具 + 读写合集 + 知识中枢；run_agent 与 use_skill 按凭证 / 空间再加（见 GET /api/ramet/tools） */
+const BASE_TOOLS = ['read_page', 'read_image', 'edit_page', 'read_collection', 'set_props', 'search_pages', 'create_page', 'move_page', 'rename_page', 'trash_page']
 
 type Granted = { user: { id: string; role: 'admin' | 'user' }; ctx: GrantCtx }
 
@@ -137,6 +139,8 @@ export function rametToolRoutes(
     names?: () => AgentNameHost
     /** create_page 建了一页（父页是合集时就是新增了一行，交给自动化；不等它） */
     created?: (parentId: string | null, pageIds: readonly string[], userId: string) => void
+    /** 合集行的副本落库（set_props、在合集里建行；collections/projector.ts）；不给 = 这两条写路径 503 */
+    projector?: Pick<Projector, 'flushRow'>
   } = {},
 ) {
   const app = new Hono()
@@ -177,6 +181,20 @@ export function rametToolRoutes(
 
   /** 要等人批准的工具弹的卡：空间 AI 的只给叫它的人批（别的成员看得到这一页，但这是他叫的、按他的权限执行） */
   const onlyInvoker = (g: Granted): { only?: string } => (g.ctx.space ? { only: g.user.id } : {})
+
+  // 合集的读写（collection-tools.ts）：凭证、空间收窄与审批都用这里的
+  const collectionTools = {
+    pool,
+    ...(getLiveDoc ? { getLiveDoc } : {}),
+    ...(extra.write ? { write: extra.write } : {}),
+    ...(extra.projector ? { projector: extra.projector } : {}),
+    ...(notify ? { notify } : {}),
+    granted: async (c: Context) => {
+      const g = await granted(pool, c)
+      return g ? { user: g.user, ...(g.ctx.space ? { space: g.ctx.space } : {}), guard: (what: string, run: () => Promise<Outcome>) => guard(c, g, what, run) } : null
+    },
+  }
+  const createRow = rowCreator(collectionTools)
 
   /** 在 parentId 下（没有 = 空间顶层）建一页：标题 + markdown 正文（page-create.ts） */
   async function insertPage(id: string, user: Granted['user'], parentId: string | null, spaceId: string, title: string, text: string): Promise<void> {
@@ -291,15 +309,28 @@ export function rametToolRoutes(
   app.post('/api/ramet/pages', async (c) => {
     const g = await granted(pool, c)
     if (!g) return c.json({ error: 'unauthorized' }, 401)
-    const body = (await c.req.json().catch(() => ({}))) as { title?: unknown; text?: unknown; parentId?: unknown }
+    const body = (await c.req.json().catch(() => ({}))) as { title?: unknown; text?: unknown; parentId?: unknown; props?: unknown }
     const title = typeof body.title === 'string' ? body.title.trim() : ''
     if (!title) return c.json({ error: 'title required' }, 400)
-    const parentId = typeof body.parentId === 'string' && body.parentId ? body.parentId : g.ctx.pageId
+    const text = typeof body.text === 'string' ? body.text.trim() : ''
+    const parentId = typeof body.parentId === 'string' && body.parentId ? body.parentId.replace(/^(collection|page):/, '') : g.ctx.pageId
     let spaceId: string
     if (parentId) {
       const parent = await writablePage(g.user, parentId, g.ctx.space)
       if (!('page' in parent)) return c.json({ error: parent.error }, parent.status)
       if (!parent.page.space_id) return c.json({ error: 'parent has no space' }, 400)
+      // 父页是合集：建的是一行，走与界面建行同一条路（带属性值、排在末尾、取号）
+      if (parent.page.kind === 'collection') {
+        const row = await createRow(g.user, g.ctx.space, parentId, body.props)
+        if ('error' in row) return c.json({ error: row.error }, row.status)
+        return guard(c, g, `在合集「${row.collection.title || '无标题'}」里新建一行「${title}」`, async () => {
+          const id = await row.create(title, text)
+          if (!id) return { status: 404, body: { error: 'parent not found' } }
+          extra.created?.(parentId, [id], g.user.id)
+          notify?.()
+          return { status: 200, body: { id, title, parentId } }
+        })
+      }
       spaceId = parent.page.space_id
     } else if (g.ctx.space) {
       // 空间 AI 没绑页面时建在它的空间顶层，不建到叫它的人的个人空间
@@ -309,10 +340,11 @@ export function rametToolRoutes(
       if (!personal) return c.json({ error: 'personal space unavailable' }, 500)
       spaceId = personal
     }
+    if (body.props !== undefined) return c.json({ error: 'props 只在父页是合集时能用（新建的是合集里的一行）' }, 400)
     if (!(await parentOk(pool, g.user, parentId, spaceId))) return c.json({ error: 'parent not found' }, 400)
     return guard(c, g, `新建页面「${title}」`, async () => {
       const id = randomUUID()
-      await insertPage(id, g.user, parentId, spaceId, title, typeof body.text === 'string' ? body.text.trim() : '')
+      await insertPage(id, g.user, parentId, spaceId, title, text)
       notify?.()
       return { status: 200, body: { id, title, parentId } }
     })
@@ -563,6 +595,8 @@ export function rametToolRoutes(
     names: { localAgents: () => extra.names?.().localAgents() ?? [], onlineAgents: (id) => extra.names?.().onlineAgents(id) },
     ...(getLiveDoc ? { getLiveDoc } : {}),
   })
+
+  collectionToolRoutes(app, collectionTools)
 
   commentReplyRoutes(app, {
     pool,

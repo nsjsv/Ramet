@@ -139,6 +139,29 @@ function view(r: RuleRow): TimerView {
   }
 }
 
+/** 时区 → 此刻比 UTC 快多少分钟（合集条件里的「今天」、公式的 TODAY() 按这个人的时区算）；认不出的时区按 0 */
+export function tzOffset(tz: string, at: Date): number {
+  try {
+    const parts = Object.fromEntries(
+      new Intl.DateTimeFormat('en-US', {
+        timeZone: tz,
+        hourCycle: 'h23',
+        year: 'numeric',
+        month: 'numeric',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: 'numeric',
+      })
+        .formatToParts(at)
+        .map((p) => [p.type, p.value]),
+    )
+    const local = Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day), Number(parts.hour), Number(parts.minute))
+    return Math.round((local - Math.floor(at.getTime() / 60_000) * 60_000) / 60_000)
+  } catch {
+    return 0
+  }
+}
+
 /** 这个人的时区：上报过且还认得就用，否则服务器的 */
 export async function userTimeZone(pool: Pick<Pool, 'query'>, userId: string): Promise<string> {
   const raw = (await pool.query<{ time_zone: string | null }>('SELECT time_zone FROM users WHERE id = $1', [userId])).rows[0]?.time_zone

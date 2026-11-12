@@ -8,6 +8,7 @@ import { randomUUID } from 'node:crypto'
 import type { Pool } from 'pg'
 import * as Y from 'yjs'
 import { isPropId, validateValue, type CollectionSchema, type PropValue } from '@ramet/shared/collection-model'
+import type { Block } from '@ramet/shared/markdown-blocks'
 import { setDocTitle, type DocWriter } from '../collab.js'
 import { SET_TITLE } from '../routes/pages.js'
 import type { Projector } from './projector.js'
@@ -91,7 +92,7 @@ export async function writeRow(
   user: User,
   collection: CollectionPage,
   rowId: string,
-  input: { set?: unknown; title?: string },
+  input: { set?: unknown; title?: string; as?: 'user' | 'agent' },
 ): Promise<{ ok: true; titled: boolean } | WriteFailure> {
   const set = input.set === undefined ? null : await readSet(deps, input.set, await readSchema(deps.pool, collection.id, deps.getLiveDoc), collection)
   if (set && !set.ok) return set
@@ -99,7 +100,7 @@ export async function writeRow(
   if (!plans.ok) return { ok: false, error: { error: 'invalid value', message: plans.error } }
   const values = set?.values ?? []
   const title = input.title
-  // 值与标题一次写进行文档，记给发起的人
+  // 值与标题一次写进行文档，记给发起的人（as = 'agent'：AI 工具替他改的，编辑归属与 edit_page 同口径）
   if (values.length > 0 || title !== undefined) {
     await deps.write(
       `page:${rowId}`,
@@ -110,7 +111,7 @@ export async function writeRow(
           if (title !== undefined) setDocTitle(doc, title)
         }, origin)
       },
-      'user',
+      input.as ?? 'user',
     )
   }
   // 副本当场落库再返回（不等投影器的去抖）。增量照常由投影器发
@@ -126,7 +127,7 @@ export async function insertRow(
   deps: RowWriteDeps,
   user: User,
   collection: CollectionPage,
-  input: { id?: string; title: string; set?: unknown; after: string | null; before: string | null },
+  input: { id?: string; title: string; set?: unknown; blocks?: Block[]; after: string | null; before: string | null },
 ): Promise<{ ok: true; id: string; renumbered: boolean } | WriteFailure | null | 'taken'> {
   const schema = await readSchema(deps.pool, collection.id, deps.getLiveDoc)
   const set = input.set === undefined ? null : await readSet(deps, input.set, schema, collection)
@@ -144,6 +145,7 @@ export async function insertRow(
     ownerId: user.id,
     title: input.title,
     props,
+    ...(input.blocks ? { blocks: input.blocks } : {}),
     after: input.after,
     before: input.before,
     numbered: numbered(schema),
