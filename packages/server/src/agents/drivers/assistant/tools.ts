@@ -26,6 +26,8 @@ const KINDS: Record<string, StepKind> = {
   search_pages: 'search',
   edit_page: 'edit',
   set_props: 'edit',
+  create_collection: 'edit',
+  edit_collection: 'edit',
   create_page: 'edit',
   rename_page: 'edit',
   move_page: 'move',

@@ -16,14 +16,12 @@ import {
   rowValue,
   timeMs,
   TITLE_PROP_ID,
-  type CollectionLayout,
   type CollectionProp,
   type CollectionRefs,
   type CollectionRow,
   type CollectionSchema,
   type CollectionView,
   type FormulaType,
-  type PropType,
   type PropValue,
   type RollupItem,
 } from '@ramet/shared/collection-model'
@@ -32,34 +30,10 @@ import { computeRows } from './computed.js'
 import { ensureNumbers, memberRows, memberRowsAmong, readSchema, spaceMembers, type CollectionPage } from './store.js'
 import { numbered } from './write-row.js'
 import { shownText, type TextCtx } from './value-text.js'
+import { LAYOUT_NAMES, TYPE_NAMES } from './ai-names.js'
+import { AiQueryError, conditionsOf, conditionText, sortsOf } from './ai-query.js'
+import { lookups } from './ai-write.js'
 
-/** 类型的叫法（同界面上属性类型菜单的说法，agent 转述给用户时对得上） */
-export const TYPE_NAMES: Record<PropType, string> = {
-  text: '文本',
-  number: '数字',
-  select: '单选',
-  multi_select: '多选',
-  status: '状态',
-  date: '日期',
-  checkbox: '复选框',
-  url: '链接',
-  person: '人员',
-  created_time: '创建时间',
-  edited_time: '编辑时间',
-  email: '邮箱',
-  phone: '电话',
-  created_by: '创建者',
-  edited_by: '最后编辑者',
-  unique_id: '自动编号',
-  files: '文件与媒体',
-  relation: '关联',
-  rollup: '汇总',
-  formula: '公式',
-  button: '按钮',
-  ai: 'AI 属性',
-}
-
-const LAYOUT_NAMES: Record<CollectionLayout, string> = { table: '表格', board: '看板', list: '列表', gallery: '画廊', calendar: '日历', timeline: '时间线' }
 
 /** 一个值最多给这么多字：长文本属性整列铺开会吃掉 agent 的上下文，要细看就读那一行的页面 */
 const VALUE_MAX = 300
@@ -75,13 +49,25 @@ export type AiCollection = {
   views: AiView[]
   /** 按哪个视图取的；null = 全部行、手动顺序 */
   view: AiView | null
+  /** 这一次叠加的临时条件 / 排序 / 关键词（写回人话） */
+  where?: string[]
+  sort?: string[]
+  query?: string
   total: number
   next: string | null
   rows: AiRow[]
 }
 
-/** limit 缺省与上限同表格的窗口（50 / 100），数字或查询串里的字符串都收 */
-export type AiReadOpts = { view?: string; cursor?: string | null; limit?: number | string | null; tzOffset: number }
+/** limit 缺省与上限同表格的窗口（50 / 100），数字或查询串里的字符串都收；where / sort 的写法见 ai-query.ts，query = 关键词 */
+export type AiReadOpts = {
+  view?: string
+  where?: unknown
+  sort?: unknown
+  query?: string
+  cursor?: string | null
+  limit?: number | string | null
+  tzOffset: number
+}
 
 /** 值要写进行文字的属性：按钮没有值，名称已经是行的标题 */
 const listed = (prop: CollectionProp): boolean => prop.type !== 'button' && prop.id !== TITLE_PROP_ID
@@ -180,6 +166,8 @@ function propOf(prop: CollectionProp, refs: CollectionRefs): AiProp {
   return out
 }
 
+const propNameOf = (schema: CollectionSchema, id: string): string => (id === TITLE_PROP_ID ? '名称' : (schema.props.find((p) => p.id === id)?.name ?? id))
+
 const viewOf = (view: CollectionView): AiView => ({ id: view.id, name: view.name || '未命名视图', layout: LAYOUT_NAMES[view.layout] })
 
 /** 视图：按 id 或名字找；没给 = 全部行。找不到 = null */
@@ -197,9 +185,7 @@ async function textCtx(pool: Pool, collection: CollectionPage, rows: CollectionR
   return { name: (id) => names.get(id), title: (id) => titles.get(id) }
 }
 
-export class UnknownViewError extends Error {}
-
-/** 读一段行（调用方判过可读）。view 对不上抛 UnknownViewError，信息里列出有哪些视图 */
+/** 读一段行（调用方判过可读）。视图 / 条件 / 排序对不上抛 AiQueryError（ai-query.ts），信息里写着能用什么 */
 export async function readCollectionForAi(
   pool: Pool,
   getLiveDoc: ((docName: string) => Y.Doc | undefined) | undefined,
@@ -210,13 +196,28 @@ export async function readCollectionForAi(
   const chosen = chooseView(schema, opts.view)
   if (chosen === null) {
     const names = schema.views.map((v) => `「${v.name || '未命名视图'}」`).join('、')
-    throw new UnknownViewError(`合集里没有视图「${opts.view}」${names ? `，有：${names}` : ''}`)
+    throw new AiQueryError(`合集里没有视图「${opts.view}」${names ? `，有：${names}` : ''}`)
   }
-  const view = chosen === 'all' ? { id: '', ...newView('', 'table', 0) } : chosen
+  const base = chosen === 'all' ? { id: '', ...newView('', 'table', 0) } : chosen
+  // 临时条件叠在视图自己的筛选上，给了排序就换掉视图的排序
+  const where = await conditionsOf(schema, opts.where, lookups(pool, collection))
+  const sorts = sortsOf(schema, opts.sort)
+  const view = { ...base, filter: { all: [...base.filter.all, ...where] }, sorts: sorts.length > 0 ? sorts : base.sorts }
   if (numbered(schema)) await ensureNumbers(pool, collection.id)
-  const rows = await memberRows(pool, collection.id)
+  let rows = await memberRows(pool, collection.id)
   const refs = await computeRows(pool, getLiveDoc, collection, schema, rows, true)
-  const window = queryWindow(rows, view, schema, { cursor: opts.cursor ?? null, limit: opts.limit ?? null }, { tzOffset: opts.tzOffset, refs })
+  const qctx = { tzOffset: opts.tzOffset, refs }
+  const keyword = opts.query?.trim().toLowerCase()
+  if (keyword) {
+    // 关键词在标题和写成文字的属性值里找（公式先算好），先于分页筛掉
+    const all = await textCtx(pool, collection, rows)
+    const filled = fillFormulas(rows, schema, qctx)
+    rows = filled.filter((row) => {
+      const facts = rowOf(schema, row, refs, all, opts.tzOffset)
+      return facts.title.toLowerCase().includes(keyword) || facts.values.some(([, text]) => text.toLowerCase().includes(keyword))
+    })
+  }
+  const window = queryWindow(rows, view, schema, { cursor: opts.cursor ?? null, limit: opts.limit ?? null }, qctx)
   const ctx = await textCtx(pool, collection, window.rows)
   return {
     id: collection.id,
@@ -224,6 +225,9 @@ export async function readCollectionForAi(
     props: schema.props.filter(listed).map((p) => propOf(p, refs)),
     views: schema.views.map(viewOf),
     view: chosen === 'all' ? null : viewOf(chosen),
+    ...(where.length > 0 ? { where: where.map((c) => conditionText(schema, c)) } : {}),
+    ...(sorts.length > 0 ? { sort: sorts.map((x) => `${propNameOf(schema, x.prop)} ${x.dir === 'desc' ? '降序' : '升序'}`) } : {}),
+    ...(keyword ? { query: opts.query!.trim() } : {}),
     total: window.total,
     next: window.next,
     rows: window.rows.map((row) => rowOf(schema, row, refs, ctx, opts.tzOffset)),

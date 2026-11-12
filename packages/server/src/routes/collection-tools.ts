@@ -1,6 +1,9 @@
 /* ---------- agent 读写合集的中心端点（Bearer，注册在 ramet-tools.ts 的 app 上，沿用它的凭证闸门与挂载位置） ----------
- * GET  /api/ramet/collections/:id?view=&cursor=&limit= → 属性定义、视图清单与一段行，值都已写成文字（collections/ai-read.ts）
+ * GET  /api/ramet/collections/:id?view=&where=&sort=&query=&cursor=&limit= → 属性定义、视图清单与一段行，值都已写成文字（collections/ai-read.ts）；
+ *      where / sort 是 JSON 列表（写法见 collections/ai-query.ts），query 是关键词
  * POST /api/ramet/rows/set { rowIds, props?, title? } → { count, collection }：改一个合集里若干行的属性（title 只能改一行）
+ * POST /api/ramet/collections { title, parentId?, ops? } → { id, title, parentId, changes }：建一个整页合集（父页同 create_page，只能是普通页）
+ * POST /api/ramet/collections/:id/schema { ops } → { changes }：改属性 / 选项 / 视图 / 合集名（ops 的写法与演练见 collections/ai-schema.ts）
  * create_page 的父页是合集时建行走 rowCreator（ramet-tools.ts 调）：与界面建行同一条 insertRow（排在末尾、取号、副本同事务）。
  * 闸门同合集的 REST（collectionGate）：不存在 / 不是合集 / 非成员 / 在回收站同一个 404，写要可写（viewer 403）；
  * 空间 AI 的凭证碰到别的空间的合集也是这个 404。精简档在 ramet-tools.ts 的闸门里就 403 了；空间 AI 白名单里读是读、写是写。
@@ -10,12 +13,16 @@
 import type { Context, Hono } from 'hono'
 import type { Pool } from 'pg'
 import type * as Y from 'yjs'
-import { readCollectionForAi, UnknownViewError } from '../collections/ai-read.js'
+import { readCollectionForAi } from '../collections/ai-read.js'
+import { AiQueryError } from '../collections/ai-query.js'
 import { aiSet, aiWriteError } from '../collections/ai-write.js'
+import { applyPlan, planNewCollection, planOps, scratchOf } from '../collections/ai-schema.js'
+import { newCollectionDoc } from '../collections/init-doc.js'
+import { randomUUID } from 'node:crypto'
 import type { Projector } from '../collections/projector.js'
-import { memberRow, readSchema, type CollectionPage } from '../collections/store.js'
+import { createCollection, memberRow, readSchema, type CollectionPage } from '../collections/store.js'
 import { insertRow, isRecord, readSet, writeRow, type RowWriteDeps } from '../collections/write-row.js'
-import type { DocWriter } from '../collab.js'
+import { loadDocForRead, type DocWriter } from '../collab.js'
 import { parseNew } from '../page-write.js'
 import { tzOffset, userTimeZone } from '../triggers/store.js'
 import { collectionGate } from './collections.js'
@@ -29,8 +36,14 @@ export type CollectionToolDeps = {
   /** 写行文档（collab.ts 的 DocWriter）与副本落库；不给 = 写端点 503 */
   write?: DocWriter
   projector?: Pick<Projector, 'flushRow'>
-  /** Bearer → 发起的用户 + 凭证收窄到的空间（空间 AI）+ 有副作用时的审批（ramet-consent.ts）；坏凭证 = null */
-  granted(c: Context): Promise<{ user: User; space?: string; guard(what: string, run: () => Promise<Outcome>): Promise<Response> } | null>
+  /** Bearer → 发起的用户 + 凭证收窄到的空间（空间 AI）+ 有副作用时的审批（ramet-consent.ts）+ 新建东西放在哪（同 create_page：
+   *  给了父页要可写且同空间，缺省 = 当前页下，没绑页面 = 空间顶层）；坏凭证 = null */
+  granted(c: Context): Promise<{
+    user: User
+    space?: string
+    guard(what: string, run: () => Promise<Outcome>): Promise<Response>
+    parent(raw: unknown): Promise<{ spaceId: string; parentId: string | null } | { status: 400 | 403 | 404; error: string }>
+  } | null>
   /** 行改了名：页面列表变了，广播 changed */
   notify?: () => void
 }
@@ -93,6 +106,18 @@ export function rowCreator(deps: CollectionToolDeps): RowCreator {
   }
 }
 
+const BAD = Symbol('bad json')
+
+/** 查询串里的 JSON 参数（where / sort）：没给 = undefined，解析不了 = BAD */
+function jsonParam(raw: string | undefined): unknown {
+  if (raw === undefined || raw === '') return undefined
+  try {
+    return JSON.parse(raw) as unknown
+  } catch {
+    return BAD
+  }
+}
+
 function rowIdsOf(raw: unknown): string[] | null {
   if (!Array.isArray(raw) || raw.length === 0 || raw.length > SET_ROWS_MAX || !raw.every((x) => typeof x === 'string' && x.trim())) return null
   return [...new Set((raw as string[]).map((x) => x.trim().replace(/^page:/, '').replace(/[「#].*$/, '')))]
@@ -107,16 +132,22 @@ export function collectionToolRoutes(app: Hono, deps: CollectionToolDeps): void 
     const gate = await gateFor(pool, g.user, g.space, c.req.param('id'), 'read')
     if (!('collection' in gate)) return c.json({ error: gate.error }, gate.status)
     const offset = tzOffset(await userTimeZone(pool, g.user.id), new Date())
+    const where = jsonParam(c.req.query('where'))
+    const sort = jsonParam(c.req.query('sort'))
+    if (where === BAD || sort === BAD) return c.json({ error: 'where / sort 要是 JSON 列表' }, 400)
     try {
       const read = await readCollectionForAi(pool, deps.getLiveDoc, gate.collection, {
         view: c.req.query('view'),
+        where,
+        sort,
+        query: c.req.query('query'),
         cursor: c.req.query('cursor') ?? null,
         limit: c.req.query('limit') ?? null,
         tzOffset: offset,
       })
       return c.json(read)
     } catch (err) {
-      if (err instanceof UnknownViewError) return c.json({ error: err.message }, 400)
+      if (err instanceof AiQueryError) return c.json({ error: err.message }, 400)
       throw err
     }
   })
@@ -159,6 +190,66 @@ export function collectionToolRoutes(app: Hono, deps: CollectionToolDeps): void 
       }
       if (title !== undefined) deps.notify?.()
       return { status: 200, body: { count, collection: { id: gate.collection.id, title: gate.collection.title } } }
+    })
+  })
+
+  app.post('/api/ramet/collections', async (c) => {
+    const g = await deps.granted(c)
+    if (!g) return c.json({ error: 'unauthorized' }, 401)
+    if (!deps.write) return c.json({ error: '没有文档写入通道' }, 503)
+    const write = deps.write
+    const body: unknown = await c.req.json().catch(() => null)
+    if (!isRecord(body)) return c.json({ error: '要给 { title, parentId?, ops? }' }, 400)
+    const title = typeof body.title === 'string' ? body.title.replace(/\s+/g, ' ').trim() : ''
+    if (!title) return c.json({ error: '合集要有名字（title）' }, 400)
+    const where = await g.parent(body.parentId)
+    if ('error' in where) return c.json({ error: where.error }, where.status)
+    // 合集只能挂在普通页下（挂在合集 / 过程页 / skill 页下，侧栏和视图里都找不到它），同建合集的 REST
+    if (where.parentId && !(await pool.query("SELECT 1 FROM live_pages WHERE id = $1 AND kind = 'doc'", [where.parentId])).rowCount) {
+      return c.json({ error: '合集只能建在普通页面下' }, 400)
+    }
+    const id = randomUUID()
+    const doc = newCollectionDoc(title)
+    const collection: CollectionPage = { id, space_id: where.spaceId, title }
+    let plan
+    try {
+      plan = await planNewCollection({ pool, getLiveDoc: deps.getLiveDoc, user: g.user, collection }, doc, body.ops)
+    } catch (err) {
+      if (err instanceof AiQueryError) return c.json({ error: err.message }, 400)
+      throw err
+    }
+    return g.guard(`新建合集「${title}」`, async () => {
+      if (!(await createCollection(pool, { id, spaceId: where.spaceId, parentId: where.parentId, ownerId: g.user.id, inline: false, title, doc }))) {
+        return { status: 409, body: { error: '合集 id 冲突了，再试一次' } }
+      }
+      // 本合集的结构已经演练进 doc 里一起写下去了，这里只补对方合集的反向关联
+      await applyPlan({ pool, write }, g.user, id, plan, true)
+      deps.notify?.()
+      return { status: 200, body: { id, title, parentId: where.parentId, changes: plan.changes } }
+    })
+  })
+
+  app.post('/api/ramet/collections/:id/schema', async (c) => {
+    const g = await deps.granted(c)
+    if (!g) return c.json({ error: 'unauthorized' }, 401)
+    if (!deps.write) return c.json({ error: '没有文档写入通道' }, 503)
+    const write = deps.write
+    const gate = await gateFor(pool, g.user, g.space, c.req.param('id'), 'write')
+    if (!('collection' in gate)) return c.json({ error: gate.error }, gate.status)
+    const body: unknown = await c.req.json().catch(() => null)
+    if (!isRecord(body)) return c.json({ error: '要给 { ops }' }, 400)
+    const scratch = scratchOf(await loadDocForRead(pool, `page:${gate.collection.id}`, deps.getLiveDoc))
+    let plan
+    try {
+      plan = await planOps({ pool, getLiveDoc: deps.getLiveDoc, user: g.user, collection: gate.collection }, scratch, body.ops)
+    } catch (err) {
+      if (err instanceof AiQueryError) return c.json({ error: err.message }, 400)
+      throw err
+    }
+    return g.guard(`改合集「${gate.collection.title || '无标题'}」的结构`, async () => {
+      await applyPlan({ pool, write }, g.user, gate.collection.id, plan)
+      if (plan.title !== undefined) deps.notify?.()
+      return { status: 200, body: { changes: plan.changes } }
     })
   })
 }

@@ -94,7 +94,7 @@ export function pageToolCtx(agent: Pick<ResolvedAgent, 'id' | 'space'>, pageId: 
 }
 
 const READ_TOOLS = ['read_page', 'read_image', 'read_collection', 'search_pages']
-const WRITE_TOOLS = ['edit_page', 'set_props', 'create_page', 'move_page', 'rename_page', 'trash_page', 'propose_memory']
+const WRITE_TOOLS = ['edit_page', 'set_props', 'create_collection', 'edit_collection', 'create_page', 'move_page', 'rename_page', 'trash_page', 'propose_memory']
 
 /** 收窄凭证能用的 Ramet 工具（GET /api/ramet/tools）。不列 agents：空间 AI 不叫人也不派活 */
 export function spaceTools(readOnly: boolean, skills: boolean): string[] {
@@ -110,6 +110,8 @@ const ALLOWED: Array<{ method: string; path: RegExp; write: boolean }> = [
   { method: 'GET', path: /^\/api\/ramet\/skills\/[^/]+(\/file)?$/, write: false },
   { method: 'POST', path: /^\/api\/ramet\/pages$/, write: true },
   { method: 'POST', path: /^\/api\/ramet\/rows\/set$/, write: true },
+  { method: 'POST', path: /^\/api\/ramet\/collections$/, write: true },
+  { method: 'POST', path: /^\/api\/ramet\/collections\/[^/]+\/schema$/, write: true },
   { method: 'POST', path: /^\/api\/ramet\/pages\/[^/]+\/(move|rename|trash)$/, write: true },
   { method: 'POST', path: /^\/api\/ramet\/memories\/propose$/, write: true },
 ]

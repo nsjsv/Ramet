@@ -28,6 +28,8 @@ describe('凭证白名单', () => {
     expect(narrowedAllowed('GET', '/api/ramet/collections/c1/rows', true)).toBe(false)
     expect(narrowedAllowed('POST', '/api/ramet/rows/set', false)).toBe(true)
     expect(narrowedAllowed('POST', '/api/ramet/rows/set', true)).toBe(false)
+    expect(narrowedAllowed('POST', '/api/ramet/collections', false)).toBe(true)
+    expect(narrowedAllowed('POST', '/api/ramet/collections/c1/schema', true)).toBe(false)
     expect(narrowedAllowed('POST', '/api/ramet/pages', true)).toBe(false)
     expect(narrowedAllowed('POST', '/api/ramet/pages/abc/trash', true)).toBe(false)
     expect(narrowedAllowed('POST', '/api/ramet/memories/propose', true)).toBe(false)
@@ -36,7 +38,7 @@ describe('凭证白名单', () => {
 
 describe('工具清单与凭证上下文', () => {
   it('读写全有 / 只读只有读的；有 skill 才列 use_skill', () => {
-    expect(spaceTools(false, false)).toEqual(['read_page', 'read_image', 'read_collection', 'search_pages', 'edit_page', 'set_props', 'create_page', 'move_page', 'rename_page', 'trash_page', 'propose_memory'])
+    expect(spaceTools(false, false)).toEqual(['read_page', 'read_image', 'read_collection', 'search_pages', 'edit_page', 'set_props', 'create_collection', 'edit_collection', 'create_page', 'move_page', 'rename_page', 'trash_page', 'propose_memory'])
     expect(spaceTools(true, true)).toEqual(['read_page', 'read_image', 'read_collection', 'search_pages', 'use_skill'])
   })
 

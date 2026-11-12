@@ -406,14 +406,23 @@ export async function ensureNumbers(pool: Pool, collectionId: string): Promise<v
 
 // ---------- 建 ----------
 
-export type NewCollection = { id: string; spaceId: string; parentId: string | null; ownerId: string; inline: boolean; title: string }
+export type NewCollection = {
+  id: string
+  spaceId: string
+  parentId: string | null
+  ownerId: string
+  inline: boolean
+  title: string
+  /** 先写好的整份文档（agent 建合集时初始结构已经演练进去了，collections/ai-schema.ts）；缺省 = newCollectionDoc */
+  doc?: Y.Doc
+}
 
 /** 建集合：先写整份文档（标题 + 「状态」属性 + 默认表格视图），再建页面行与 collections 行（同一事务）——
  *  建页时不可能有活连接，「先写内容、再让页面可被发现」才没有竞态（同 writeDocState 的约定）。
  *  id 可由客户端给（内联集合先插块后建）；已被占用（含回收站里的）返回 false */
 export async function createCollection(pool: Pool, input: NewCollection): Promise<boolean> {
   if ((await pool.query(PAGE_ID_TAKEN, [input.id])).rows.length > 0) return false
-  await writeDocState(pool, `page:${input.id}`, newCollectionDoc(input.title))
+  await writeDocState(pool, `page:${input.id}`, input.doc ?? newCollectionDoc(input.title))
   try {
     await withTransaction(pool, async (client) => {
       await client.query(INSERT_COLLECTION_PAGE, [input.id, input.parentId, input.ownerId, input.spaceId, input.title])

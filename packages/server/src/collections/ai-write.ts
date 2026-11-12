@@ -7,7 +7,7 @@
 
 import type { Pool } from 'pg'
 import { findOption, isPropId, isReverseRelation, TITLE_NAME, type CollectionProp, type CollectionSchema } from '@ramet/shared/collection-model'
-import { TYPE_NAMES } from './ai-read.js'
+import { TYPE_NAMES } from './ai-names.js'
 import { memberRows, spaceMembers, type CollectionPage } from './store.js'
 
 export type AiSet = { ok: true; set: Record<string, unknown> } | { ok: false; error: string }
@@ -23,7 +23,7 @@ const COMPUTED = new Set(['created_time', 'edited_time', 'created_by', 'edited_b
 
 const fail = (error: string): { ok: false; error: string } => ({ ok: false, error })
 const isEmpty = (v: unknown): boolean => v === null || v === undefined || (typeof v === 'string' && v.trim() === '') || (Array.isArray(v) && v.length === 0)
-const listing = (names: string[]): string => {
+export const listing = (names: string[]): string => {
   const shown = names.slice(0, NAMES_SHOWN).map((n) => `「${n}」`).join('、')
   return names.length > NAMES_SHOWN ? `${shown} 等 ${names.length} 个` : shown
 }
@@ -35,19 +35,38 @@ function items(value: unknown): unknown[] {
   return [value]
 }
 
-function optionOf(prop: CollectionProp, raw: unknown): string | { error: string } {
+/** 选项按 id 或名字认（trim 后全等）；对不上 = 原因（列出可选的） */
+export function optionOf(prop: CollectionProp, raw: unknown): string | { error: string } {
   const key = String(raw).trim()
   const id = findOption(prop, key)?.id ?? prop.options.find((o) => o.name.trim() === key)?.id
   if (id) return id
   return { error: `属性「${prop.name}」没有选项「${key}」${prop.options.length ? `，可选：${listing(prop.options.map((o) => o.name))}` : '（还没有任何选项）'}` }
 }
 
-type Lookups = {
+/** 名字查找（一次请求里查一次、缓存住）：空间成员、某个合集的行（只认同空间的合集，失效的关联可能指到了别的空间） */
+export type Lookups = {
   members(): Promise<Map<string, string>>
   rowsOf(collectionId: string): Promise<Array<{ id: string; title: string }>>
 }
 
-async function personOf(prop: CollectionProp, raw: unknown, look: Lookups): Promise<string | { error: string }> {
+export function lookups(pool: Pool, collection: CollectionPage): Lookups {
+  let members: Map<string, string> | undefined
+  const rows = new Map<string, Array<{ id: string; title: string }>>()
+  return {
+    members: async () => (members ??= await spaceMembers(pool, collection.space_id)),
+    rowsOf: async (id) => {
+      const cached = rows.get(id)
+      if (cached) return cached
+      const inSpace = (await pool.query('SELECT 1 FROM live_pages WHERE id = $1 AND space_id = $2', [id, collection.space_id])).rowCount
+      const found = inSpace ? (await memberRows(pool, id)).map((r) => ({ id: r.id, title: r.title })) : []
+      rows.set(id, found)
+      return found
+    },
+  }
+}
+
+/** 成员按用户 id 或用户名（不分大小写）认 */
+export async function personOf(prop: CollectionProp, raw: unknown, look: Lookups): Promise<string | { error: string }> {
   const key = String(raw).trim()
   const members = await look.members()
   if (members.has(key)) return key
@@ -57,7 +76,7 @@ async function personOf(prop: CollectionProp, raw: unknown, look: Lookups): Prom
 }
 
 /** 关联到的行：page:<id>（可带「标题」）、行 id，或对方合集里唯一的标题 */
-async function rowOf(prop: CollectionProp, target: string, raw: unknown, look: Lookups): Promise<string | { error: string }> {
+export async function rowOf(prop: CollectionProp, target: string, raw: unknown, look: Lookups): Promise<string | { error: string }> {
   const key = String(raw).trim()
   const ref = /^page:([^\s「#]+)/.exec(key)?.[1] ?? (UUID.test(key) ? key : null)
   if (ref) return ref
@@ -126,20 +145,7 @@ export async function aiSet(
   raw: unknown,
 ): Promise<AiSet> {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return fail('props 要写成 { 属性名: 值 }')
-  let members: Map<string, string> | undefined
-  const rows = new Map<string, Array<{ id: string; title: string }>>()
-  const look: Lookups = {
-    members: async () => (members ??= await spaceMembers(pool, collection.space_id)),
-    rowsOf: async (id) => {
-      const cached = rows.get(id)
-      if (cached) return cached
-      // 关联只能指向同一个空间的合集；别的空间的不去读（失效的关联可能指到了那里）
-      const inSpace = (await pool.query('SELECT 1 FROM live_pages WHERE id = $1 AND space_id = $2', [id, collection.space_id])).rowCount
-      const found = inSpace ? (await memberRows(pool, id)).map((r) => ({ id: r.id, title: r.title })) : []
-      rows.set(id, found)
-      return found
-    },
-  }
+  const look = lookups(pool, collection)
   const set: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
     const name = key.trim()

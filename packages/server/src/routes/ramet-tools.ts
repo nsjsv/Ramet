@@ -99,7 +99,7 @@ export type ToolHost = {
 }
 
 /** 读页面 / 读图片 / 改页面三个基础工具 + 读写合集 + 知识中枢；run_agent 与 use_skill 按凭证 / 空间再加（见 GET /api/ramet/tools） */
-const BASE_TOOLS = ['read_page', 'read_image', 'edit_page', 'read_collection', 'set_props', 'search_pages', 'create_page', 'move_page', 'rename_page', 'trash_page']
+const BASE_TOOLS = ['read_page', 'read_image', 'edit_page', 'read_collection', 'set_props', 'create_collection', 'edit_collection', 'search_pages', 'create_page', 'move_page', 'rename_page', 'trash_page']
 
 type Granted = { user: { id: string; role: 'admin' | 'user' }; ctx: GrantCtx }
 
@@ -183,6 +183,33 @@ export function rametToolRoutes(
   /** 要等人批准的工具弹的卡：空间 AI 的只给叫它的人批（别的成员看得到这一页，但这是他叫的、按他的权限执行） */
   const onlyInvoker = (g: Granted): { only?: string } => (g.ctx.space ? { only: g.user.id } : {})
 
+  /** 新建的页 / 合集放在哪：给了父页（可带 page: / collection: 记号）要存在、可写、在凭证的空间里；缺省 = 当前页下；
+   *  没绑页面 = 空间顶层（空间 AI 是它的空间，其余是发起人的个人空间）。kind = 父页的种类（父页是合集时 create_page 建的是一行） */
+  async function placeFor(
+    g: Granted,
+    raw: unknown,
+  ): Promise<{ parentId: string | null; spaceId: string; kind: string | null } | { status: 400 | 403 | 404 | 500; error: string }> {
+    const parentId = typeof raw === 'string' && raw ? raw.replace(/^(collection|page):/, '') : g.ctx.pageId
+    let spaceId: string
+    let kind: string | null = null
+    if (parentId) {
+      const parent = await writablePage(g.user, parentId, g.ctx.space)
+      if (!('page' in parent)) return parent
+      if (!parent.page.space_id) return { status: 400, error: 'parent has no space' }
+      spaceId = parent.page.space_id
+      kind = parent.page.kind
+    } else if (g.ctx.space) {
+      // 空间 AI 没绑页面时建在它的空间顶层，不建到叫它的人的个人空间
+      spaceId = g.ctx.space
+    } else {
+      const personal = await myPersonalSpaceId(pool, g.user.id)
+      if (!personal) return { status: 500, error: 'personal space unavailable' }
+      spaceId = personal
+    }
+    if (!(await parentOk(pool, g.user, parentId, spaceId))) return { status: 400, error: 'parent not found' }
+    return { parentId, spaceId, kind }
+  }
+
   // 合集的读写（collection-tools.ts）：凭证、空间收窄与审批都用这里的
   const collectionTools = {
     pool,
@@ -192,7 +219,16 @@ export function rametToolRoutes(
     ...(notify ? { notify } : {}),
     granted: async (c: Context) => {
       const g = await granted(pool, c)
-      return g ? { user: g.user, ...(g.ctx.space ? { space: g.ctx.space } : {}), guard: (what: string, run: () => Promise<Outcome>) => guard(c, g, what, run) } : null
+      if (!g) return null
+      return {
+        user: g.user,
+        ...(g.ctx.space ? { space: g.ctx.space } : {}),
+        guard: (what: string, run: () => Promise<Outcome>) => guard(c, g, what, run),
+        parent: async (raw: unknown) => {
+          const place = await placeFor(g, raw)
+          return 'error' in place ? { status: place.status === 500 ? 400 : place.status, error: place.error } : { parentId: place.parentId, spaceId: place.spaceId }
+        },
+      }
     },
   }
   const createRow = rowCreator(collectionTools)
@@ -314,35 +350,22 @@ export function rametToolRoutes(
     const title = typeof body.title === 'string' ? body.title.trim() : ''
     if (!title) return c.json({ error: 'title required' }, 400)
     const text = typeof body.text === 'string' ? body.text.trim() : ''
-    const parentId = typeof body.parentId === 'string' && body.parentId ? body.parentId.replace(/^(collection|page):/, '') : g.ctx.pageId
-    let spaceId: string
-    if (parentId) {
-      const parent = await writablePage(g.user, parentId, g.ctx.space)
-      if (!('page' in parent)) return c.json({ error: parent.error }, parent.status)
-      if (!parent.page.space_id) return c.json({ error: 'parent has no space' }, 400)
-      // 父页是合集：建的是一行，走与界面建行同一条路（带属性值、排在末尾、取号）
-      if (parent.page.kind === 'collection') {
-        const row = await createRow(g.user, g.ctx.space, parentId, body.props)
-        if ('error' in row) return c.json({ error: row.error }, row.status)
-        return guard(c, g, `在合集「${row.collection.title || '无标题'}」里新建一行「${title}」`, async () => {
-          const id = await row.create(title, text)
-          if (!id) return { status: 404, body: { error: 'parent not found' } }
-          extra.created?.(parentId, [id], g.user.id)
-          notify?.()
-          return { status: 200, body: { id, title, parentId } }
-        })
-      }
-      spaceId = parent.page.space_id
-    } else if (g.ctx.space) {
-      // 空间 AI 没绑页面时建在它的空间顶层，不建到叫它的人的个人空间
-      spaceId = g.ctx.space
-    } else {
-      const personal = await myPersonalSpaceId(pool, g.user.id)
-      if (!personal) return c.json({ error: 'personal space unavailable' }, 500)
-      spaceId = personal
+    const place = await placeFor(g, body.parentId)
+    if ('error' in place) return c.json({ error: place.error }, place.status)
+    const { parentId, spaceId } = place
+    // 父页是合集：建的是一行，走与界面建行同一条路（带属性值、排在末尾、取号）
+    if (parentId && place.kind === 'collection') {
+      const row = await createRow(g.user, g.ctx.space, parentId, body.props)
+      if ('error' in row) return c.json({ error: row.error }, row.status)
+      return guard(c, g, `在合集「${row.collection.title || '无标题'}」里新建一行「${title}」`, async () => {
+        const id = await row.create(title, text)
+        if (!id) return { status: 404, body: { error: 'parent not found' } }
+        extra.created?.(parentId, [id], g.user.id)
+        notify?.()
+        return { status: 200, body: { id, title, parentId } }
+      })
     }
     if (body.props !== undefined) return c.json({ error: 'props 只在父页是合集时能用（新建的是合集里的一行）' }, 400)
-    if (!(await parentOk(pool, g.user, parentId, spaceId))) return c.json({ error: 'parent not found' }, 400)
     return guard(c, g, `新建页面「${title}」`, async () => {
       const id = randomUUID()
       await insertPage(id, g.user, parentId, spaceId, title, text)
