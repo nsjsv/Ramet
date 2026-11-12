@@ -4,6 +4,7 @@
 // 这里放两边都要的东西：连接与请求的类型、提示词、模型列表、模型错误文案（describeModelError）。
 // 服务器只做中转，不记录正文（日志里只有错误类别和状态码）。这个文件不引 pi：连接表、目录这些轻量模块会引它。
 
+import type { ModelUsage } from './ai-usage.js'
 import { createSafeFetch, isUnsafeEndpointError, type SafeFetch, type SafeFetchDeps } from './endpoint-guard.js'
 
 export type QuickKind = 'rewrite' | 'draft' | 'composer' | 'code' | 'command' | 'reply'
@@ -25,7 +26,8 @@ export type ModelRequest = ModelConnection & {
 }
 
 /** 内部事件流：文本增量 / 结束（reason 已归一：end_turn | max_tokens | refusal | 其它原样） */
-export type ModelChunk = { type: 'delta'; text: string } | { type: 'stop'; reason: string }
+/** usage：这次调用花了多少（站点通道在流结束时给一次，记账用；本地通道没有） */
+export type ModelChunk = { type: 'delta'; text: string } | { type: 'stop'; reason: string } | { type: 'usage'; usage: ModelUsage }
 
 /** 可注入的模型调用（测试里换成假的；signal 被 abort 时必须尽快结束） */
 export type QuickModelCall = (req: ModelRequest, signal: AbortSignal) => AsyncIterable<ModelChunk>

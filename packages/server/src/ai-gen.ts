@@ -20,6 +20,7 @@ import { extractTitle, loadDocForRead, pageAccess, type DocWriter } from './coll
 import { fragmentToMarkdown } from './markdown-out.js'
 import { failureOf, piModel, type PiStream } from './pi-models.js'
 import { describeModelError, type Probe } from './quick.js'
+import { recordUsage, type ModelUsage } from './ai-usage.js'
 
 /** 上下文里这一页正文最多这么多字 */
 const CONTEXT_MAX = 30_000
@@ -97,16 +98,31 @@ async function setState(deps: AiGenDeps, user: User, pageId: string, blockId: st
 }
 
 /** 用这个人的模型连接问一次（非流式收齐）：AI 块与 AI 属性共用。失败抛 Error（原因已抹 key） */
-export async function generateText(deps: Pick<AiGenDeps, 'pool' | 'stream' | 'secretKey'>, userId: string, system: string, user: string, max = OUTPUT_MAX): Promise<string> {
+export async function generateText(
+  deps: Pick<AiGenDeps, 'pool' | 'stream' | 'secretKey'>,
+  userId: string,
+  /** 记账的来源：AI 块 / AI 属性 */
+  source: 'ai_gen' | 'ai_prop',
+  system: string,
+  user: string,
+  max = OUTPUT_MAX,
+): Promise<string> {
   const conn = await connectionOf(deps, userId)
   if (!conn) throw new Error('还没配模型连接：到设置里加一套')
   const probe: Probe = {}
   const signal = AbortSignal.timeout(TIMEOUT_MS)
   const context = normalizeContext({ systemPrompt: system, messages: [{ role: 'user', content: user, timestamp: Date.now() }] })
+  // 出错之前已经花掉的也记（上游报了才有）
+  const spend = (usage: ModelUsage): Promise<void> =>
+    recordUsage(deps.pool, { payerId: userId, actorId: userId, source, model: conn.model, requests: 1, ...usage })
   let text = ''
   for await (const ev of deps.stream(conn, piModel(conn), context, { hideThinking: true, signal, probe })) {
     if (ev.type === 'text_delta' && ev.delta) text += ev.delta
-    else if (ev.type === 'error') throw new Error(describeModelError(failureOf(ev.error, probe), conn.apiKey).message)
+    else if (ev.type === 'done') await spend(ev.message.usage)
+    else if (ev.type === 'error') {
+      await spend(ev.error.usage)
+      throw new Error(describeModelError(failureOf(ev.error, probe), conn.apiKey).message)
+    }
     if (text.length > max) break
   }
   return text.slice(0, max).trim()
@@ -128,7 +144,7 @@ export async function runAiGen(deps: AiGenDeps, user: User, pageId: string, bloc
     await setState(deps, user, pageId, blockId, 'running', '')
     let text: string
     try {
-      text = await generateText(deps, user.id, SYSTEM, `这一页的标题：${extractTitle(doc) || '无标题'}\n\n这一页的内容：\n<page>\n${page}\n</page>\n\n块的要求：${prompt}`)
+      text = await generateText(deps, user.id, 'ai_gen', SYSTEM, `这一页的标题：${extractTitle(doc) || '无标题'}\n\n这一页的内容：\n<page>\n${page}\n</page>\n\n块的要求：${prompt}`)
     } catch (err) {
       const reason = err instanceof Error && err.message ? err.message : '生成失败'
       await setState(deps, user, pageId, blockId, 'failed', reason)

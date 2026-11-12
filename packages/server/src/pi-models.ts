@@ -21,6 +21,7 @@ import {
 import { stream as anthropicStream, type AnthropicEffort } from '@earendil-works/pi-ai/api/anthropic-messages'
 import { stream as openaiStream } from '@earendil-works/pi-ai/api/openai-completions'
 import { ANTHROPIC_MODELS } from '@earendil-works/pi-ai/providers/anthropic.models'
+import { emptyUsage } from './ai-usage.js'
 import { createSafeFetch, type SafeFetch, type SafeFetchDeps } from './endpoint-guard.js'
 import {
   isKnownAnthropic,
@@ -199,9 +200,12 @@ export function createModelCaller(deps: SafeFetchDeps = {}): QuickModelCall {
     for await (const ev of events) {
       if (ev.type === 'text_delta' && ev.delta) yield { type: 'delta', text: ev.delta }
       else if (ev.type === 'done') {
+        if (!emptyUsage(ev.message.usage)) yield { type: 'usage', usage: ev.message.usage }
         yield { type: 'stop', reason: ev.reason === 'length' ? 'max_tokens' : 'end_turn' }
         return
       } else if (ev.type === 'error') {
+        // 出错 / 被拒 / 中止之前已经花掉的也要记账
+        if (!emptyUsage(ev.error.usage)) yield { type: 'usage', usage: ev.error.usage }
         if (ev.reason === 'aborted' || signal.aborted) throw abortError()
         if (isRefusal(ev.error)) {
           yield { type: 'stop', reason: 'refusal' }

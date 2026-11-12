@@ -66,6 +66,7 @@ export async function fillRow(deps: AiPropDeps, user: User, collectionId: string
     text = await generateText(
       deps,
       user.id,
+      'ai_prop',
       SYSTEM,
       `这一行：\n${facts}${body ? `\n\n这一行页面里的正文：\n<body>\n${body}\n</body>` : ''}\n\n这一列（${prop.name}）的要求：${prompt}`,
       TEXT_MAX,

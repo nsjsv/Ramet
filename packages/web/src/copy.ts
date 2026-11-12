@@ -13,6 +13,7 @@ import { COMMENTS_COPY } from './comments/comments-copy'
 import { DIALOG_COPY } from './ui/ui-copy'
 import { ASSISTANT_COPY } from './assistant/assistant-copy'
 import { SPACE_AI_COPY } from './assistant/space-ai-copy'
+import { USAGE_COPY } from './usage/usage-copy'
 import { AI_COPY } from './ai/ai-copy'
 import { QUICK_SETTINGS_COPY } from './quick-settings-copy'
 
@@ -26,6 +27,7 @@ export const COPY = {
   dialog: DIALOG_COPY,
   assistant: ASSISTANT_COPY,
   spaceAi: SPACE_AI_COPY,
+  usage: USAGE_COPY,
   ai: AI_COPY,
   untitled: '无标题',
   /** 浏览器标签页标题里空标题页的叫法 */

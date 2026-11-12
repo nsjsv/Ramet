@@ -6,6 +6,7 @@ import { quickApi, type AiConnection } from './quick-api'
 import { openSettings } from './settings-bus'
 import { Card, Row } from './ui/form-kit'
 import { Select } from './ui/Select'
+import { SpaceAiUsageCard } from './usage/UsageView'
 
 const C = COPY.spaceAi
 
@@ -15,7 +16,14 @@ const C = COPY.spaceAi
  * - 成员 / 只读成员：只看开没开、叫什么（空间列表里就有，不另发请求）。 */
 export default function SpaceAiCard({ space, onChanged }: { space: Space; onChanged: () => void }) {
   if (space.is_personal) return null
-  return space.my_role === 'owner' ? <OwnerCard space={space} onChanged={onChanged} /> : <MemberCard space={space} />
+  if (space.my_role !== 'owner') return <MemberCard space={space} />
+  // 用量只给 owner：成员叫空间 AI 花的是他的模型连接
+  return (
+    <>
+      <OwnerCard space={space} onChanged={onChanged} />
+      <SpaceAiUsageCard spaceId={space.id} />
+    </>
+  )
 }
 
 function MemberCard({ space }: { space: Space }) {

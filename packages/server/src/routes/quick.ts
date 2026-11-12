@@ -54,6 +54,7 @@ import { thinkingLevels } from '../agents/drivers/assistant/options.js'
 import type { Resolver } from '../endpoint-guard.js'
 import { defaultModelCatalog, findModel, type ModelCatalog } from '../model-catalog.js'
 import { createModelCaller } from '../pi-models.js'
+import { recordUsage } from '../ai-usage.js'
 import {
   LocalQuickError,
   QUICK_SYSTEM_PROMPT,
@@ -376,7 +377,7 @@ export function quickRoutes(pool: Pool, deps: QuickDeps = {}, local?: LocalQuick
     try {
       for await (const chunk of call({ ...conn, system: TEST_SYSTEM, user: 'ping', maxTokens: TEST_MAX_TOKENS }, signal)) {
         if (chunk.type === 'delta') reply = (reply + chunk.text).slice(0, 80)
-        else if (chunk.reason === 'refusal') return c.json({ ok: false, code: 'refusal', message: '模型拒绝了这个请求' })
+        else if (chunk.type === 'stop' && chunk.reason === 'refusal') return c.json({ ok: false, code: 'refusal', message: '模型拒绝了这个请求' })
       }
       return c.json({ ok: true, reply: reply.trim() })
     } catch (err) {
@@ -433,6 +434,8 @@ export function quickRoutes(pool: Pool, deps: QuickDeps = {}, local?: LocalQuick
     let open: (signal: AbortSignal) => AsyncIterable<ModelChunk>
     // 这次请求用的 key：错误文案里出现的要抹掉（describeModelError）；本地通道不用 key
     let apiKey: string | null = null
+    // 站点通道的模型（记账用）；本地通道花的是用户自己机器上的订阅，不记
+    let model: string | null = null
     if (settings.channel === 'local') {
       // 本地通道：经 connector 在用户自己的机器上用 agent 跑一次（受限会话）。能不能用只看机器授权（assertCanUse），与 key 无关
       if (!local) return c.json({ error: 'local agent unavailable', message: '服务器没有启用本地通道' }, 409)
@@ -463,6 +466,7 @@ export function quickRoutes(pool: Pool, deps: QuickDeps = {}, local?: LocalQuick
         throw err
       }
       apiKey = conn.apiKey
+      model = conn.model
       const req = { ...conn, system: QUICK_SYSTEM_PROMPT, user: buildUserMessage(input) }
       open = (signal) => call(req, signal)
     }
@@ -482,6 +486,11 @@ export function quickRoutes(pool: Pool, deps: QuickDeps = {}, local?: LocalQuick
       let stopReason = 'end_turn'
       try {
         for await (const chunk of open(signal)) {
+          // 用量先记（客户端走了也已经花掉了）
+          if (chunk.type === 'usage') {
+            if (model) await recordUsage(pool, { payerId: user.id, actorId: user.id, source: 'quick', model, requests: 1, ...chunk.usage })
+            continue
+          }
           if (clientGone) return
           if (chunk.type === 'stop') {
             stopReason = chunk.reason

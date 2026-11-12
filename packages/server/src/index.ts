@@ -24,6 +24,7 @@ import { PAGE_CHANGES_PRUNE_MS, prunePageChanges } from './page-sync.js'
 import { blocksRoutes } from './routes/blocks.js'
 import { spacesRoutes } from './routes/spaces.js'
 import { spaceAiRoutes, watchSpaceAiConnections } from './routes/space-ai.js'
+import { aiUsageRoutes } from './routes/ai-usage.js'
 import { importRoutes } from './routes/import.js'
 import { boardsRoutes } from './routes/boards.js'
 import { collectionRoutes } from './routes/collections.js'
@@ -321,6 +322,8 @@ export function startServer(
   )
   // 空间 AI 的配置（每条路由自带 requireAuth）：改了经同一个广播让在线端重拉空间列表（列表里带 ai）
   app.route('/', spaceAiRoutes(pool, () => notifyPagesChanged(hocuspocus)))
+  // AI 使用量（每条路由自带 requireAuth）
+  app.route('/', aiUsageRoutes(pool))
   // 目录树路由：目录 / 条目变更不广播，但删目录（树）会把页面移入回收站，页面树要跟着变，所以注入同一份页面广播回调
   app.route(
     '/',

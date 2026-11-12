@@ -27,6 +27,7 @@ import { DriverBase } from '../base.js'
 import { forStorage, isStoredHistory, userTurn } from './history.js'
 import { PROVIDER_ID, resolveChoice, type AssistantChoice, type AssistantThinking, type ResolvedChoice } from './options.js'
 import { userTimeZone } from '../../../triggers/store.js'
+import { recordUsage } from '../../../ai-usage.js'
 import { ASSISTANT_SYSTEM_PROMPT, clockLine, SPACE_AI_SYSTEM_PROMPT } from './prompt.js'
 import { agentTools, AssistantTools, resultFace, startFace } from './tools.js'
 
@@ -108,6 +109,8 @@ type StepBook = { used: Set<string>; open: Map<string, { stepId: string; input: 
 /** 一轮里各次模型请求的用量合计；一次都没报就是没有（不补 0） */
 class UsageSum {
   private sum: { input: number; output: number; cacheRead: number; cacheWrite: number } | null = null
+  /** 报了用量的模型请求次数（记账用） */
+  requests = 0
 
   add(u: Usage): void {
     const s = (this.sum ??= { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 })
@@ -115,6 +118,12 @@ class UsageSum {
     s.output += u.output
     s.cacheRead += u.cacheRead
     s.cacheWrite += u.cacheWrite
+    this.requests++
+  }
+
+  /** 这一轮的合计（记账用；没报过用量 = null） */
+  raw(): { input: number; output: number; cacheRead: number; cacheWrite: number } | null {
+    return this.sum
   }
 
   total(): TurnUsage | undefined {
@@ -356,6 +365,19 @@ export class AssistantDriver extends DriverBase {
     } finally {
       signal.removeEventListener('abort', stop)
       s.messages = agent.state.messages.filter((m): m is Message => m.role !== 'system')
+      // 记账：停止 / 出错时已经花掉的也算。花的是连接主人的额度（空间 AI 是空间 owner 的），叫它的人另记
+      const spent = usage.raw()
+      if (spent) {
+        await recordUsage(this.deps.pool, {
+          payerId: resolved.row?.user_id ?? s.userId,
+          actorId: s.userId,
+          spaceId: s.spaceId,
+          source: s.spaceId ? 'space_ai' : 'genet',
+          model: conn.model,
+          requests: usage.requests,
+          ...spent,
+        })
+      }
     }
     const last = s.messages.findLast((m): m is AssistantMessage => m.role === 'assistant')
     if (signal.aborted || last?.stopReason === 'aborted') return result('cancelled')

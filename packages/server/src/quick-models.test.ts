@@ -5,6 +5,7 @@ import http from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createModelCaller } from './pi-models.js'
+import type { ModelUsage } from './ai-usage.js'
 import {
   QUICK_SYSTEM_PROMPT,
   UpstreamFailure,
@@ -61,14 +62,16 @@ const toLocal: Resolver = async () => [{ address: '127.0.0.1', family: 4 }]
 // 放行本机地址（上游是本机服务），防护本身的行为在 endpoint-guard.test.ts 里测
 const localCaller = () => createModelCaller({ resolve: toLocal, transport: http, forbidden: () => false })
 
-async function collect(it: AsyncIterable<ModelChunk>): Promise<{ text: string; stop: string | null }> {
+async function collect(it: AsyncIterable<ModelChunk>): Promise<{ text: string; stop: string | null; usage: ModelUsage | null }> {
   let text = ''
   let stop: string | null = null
+  let usage: ModelUsage | null = null
   for await (const c of it) {
     if (c.type === 'delta') text += c.text
+    else if (c.type === 'usage') usage = c.usage
     else stop = c.reason
   }
-  return { text, stop }
+  return { text, stop, usage }
 }
 
 
@@ -110,7 +113,7 @@ describe('OpenAI 兼容：流式调用', () => {
       res.end()
     })
     const out = await collect(localCaller()(req(up.port), new AbortController().signal))
-    expect(out).toEqual({ text: '你好，世界', stop: 'end_turn' })
+    expect(out).toEqual({ text: '你好，世界', stop: 'end_turn', usage: null })
     const got = up.seen[0]!
     expect(got.url).toBe('/v1/chat/completions')
     expect(got.headers.authorization).toBe('Bearer sk-test-1234')
@@ -127,9 +130,22 @@ describe('OpenAI 兼容：流式调用', () => {
     const mk = (finish: string) =>
       upstream((_req, res) => res.end(`data: {"id":"c1","choices":[{"index":0,"delta":{"content":"x"},"finish_reason":"${finish}"}]}\n\ndata: [DONE]\n\n`))
     const length = await mk('length')
-    expect(await collect(localCaller()(req(length.port), new AbortController().signal))).toEqual({ text: 'x', stop: 'max_tokens' })
+    expect(await collect(localCaller()(req(length.port), new AbortController().signal))).toEqual({ text: 'x', stop: 'max_tokens', usage: null })
     const filtered = await mk('content_filter')
     expect((await collect(localCaller()(req(filtered.port), new AbortController().signal))).stop).toBe('refusal')
+  })
+
+  it('上游报了用量：流结束前交出一块 usage（记账用）', async () => {
+    const up = await upstream((_req, res) =>
+      res.end(
+        'data: {"id":"c1","choices":[{"index":0,"delta":{"content":"x"},"finish_reason":"stop"}]}\n\n' +
+          'data: {"id":"c1","choices":[],"usage":{"prompt_tokens":5,"completion_tokens":3}}\n\n' +
+          'data: [DONE]\n\n',
+      ),
+    )
+    const out = await collect(localCaller()(req(up.port), new AbortController().signal))
+    expect(out.stop).toBe('end_turn')
+    expect(out.usage).toMatchObject({ input: 5, output: 3 })
   })
 
   it('HTTP 错误按状态码映射：401/403 = key 无效，429 = 超限，其它带状态码且上游原文只留前 300 字', async () => {
@@ -222,7 +238,7 @@ describe('Anthropic 协议：自定义地址经防护版 fetch，官方地址直
       res.end(anthropicReply())
     })
     const out = await collect(localCaller()(req(up.port), new AbortController().signal))
-    expect(out).toEqual({ text: '你好！', stop: 'end_turn' })
+    expect(out).toEqual({ text: '你好！', stop: 'end_turn', usage: expect.objectContaining({ input: 1, output: 2 }) })
     const got = up.seen[0]!
     expect(got.url.split('?')[0]).toBe('/anthropic/v1/messages')
     expect(got.headers['x-api-key']).toBe('sk-test-1234')
@@ -284,7 +300,7 @@ describe('Anthropic 协议：自定义地址经防护版 fetch，官方地址直
     })
     try {
       const official: ModelRequest = { ...base, protocol: 'anthropic', baseUrl: null, model: 'claude-opus-5-5' }
-      expect(await collect(createModelCaller()(official, new AbortController().signal))).toEqual({ text: '你好！', stop: 'end_turn' })
+      expect(await collect(createModelCaller()(official, new AbortController().signal))).toEqual({ text: '你好！', stop: 'end_turn', usage: expect.objectContaining({ input: 1, output: 2 }) })
     } finally {
       vi.unstubAllGlobals()
     }

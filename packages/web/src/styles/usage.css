@@ -1,0 +1,144 @@
+/* ---------- AI 使用量（usage/UsageView.tsx）：总数块 + 每天一根柱子 + 分组表格 ----------
+ * 柱子用强调色（单一系列），4px 圆角只在顶上、底贴基线，柱间留 2px；网格与横轴退到背景里（细线、浅字）。
+ * 数字一律用正文 / 次级文字色，不用柱子的颜色。 */
+
+.usage-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 12px 14px 14px;
+}
+
+.usage-tiles {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.usage-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: var(--r-sm);
+  background: var(--bg-sunk);
+  min-width: 0;
+}
+
+.usage-tile-value {
+  font-size: var(--t-md);
+  font-weight: 600;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.usage-tile-label {
+  font-size: var(--t-xs);
+  color: var(--ink-3);
+}
+
+.usage-chart-title {
+  margin-bottom: 6px;
+  font-size: var(--t-xs);
+  font-weight: 600;
+  color: var(--ink-3);
+}
+
+.usage-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 96px;
+  border-bottom: 1px solid var(--line);
+}
+
+/* 整列是悬停区：比柱子大，矮柱子也好指 */
+.usage-bar-col {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+  border-radius: 4px 4px 0 0;
+}
+
+.usage-bar-col:hover {
+  background: var(--accent-tint);
+}
+
+.usage-bar {
+  width: 100%;
+  border-radius: 4px 4px 0 0;
+  background: var(--accent);
+}
+
+.usage-axis {
+  position: relative;
+  height: 16px;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.usage-axis span {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+/* 头尾两个标签贴边，不被裁出卡片 */
+.usage-axis span:first-child {
+  transform: none;
+  left: 0 !important;
+}
+
+.usage-axis span:last-child:not(:first-child) {
+  transform: none;
+  left: auto !important;
+  right: 0;
+}
+
+.usage-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--t-sm);
+}
+
+.usage-table th {
+  text-align: left;
+  font-size: var(--t-xs);
+  font-weight: 500;
+  color: var(--ink-3);
+  padding: 4px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.usage-table td {
+  padding: 6px 0;
+  color: var(--ink);
+  border-bottom: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
+
+.usage-table tr:last-child td {
+  border-bottom: none;
+}
+
+.usage-table th:not(:first-child),
+.usage-table td:not(:first-child) {
+  text-align: right;
+  width: 88px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-2);
+}
+
+@media (max-width: 640px) {
+  .usage-tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

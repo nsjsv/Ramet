@@ -4,6 +4,7 @@ import { API_PAGE_FIELDS } from './page-icon.js'
 import { COMMENT_SWITCHES_DDL, COMMENTS_DDL } from './comments/schema.js'
 import { COLLECTION_NUMBERS_DDL } from './collections/schema.js'
 import { ASSISTANT_DDL } from './agents/drivers/assistant/schema.js'
+import { AI_USAGE_DDL } from './ai-usage-schema.js'
 import { TRIGGERS_DDL } from './triggers/schema.js'
 
 // 页面变更日志（page-sync.ts）的 UPDATE 触发列：对外字段（API_PAGE_FIELDS，含 position）+ 图标两列 + 封面三列 + deleted_at。
@@ -632,6 +633,7 @@ CREATE TABLE IF NOT EXISTS agent_session_files (
 );
 ${COLLECTION_NUMBERS_DDL}
 ${ASSISTANT_DDL}
+${AI_USAGE_DDL}
 -- 排队消息发送时用户正在看的页面(Genet 浮窗:「这页」指它,派发时写进 user_message 的 ctx 属性);空 = 没有
 ALTER TABLE send_queue ADD COLUMN IF NOT EXISTS ctx TEXT NOT NULL DEFAULT '';
 ${TRIGGERS_DDL}
