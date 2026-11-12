@@ -6,6 +6,8 @@ import { purgePageRows } from '../page-purge.js'
 import { requireAuth, type AuthEnv, type AuthUser } from '../auth.js'
 import { extractTitle, insertSnapshot, loadDocFromDb, materializeSnapshot, writeDocState, type DocWriter } from '../collab.js'
 import { linkInParent, needsEntry, unlinkFromParent } from '../page-entry.js'
+import { adoptIntoCollection, intoCollectionError } from '../collections/adopt.js'
+import type { Projector } from '../collections/projector.js'
 import { newPageDoc } from '../agents/markdown.js'
 import { myPersonalSpaceId } from '../clone.js'
 import { iconParams, isIconSourceMime, parseIconInput, SELECT_ICON_SOURCE_MIME, SET_PAGE_ICON, apiPageColumns, rowIcon, toApiPage } from '../page-icon.js'
@@ -251,6 +253,8 @@ export function pagesRoutes(
   write?: DocWriter,
   /** 建了一页（父页是合集时就是新增了一行，交给自动化；不等它） */
   created?: (parentId: string | null, pageIds: readonly string[], userId: string) => void,
+  /** 页面拖进合集时补成一行要落副本（collections/adopt.ts）；缺省 = 不补（只有不走这类写的测试才缺省） */
+  projector?: Pick<Projector, 'flushRow'>,
 ) {
   // 该子应用只有 /api/pages 一族路由,鉴权统一挂全量,未登录一律 401
   const app = new Hono<AuthEnv>()
@@ -373,6 +377,7 @@ export function pagesRoutes(
       cover?: unknown
     }
     let written = false
+    let adopted = false
     // 全宽：页面属性，写了就广播（协作者的列宽跟着变）
     if (body.full_width !== undefined) {
       if (typeof body.full_width !== 'boolean') return c.json({ error: 'full_width must be a boolean' }, 400)
@@ -431,6 +436,8 @@ export function pagesRoutes(
         return c.json({ error: 'parent_id not found' }, 400)
       }
       if (!(await validParent(pool, id, parentId))) return c.json({ error: 'parent_id would create a cycle' }, 400)
+      const refusal = await intoCollectionError(pool, page.kind, parentId)
+      if (refusal) return c.json({ error: refusal }, 400)
       await pool.query(SET_PARENT, [parentId, id])
       written = true
       // 换了父页：新父页正文补入口（补不上把父子关系改回去再报错），旧父页的入口摘掉
@@ -447,11 +454,16 @@ export function pagesRoutes(
         }
         if (page.kind === 'doc') await unlinkFromParent(pool, { write, user }, oldParent, id)
       }
+      // 拖进了合集：补成一行（属性按目标改写、排到末尾、取号），之后不按侧栏下标重排（行的顺序是合集的手动顺序）
+      if (write && projector) {
+        const deps = { pool, write, getLiveDoc: getLiveDoc ?? (() => undefined), projector }
+        adopted = await adoptIntoCollection({ deps, ...(created ? { rowsAdded: created } : {}) }, user, id, oldParent, parentId, 'user')
+      }
     }
     // 同级排序(侧栏拖拽插入线):index = 该页在目标父页子列表(按展示序)里的落点下标。
     // 摘除自身后钳制插入,整列重写 position 0..n-1(单事务);不传 index 不动排序。
     // 只传 index 不传 parent_id = 同父内重排
-    if (body.index !== undefined) {
+    if (body.index !== undefined && !adopted) {
       if (typeof body.index !== 'number' || !Number.isInteger(body.index) || body.index < 0) {
         return c.json({ error: 'index must be a non-negative integer' }, 400)
       }

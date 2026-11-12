@@ -304,6 +304,7 @@ export function startServer(
       () => notifyBoardsChanged(hocuspocus),
       createDocWriter(() => hocuspocus),
       rowsAddedTo,
+      projector,
     ),
   )
   // 块文本端点（提及快照）：同样活文档优先，补 id 插件刚写入的块 id 立即可读

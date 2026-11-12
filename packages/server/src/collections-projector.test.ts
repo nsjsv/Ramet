@@ -169,12 +169,16 @@ describe('自愈与写后即读', () => {
     await eventually(() => expect(updatesOf(deltas, row.id).at(-1)?.row.has_body).toBe(false))
   })
 
-  test('拖进集合、还没有副本的行：文档加载时补一行空副本（副本行的存在就是「投影过」）', async () => {
+  test('还没有副本的行（没走补行的路径进来的）：文档加载时补一行空副本（副本行的存在就是「投影过」）；侧栏拖进来的当场就有', async () => {
     const t = await team()
     const c = await newCollection(t)
-    const page = await postPage(t.owner.cookie, { space_id: t.spaceId, title: '拖进来的' })
+    const dragged = await postPage(t.owner.cookie, { space_id: t.spaceId, title: '拖进来的' })
+    expect((await call('PATCH', `/api/pages/${dragged}`, t.owner.cookie, { parent_id: c.id })).status).toBe(200)
+    expect(await replicaOf(dragged)).toEqual({})
+    // 直接改库进集合（导入、恢复这类不经 collections/adopt.ts 的路径）：要等文档加载时自愈
+    const page = await postPage(t.owner.cookie, { space_id: t.spaceId, title: '改库进来的' })
     const outside = await postPage(t.owner.cookie, { space_id: t.spaceId, title: '不在集合里' })
-    expect((await call('PATCH', `/api/pages/${page}`, t.owner.cookie, { parent_id: c.id })).status).toBe(200)
+    await pool.query('UPDATE pages SET parent_id = $1 WHERE id = $2', [c.id, page])
     expect(await replicaOf(page)).toBeUndefined()
     await connect(`page:${page}`, t.member.cookie)
     await connect(`page:${outside}`, t.member.cookie)

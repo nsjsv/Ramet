@@ -67,12 +67,14 @@ export const tools = [
     name: 'move_page',
     define: () => ({
       name: 'move_page',
-      description: '把一个页面（连同它的子页面）移到另一个页面之下；不给 parentId 或给 null = 移到空间顶层。只能在同一个空间内移动，不能移到自己的子孙之下。',
+      description:
+        '把一个页面（连同它的子页面）移到另一个页面之下；不给 parentId 或给 null = 移到空间顶层。只能在同一个空间内移动，不能移到自己的子孙之下。' +
+        'parentId 是合集时页面就成了那个合集的一行（排在末尾）：从别的合集挪来的行，属性按同名同类型对应过去，对不上的值丢掉；只有普通页面能放进合集。',
       inputSchema: {
         type: 'object',
         properties: {
           pageId: { type: 'string', description: '要移动的页面 id' },
-          parentId: { type: ['string', 'null'], description: '新的父页面 id；null / 缺省 = 空间顶层' },
+          parentId: { type: ['string', 'null'], description: '新的父页面 id（或合集的 collection:<id>）；null / 缺省 = 空间顶层' },
         },
         required: ['pageId'],
       },

@@ -62,6 +62,7 @@ import { heartbeatJson, consentTitle, type Consent, type Outcome } from './ramet
 import { markHandled } from './mark-handled.js'
 import { commentReplyRoutes } from './comment-reply.js'
 import { collectionToolRoutes, rowCreator } from './collection-tools.js'
+import { adoptIntoCollection, intoCollectionError } from '../collections/adopt.js'
 import type { Projector } from '../collections/projector.js'
 import type { GenetCalls } from '../comments/genet-call.js'
 import type { PostedComment } from '../triggers/sources/comment.js'
@@ -357,12 +358,19 @@ export function rametToolRoutes(
     const found = await writablePage(g.user, id, g.ctx.space)
     if (!('page' in found)) return c.json({ error: found.error }, found.status)
     const body = (await c.req.json().catch(() => ({}))) as { parentId?: unknown }
-    const parentId = typeof body.parentId === 'string' && body.parentId ? body.parentId : null
+    const parentId = typeof body.parentId === 'string' && body.parentId ? body.parentId.replace(/^(collection|page):/, '') : null
     if (parentId && (await outsideSpace(g, parentId))) return c.json({ error: 'parent not found' }, 404)
     if (!(await parentOk(pool, g.user, parentId, found.page.space_id))) return c.json({ error: 'parent not found (or in another space)' }, 400)
     if (!(await validParent(pool, id, parentId))) return c.json({ error: 'parent would create a cycle' }, 400)
+    const refusal = await intoCollectionError(pool, found.page.kind, parentId)
+    if (refusal) return c.json({ error: refusal }, 400)
     return guard(c, g, `把《${found.page.title || '无标题'}》移到${parentId ? ` page:${parentId} 之下` : '空间顶层'}`, async () => {
       await pool.query(SET_PARENT, [parentId, id])
+      // 挪进了合集：补成一行，同侧栏拖进合集（collections/adopt.ts）
+      if (extra.write && extra.projector) {
+        const deps = { pool, write: extra.write, getLiveDoc: getLiveDoc ?? (() => undefined), projector: extra.projector }
+        await adoptIntoCollection({ deps, ...(extra.created ? { rowsAdded: extra.created } : {}) }, g.user, id, found.page.parent_id, parentId, 'agent')
+      }
       notify?.()
       return { status: 200, body: { ok: true, title: found.page.title, parentId } }
     })

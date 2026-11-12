@@ -110,6 +110,8 @@ const SELECT_TAIL = `SELECT bool_or(position IS NULL) AS unplaced, max(position)
 const SELECT_ORDER = `SELECT id, position, created_at FROM live_pages WHERE parent_id = $1 AND kind = 'doc' AND id <> $2`
 const RENUMBER = `UPDATE pages SET position = v.pos FROM unnest($1::text[], $2::float8[]) AS v(id, pos) WHERE pages.id = v.id`
 const SET_POSITION = 'UPDATE pages SET position = $1 WHERE id = $2'
+/** 经改父页进来的行还在这个集合下（锁住它，排位置与取号期间不被挪走） */
+const LOCK_ADOPTED = `SELECT 1 FROM pages WHERE id = $1 AND parent_id = $2 AND kind = 'doc' AND deleted_at IS NULL FOR UPDATE`
 
 // ---------- 读 ----------
 
@@ -481,6 +483,20 @@ export async function createRow(pool: Pool, input: NewRow): Promise<{ id: string
   if (created) return created
   await pool.query(DELETE_DOC_STATE, [docName])
   return null
+}
+
+/** 经「改父页」进了集合的行（collections/adopt.ts）：排到末尾、副本换成按目标定义改写好的值（同 moveRowsTo），
+ *  集合有编号属性就取号；一个事务。行文档里的 props 由调用方随后经 DocWriter 写。集合不在了 / 行已经不在它下面 = false */
+export async function adoptRow(pool: Pool, collectionId: string, rowId: string, mapped: Record<string, PropValue>, numbered: boolean): Promise<boolean> {
+  return withTransaction(pool, async (client) => {
+    if ((await client.query(LOCK_LIVE_COLLECTION, [collectionId])).rows.length === 0) return false
+    await client.query(LOCK_ORDER, [orderKey(collectionId)])
+    if ((await client.query(LOCK_ADOPTED, [rowId, collectionId])).rows.length === 0) return false
+    await client.query(SET_POSITION, [await tailPosition(client, collectionId, rowId), rowId])
+    await writeReplica(client, rowId, mapped, true)
+    if (numbered) await assignNumbers(client, collectionId)
+    return true
+  })
 }
 
 // ---------- 批量：复制、挪到别的集合（routes/collections.ts 的 rows/duplicate、rows/move） ----------

@@ -357,7 +357,8 @@ function TreeItem({ node, depth, ...cb }: TreeCallbacks & { node: PageNode; dept
   const dropOk = (): boolean => {
     if (cb.readOnly) return false
     const pg = activeDrag()
-    if (pg) return !pg.subtree.has(node.id)
+    // 合集里只放普通页（放进去就是一行），合集 / skill 页拖到合集上不亮（服务端同样 400）
+    if (pg) return !pg.subtree.has(node.id) && !(isCollection && pg.kind !== 'doc')
     // 拖块进页对集合禁用：集合页没有正文
     return !isCollection && blockDragTarget(node.id) !== null
   }
