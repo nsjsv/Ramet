@@ -52,6 +52,7 @@ import CommentMargin from './comments/CommentMargin'
 import PageDiscussion from './comments/PageDiscussion'
 import type { CommentCtx } from './comments/CommentThread'
 import { closeDrawer, toggleDrawer } from './comments/comments-store'
+import { isPrivatePage } from './page-area'
 
 // 聊天 / 文档双模式的存储与优先级在 view-mode.ts（页面自己的记忆 > 全局默认 > 文档），这里只消费。
 
@@ -65,6 +66,8 @@ interface Props {
   canPublish?: boolean
   /** 是该空间 owner：评论里能删别人的（服务端同样判定） */
   spaceOwner?: boolean
+  /** 我在这个空间是访客：能编辑也不能再分享、不能用 AI（服务端同样判定） */
+  guest?: boolean
   /** 标题 fragment 一变就上报（Shell 乐观更新侧栏页面树）；
    *  与 500ms 防抖 REST 写库相互独立，且必须稳定引用（否则 effect 重建 ws 连接） */
   onTitleLive: (id: string, title: string) => void
@@ -78,6 +81,7 @@ export default function EditorPage({
   readOnly = false,
   canPublish = false,
   spaceOwner = false,
+  guest = false,
 }: Props) {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
@@ -123,7 +127,7 @@ export default function EditorPage({
   // agent SSE 状态（status/permission/commands；server 未就绪保持 idle，UI 降级）
   const agentState = useAgentEvents(id)
   // 消息 chip 的「来源/路径」不需要会话，但「模型/思考」来自 agent 的会话 —— 进页面就预备（同一所有者）
-  usePrepareAgent(id, agentState, readOnly)
+  usePrepareAgent(id, agentState, readOnly || guest)
   // 换页恢复目标页的模式（含首挂载，重复 no-op 无害）
   useEffect(() => {
     setChatMode(readViewMode(id))
@@ -408,8 +412,8 @@ export default function EditorPage({
   const commentsOn = !!id && page?.kind === 'doc' && !chatMode && (commentKinds.inline || commentKinds.page)
   const getSchema = useCallback(() => getBodyView()?.state.schema, [getBodyView])
   const commentCtx = useMemo<CommentCtx>(
-    () => ({ readOnly: false, spaceId: page?.space_id ?? null, canModerate: spaceOwner, getSchema, tick: editorTick }),
-    [page?.space_id, spaceOwner, getSchema, editorTick],
+    () => ({ readOnly: false, spaceId: page?.space_id ?? null, privatePage: isPrivatePage(page), canModerate: spaceOwner, getSchema, tick: editorTick }),
+    [page?.space_id, page?.private_owner, spaceOwner, getSchema, editorTick],
   )
   // 评论深链要等正文和服务端同步过（本地缓存先出的内容里可能还没有锚定的字）
   const commentsReady = useCallback(() => {
@@ -434,6 +438,8 @@ export default function EditorPage({
         pageId={id}
         peers={peers}
         canPublish={canPublish}
+        // 过程页跟着对话页、skill 页属于空间：都不单独分享（服务端同样拒绝）
+        canShare={!readOnly && !guest && page?.kind === 'doc'}
         published={page?.published ?? false}
         includeRuns={page?.publish_includes_runs ?? false}
         onChanged={onChanged}
@@ -535,7 +541,7 @@ export default function EditorPage({
           />
         )}
         {/* 审批弹条（两种视图都渲染：权限请求不能只在一种视图里可批）；viewer 只读不渲染 */}
-        {id && !readOnly && <AgentPanel pageId={id} state={agentState} />}
+        {id && !readOnly && !guest && <AgentPanel pageId={id} state={agentState} />}
       </div>
       {/* 页内查找/替换浮条：视口级浮层（fixed 顶栏下方），viewer 也能查找（替换 action 自带 editable 守卫） */}
       <FindBar />

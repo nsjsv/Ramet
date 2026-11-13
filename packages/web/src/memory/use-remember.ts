@@ -10,7 +10,7 @@ export type RememberHint = { text: string; error: boolean }
 
 const HINT_MS = 3500
 
-export function useRemember(spaceId: string | undefined | null, canWrite: boolean) {
+export function useRemember(pageId: string | undefined, canWrite: boolean) {
   const [hint, setHint] = useState<RememberHint | null>(null)
   const timer = useRef<number | undefined>(undefined)
   const busy = useRef(false)
@@ -32,16 +32,15 @@ export function useRemember(spaceId: string | undefined | null, canWrite: boolea
       }
       if (busy.current) return true // 上一条还在路上：连按回车不重复记
       busy.current = true
-      void remember(spaceId, content).then((res) => {
+      if (!pageId) return true
+      void remember(pageId, content).then((res) => {
         busy.current = false
-        if (res.ok) {
-          onDone()
-          show({ text: COPY.memory.command.saved, error: false })
-        } else show({ text: res.message, error: true })
+        if (res.ok) onDone()
+        show({ text: res.message, error: !res.ok })
       })
       return true
     },
-    [spaceId, canWrite, show],
+    [pageId, canWrite, show],
   )
 
   return { hint, run }

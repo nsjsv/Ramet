@@ -11,6 +11,7 @@ import { syncInlineCollections } from './collections/inline.js'
 import { refreshFavoriteArchives } from './favorites.js'
 import { syncPageLinks } from './page-links.js'
 import { flushEditMarks, trackEdits } from './edit-marks.js'
+import { pageAccess } from './page-visibility.js'
 
 // 压缩阈值取 200：每攒 200 条增量才做一次全量快照重写，写放大约为全量方案的 1/200；
 // 加载时按 seq 重放 200 条小增量是内存内 applyUpdate，耗时无感。
@@ -29,13 +30,6 @@ const PUT_SNAPSHOT = `INSERT INTO yjs_documents (doc_name, state, updated_at)
   VALUES ($1, $2, now()::text)
   ON CONFLICT (doc_name) DO UPDATE SET state = EXCLUDED.state, updated_at = EXCLUDED.updated_at`
 const DELETE_UPDATES = 'DELETE FROM yjs_updates WHERE doc_name = $1'
-// 活页面视图：已回收页面在这里打不上，与不存在同响应（null），ws 与 REST 共用同一条闸门。
-// LEFT JOIN 保住“页面存在”这一行（m.role 为 null 即非成员）；可见性唯一依据是 space_members
-// （页面恒属一个空间），admin 不例外
-const GET_PAGE_ACCESS = `SELECT m.role AS role
-  FROM live_pages p
-  LEFT JOIN space_members m ON m.space_id = p.space_id AND m.user_id = $2
-  WHERE p.id = $1`
 // 标题播种用：Yjs 里还没有标题时，从 DB 把 title 补进文档
 const SELECT_PAGE_TITLE = 'SELECT title FROM live_pages WHERE id = $1'
 
@@ -454,22 +448,8 @@ export function notifyPreviewsChanged(hocuspocus: Hocuspocus, pageId: string): v
 // doc 名只认 page:<uuid>；crypto.randomUUID 产出即全小写，不用大小写兼容（集合的投影器同用这一条）
 export const PAGE_DOC_NAME = /^page:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/
 
-// 页面访问角色，REST 与 ws 共用这一处判定。不存在和非成员都返回 null（不泄露存在性），
-// 成员给实际角色 owner | member | viewer，全局 admin 也不例外。
-// 入参只要 id + role：AI 凭证（page-read.ts）解出的用户没有 username 那一套，却要走同一条闸
-export async function pageAccess(
-  pool: Pool,
-  pageId: string,
-  user: { id: string; role: string },
-): Promise<'owner' | 'member' | 'viewer' | null> {
-  const { rows } = await pool.query<{ role: 'owner' | 'member' | 'viewer' | null }>(GET_PAGE_ACCESS, [
-    pageId,
-    user.id,
-  ])
-  const row = rows[0]
-  if (!row) return null // 页面不存在（JOIN 打不上）
-  return row.role
-}
+// 页面访问角色的判定在 page-visibility.ts（页面可见性的唯一出口）；这里原样导出，ws 两道闸与各处 REST 照旧从这里取
+export { pageAccess }
 
 // 每个 Hocuspocus 实例在途的增量落库。客户端（含机器人客户端）收到同步确认时，onChange 里的写库可能还没完成：
 // 关停必须等它们落完再返回（drainDocWrites），否则「回复刚写进文档就关停」时最后一笔增量可能没进库

@@ -51,6 +51,8 @@ export const tools = [
         '返回的 mention 要原样写进你的回复：它显示成任务页的链接，旁边是实时的进度。它做完或失败时 Ramet 会在对话里发一条任务通知叫你接着处理，不用等。' +
         '派不出去会返回原因，照实告诉用户。' +
         '用户点名了模型或思考程度才填 model / effort；对不上时会列出可选值，照着重填，拿不准就问用户。' +
+        '活是在某个空间里做的（改那个空间的项目、按那个空间的约定）就填 space，任务页上的 agent 会带上那个空间的约定、用那里的 skill；' +
+        '不填时 task 里 page: 提到的页恰好都在一个空间里就按那个空间。' +
         (caps.agents.length > 0
           ? `可派的 agent：${agentList(caps.agents)}。`
           : '现在没有可派的 agent（机器都不在线，或者用户还没有接入机器）。'),
@@ -72,6 +74,7 @@ export const tools = [
             type: 'string',
             description: '思考程度 / 推理强度（如 high、高）。只在用户指定了时填，没指定就不填；对不上会返回可选值',
           },
+          space: { type: 'string', description: '这件活在哪个空间里做（空间 id，见空间清单）；与空间无关的个人杂事不填' },
         },
         required: ['agent', 'title', 'task'],
       },
@@ -87,13 +90,15 @@ export const tools = [
           task: String(args.task ?? ''),
           ...(opt(args.model) ? { model: opt(args.model) } : {}),
           ...(opt(args.effort) ? { effort: opt(args.effort) } : {}),
+          ...(opt(args.space) ? { space: opt(args.space).replace(/^space:/, '') } : {}),
         },
       })
       if (declined(r)) return declined(r)
       if (broken(r)) return failure('派不出去', r)
       const out = r.json
       const applied = Array.isArray(out.applied) && out.applied.length > 0 ? `（${out.applied.map((a) => `${a.name} ${a.value}`).join(' · ')}）` : ''
-      return reply(`已派给 ${out.label}${applied}，它在任务页 page:${out.pageId} 上开跑了（不用等它做完，做完会通知你）。把这段原样写进回复：${out.mention}`)
+      const where = out.space ? `，按「${out.space}」的约定做` : ''
+      return reply(`已派给 ${out.label}${applied}${where}，它在任务页 page:${out.pageId} 上开跑了（不用等它做完，做完会通知你）。把这段原样写进回复：${out.mention}`)
     },
   },
   {

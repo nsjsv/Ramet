@@ -185,7 +185,7 @@ describe('Genet 只在自己的 Genet 页上能用', () => {
     close(h)
   })
 
-  it('@ 点名 Genet：别的页面上 400；同空间的另一个成员在别人的 Genet 页上也解析不出来（看得到这页，所以是 400 不是 404）', async () => {
+  it('@ 点名 Genet：别的页面上 400；同空间的另一个成员看不到别人的 Genet 页（它在主人的私人区，同不存在 404）', async () => {
     const h = await home()
     const requests = script(say('不该到这里'))
     const other = await connectDoc(h.otherPage, h.cookie)
@@ -197,12 +197,9 @@ describe('Genet 只在自己的 Genet 页上能用', () => {
     const bob = await login('bob')
     const space = (await pool.query<{ space_id: string }>('SELECT space_id FROM pages WHERE id = $1', [h.pageId])).rows[0]!.space_id
     await pool.query("INSERT INTO space_members (space_id, user_id, role) VALUES ($1, $2, 'member')", [space, bobId])
-    const bobDoc = await connectDoc(h.pageId, bob)
-    mentionAssistant(bobDoc.document)
-    expect((await postJson(`/api/pages/${h.pageId}/continue`, bob, {})).status).toBe(400)
-    expect((await postJson(`/api/pages/${h.pageId}/continue`, bob, { agent: ASSISTANT_ID })).status).toBe(400)
-    expect((await postJson(`/api/pages/${h.pageId}/agent-choice`, bob, { agent: ASSISTANT_ID })).status).toBe(400)
-    bobDoc.destroy()
+    expect((await postJson(`/api/pages/${h.pageId}/continue`, bob, {})).status).toBe(404)
+    expect((await postJson(`/api/pages/${h.pageId}/continue`, bob, { agent: ASSISTANT_ID })).status).toBe(404)
+    expect((await postJson(`/api/pages/${h.pageId}/agent-choice`, bob, { agent: ASSISTANT_ID })).status).toBe(404)
     expect(requests).toHaveLength(0)
     close(h)
   })

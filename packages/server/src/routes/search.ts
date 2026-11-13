@@ -1,7 +1,7 @@
 /* ---------- 全文搜索 ----------
  * GET /api/search?q=&include=agent → 对 title + content_text 做 ILIKE 子串匹配(空白分隔的每个词都要命中,
  * % _ \ 按字面),按相关度排序(标题完全相同 > 前缀 > 包含 > 只在正文;同档按正文命中次数、最近编辑),
- * 返回 [{id, title, snippet}]。可见性与 pages 列表同源:只见自己是成员的空间里的页面(搜索是列举类读路径,
+ * 返回 [{id, title, snippet}]。可见性与 pages 列表同源(page-visibility.ts):只见自己看得见的页面(搜索是列举类读路径,
  * 全局 admin 也不例外);限 50 条。snippet 在 JS 里取命中位置前后 ~60 字符(SQL 里做子串还得算偏移,不省事)。
  * 过程页(kind='run')默认不参与 —— 工具调用文本会淹没真实内容;include=agent 显式开启。skill 页(kind='skill')照常参与。 */
 
@@ -9,12 +9,13 @@ import { Hono } from 'hono'
 import type { Pool } from 'pg'
 import { requireAuth, type AuthEnv } from '../auth.js'
 import { rowIcon } from '../page-icon.js'
+import { pageVisibleSql, publicAreaSql } from '../page-visibility.js'
 
 // 每个词都要在标题或正文里出现（$4 = 各词的 ILIKE 模式）；排序：标题档位（完全相同 0 / 前缀 1 / 包含 2 / 只在正文 3）
 // → 正文里各词出现次数之和（$5 = 小写的词）→ 正文最近改动（没有就用建页时间）→ id
 const SEARCH = `SELECT id, title, content_text, icon_emoji, icon_file_id, parent_id FROM live_pages p
-  WHERE space_id IN (SELECT space_id FROM space_members WHERE user_id = $1)
-    AND ($9::text IS NULL OR space_id = $9)
+  WHERE ${pageVisibleSql('p', '$1')}
+    AND ($9::text IS NULL OR (space_id = $9 AND ${publicAreaSql('p')}))
     AND ($2 OR kind <> 'run')
     AND NOT EXISTS (
       SELECT 1 FROM unnest($4::text[]) pat WHERE NOT (p.title ILIKE pat ESCAPE '\\' OR coalesce(p.content_text, '') ILIKE pat ESCAPE '\\')
@@ -61,8 +62,8 @@ export async function searchPages(
   pool: Pool,
   user: { id: string },
   q: string,
-  /** spaceId = 只搜这个空间（空间 AI 的凭证范围）；不给 = 自己是成员的全部空间 */
-  opts: { includeAgent?: boolean; limit?: number; spaceId?: string } = {},
+  /** publicIn = 只搜这个空间的公共区（空间 AI 的凭证范围）；不给 = 自己看得见的全部 */
+  opts: { includeAgent?: boolean; limit?: number; publicIn?: string } = {},
 ): Promise<Array<{ id: string; title: string; snippet: string; icon: ReturnType<typeof rowIcon>; parent_id: string | null }>> {
   const limit = Math.min(Math.max(opts.limit ?? 50, 1), 50)
   const query = buildSearch(q)
@@ -74,7 +75,7 @@ export async function searchPages(
     icon_emoji: string | null
     icon_file_id: string | null
     parent_id: string | null
-  }>(SEARCH, [user.id, opts.includeAgent === true, limit, query.patterns, query.terms, query.full, query.prefix, query.contains, opts.spaceId ?? null])
+  }>(SEARCH, [user.id, opts.includeAgent === true, limit, query.patterns, query.terms, query.full, query.prefix, query.contains, opts.publicIn ?? null])
   // 命中带图标(下拉行显示页面身份);派生契约与页面列表同源
   const hitTerm = (text: string | null): string => query.terms.find((t) => text?.toLowerCase().includes(t)) ?? query.terms[0]!
   return rows.map((r) => ({ id: r.id, title: r.title, snippet: snippet(r.content_text, hitTerm(r.content_text)), icon: rowIcon(r), parent_id: r.parent_id }))

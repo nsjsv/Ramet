@@ -9,7 +9,7 @@ import { builtinTemplates } from './templates-builtin'
 /* ---------- 从模板新建 ----------
  * 两组：本空间的模板（页面 ⋮「设为模板」的那些，is_template）与内置模板（templates-builtin.ts）。
  * 空间模板 = 复制整页（连子页，server routes/import.ts 的 instantiate）；内置模板 = 一份 markdown 走导入端点建页。
- * 落在空间顶层或当前页下面。建好跳到新页。
+ * 落在空间顶层（我的私人区：没说放哪的新页先只给自己看）或当前页下面（跟那一页的区）。建好跳到新页。
  *
  * 入口暂时隐藏：侧栏「导入」「从模板新建」与顶栏 ⋮「设为模板」都已撤掉，
  * 本组件、服务端接口（routes/import.ts）与 api 函数保留，重新上线时只需把入口接回 Sidebar / TopBar。 */
@@ -69,7 +69,7 @@ export default function TemplatePicker({
       ) : (
         <div className="template-list">
           {templates.map((t) => (
-            <button key={t.id} className="template-row" disabled={busy !== null} onClick={() => void create(t.id, async () => (await api.instantiateTemplate(t.id, spaceId, parentId)).id)}>
+            <button key={t.id} className="template-row" disabled={busy !== null} onClick={() => void create(t.id, async () => (await api.instantiateTemplate(t.id, spaceId, parentId, parentId === null)).id)}>
               <PageIcon icon={t.icon} size="sm" placeholder />
               <span className="template-title">{t.title || '无标题'}</span>
               {busy === t.id && <span className="template-busy">正在新建…</span>}
@@ -88,7 +88,7 @@ export default function TemplatePicker({
             onClick={() =>
               void create(t.id, async () => {
                 const file = new Blob([t.markdown], { type: 'text/markdown' })
-                const result = await api.importMarkdown(spaceId, file, `${t.title}.md`, parentId)
+                const result = await api.importMarkdown(spaceId, file, `${t.title}.md`, parentId, parentId === null)
                 return result.roots[0] ?? null
               })
             }

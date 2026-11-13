@@ -17,6 +17,7 @@ import { extractTitle, loadDocForRead, PAGE_DOC_NAME } from '../../collab.js'
 import { readSchema } from '../../collections/store.js'
 import { withTransaction } from '../../db.js'
 import { takeFlushedEditors } from '../../edit-marks.js'
+import { pageVisibleSql } from '../../page-visibility.js'
 import { summaryState, type SummaryState } from '../../updates.js'
 import type { TriggerHub } from '../hub.js'
 import type { EventPayload } from '../payload.js'
@@ -53,7 +54,7 @@ function stateOf(doc: Y.Doc): SummaryState {
   return summaryState(doc, extractTitle(doc), doc.getMap('collection').size > 0)
 }
 
-// 这一页（活的 doc / 合集页）被哪些启用中的盯页面规则盯着：盯的就是它，或者连子页盯、盯的是它的祖先；主人得是这一页所在空间的成员
+// 这一页（活的 doc / 合集页）被哪些启用中的盯页面规则盯着：盯的就是它，或者连子页盯、盯的是它的祖先；主人得看得到这一页
 const SELECT_WATCHERS = `WITH RECURSIVE up(id, parent_id, n) AS (
     SELECT id, parent_id, 0 FROM live_pages WHERE id = $1 AND kind IN ('doc', 'collection')
     UNION ALL SELECT p.id, p.parent_id, up.n + 1 FROM live_pages p JOIN up ON p.id = up.parent_id WHERE up.n < 100
@@ -61,8 +62,8 @@ const SELECT_WATCHERS = `WITH RECURSIVE up(id, parent_id, n) AS (
   SELECT t.id, t.owner_id, t.config FROM agent_triggers t
   WHERE t.source = 'page_watch' AND t.enabled
     AND (t.config->>'page' = $1 OR (t.config->>'subtree' = 'true' AND t.config->>'page' IN (SELECT id FROM up)))
-    AND EXISTS (SELECT 1 FROM up JOIN live_pages p ON p.id = up.id JOIN space_members m ON m.space_id = p.space_id
-                WHERE up.n = 0 AND m.user_id = t.owner_id)`
+    AND EXISTS (SELECT 1 FROM up JOIN live_pages p ON p.id = up.id
+                WHERE up.n = 0 AND ${pageVisibleSql('p', 't.owner_id')})`
 // 编辑者按第一次出现的顺序去重
 const UPSERT_WINDOW = `INSERT INTO page_watch_windows (trigger_id, page_id, opened_at, last_at, last_editor, editors, base, depth)
   VALUES ($1, $2, $3, $3, $4, $5::text[], $6::jsonb, $7)
@@ -76,14 +77,13 @@ const SET_NEXT = `UPDATE agent_triggers t SET next_at = LEAST(w.last + $2 * inte
 const TAKE_WINDOWS = `DELETE FROM page_watch_windows WHERE trigger_id = $1
   RETURNING page_id, opened_at, last_at, last_editor, editors, base, depth`
 const SELECT_PAGES = `SELECT p.id, p.title, p.deleted_at IS NOT NULL AS trashed, par.kind = 'collection' AS row, p.parent_id, p.created_at::timestamptz AS created_at,
-    EXISTS (SELECT 1 FROM space_members m WHERE m.space_id = p.space_id AND m.user_id = $2) AS member
+    ${pageVisibleSql('p', '$2')} AS member
   FROM pages p LEFT JOIN pages par ON par.id = p.parent_id WHERE p.id = ANY($1::text[])`
 
 /** 建 / 改配置时：主人得看得到那一页，且是普通页或合集页。不行 = 原因 */
 export async function checkWatchPage(pool: Pool, ownerId: string, pageId: string): Promise<string | null> {
   const ok = await pool.query(
-    `SELECT 1 FROM live_pages p JOIN space_members m ON m.space_id = p.space_id AND m.user_id = $2
-      WHERE p.id = $1 AND p.kind IN ('doc', 'collection')`,
+    `SELECT 1 FROM live_pages p WHERE p.id = $1 AND p.kind IN ('doc', 'collection') AND ${pageVisibleSql('p', '$2')}`,
     [pageId, ownerId],
   )
   return ok.rowCount ? null : '要盯的那一页不在了，或者你看不到它'

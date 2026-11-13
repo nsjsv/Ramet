@@ -23,7 +23,7 @@ import type { EditorView } from '@milkdown/kit/prose/view'
 import { $prose } from '@milkdown/kit/utils'
 import { agentStateFor, appendUserMessage, pageAgent, runAgent, setAgentRunError } from './agent-bar'
 import { api } from '../api'
-import { parseRemember, remember, spaceOfPage } from '../memory/remember'
+import { parseRemember, remember } from '../memory/remember'
 import { messageConfigOf } from './message-blocks'
 import { findBlockIdPos } from './block-id'
 import { deleteBlockRange } from './block-delete'
@@ -142,7 +142,7 @@ export function sendLast(view: EditorView, pageId: string): boolean {
 /** 文档模式的 `>> /记住 …` 草稿：记下了就把这条草稿从文档里删掉（它不是给 agent 的消息，留着会进之后每一轮的上下文），
  *  没记下（只读 / 超限 / 空内容）草稿原样留着，原因走运行错误条 */
 async function rememberDraft(view: EditorView, pageId: string, key: string, content: string): Promise<void> {
-  const res = await remember(spaceOfPage(pageId), content)
+  const res = await remember(pageId, content)
   if (!res.ok) {
     setAgentRunError(pageId, res.message)
     return

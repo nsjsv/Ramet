@@ -467,8 +467,8 @@ export default function ChatView({
   const layout = useAttachLayout()
   const pageRef = useRef<HTMLDivElement>(null)
   useEffect(() => (pageRef.current ? wireAttHover(pageRef.current) : undefined), [])
-  // `/记住 内容` 是 Ramet 自己的命令，直接记进这个空间的公共记忆，不发给 agent（memory/remember.ts）
-  const remember = useRemember(pages?.find((p) => p.id === pageId)?.space_id, !readOnly)
+  // `/记住 内容` 是 Ramet 自己的命令，不发给 agent：Genet 页上进个人记忆，别的页进这个空间的公共记忆（服务端按页面定，memory/remember.ts）
+  const remember = useRemember(pageId, !readOnly)
   // 气泡装饰按需读页面的空间 / 创建者（发言人头像），经 ref 取最新 pages，免得 pages 变化重建对话视图
   const pagesRef = useRef(pages)
   useEffect(() => {

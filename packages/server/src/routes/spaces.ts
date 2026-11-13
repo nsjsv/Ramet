@@ -3,6 +3,7 @@ import { Hono, type Context } from 'hono'
 import type { Pool } from 'pg'
 import { withTransaction } from '../db.js'
 import { purgeSpace } from '../page-purge.js'
+import { SELECT_SUBTREE_ALL } from '../page-trash.js'
 import { requireAuth, USERNAME_MAX, type AuthEnv, type AuthUser } from '../auth.js'
 import { deleteMemberConnectors } from '../agents/connectors.js'
 import { SPACE_AI_DEFAULT_NAME, SPACE_AI_JOIN } from '../agents/space-ai.js'
@@ -19,7 +20,7 @@ type SpaceRow = {
 // 列表/详情行:my_role = 我在该空间的实际角色;非成员为 null(列表只含自己参与的空间)
 type MySpaceRow = SpaceRow & { my_role: 'owner' | 'member' | 'viewer' | null }
 // 列表另带空间 AI 的两列(生效判定见 agents/space-ai.ts 的 SPACE_AI_JOIN),响应里收成 ai 字段
-type ListedSpaceRow = MySpaceRow & { ai_name: string | null; ai_enabled: boolean }
+type ListedSpaceRow = MySpaceRow & { ai_name: string | null; ai_enabled: boolean; ai_chat: string | null }
 
 // avatar = 头像的 files.id(NULL = 没上传):对话气泡按发言人画头像,成员之间可见
 type MemberRow = {
@@ -42,8 +43,10 @@ type InvitePreviewRow = {
 
 // ---------- SQL 常量 ----------
 
+// ai_chat：我和这个空间的空间 AI 的直接对话页（活的才给；agents/space-ai-chat.ts），前端据此认出这页上能叫空间 AI
 const SELECT_MY_SPACES = `SELECT s.id, s.name, s.owner_id, s.is_personal, s.created_at, m.role AS my_role,
-    sa.name AS ai_name, sc.id IS NOT NULL AS ai_enabled
+    sa.name AS ai_name, sc.id IS NOT NULL AS ai_enabled,
+    (SELECT ch.page_id FROM space_ai_chats ch JOIN live_pages cp ON cp.id = ch.page_id WHERE ch.space_id = s.id AND ch.user_id = $1) AS ai_chat
   FROM spaces s JOIN space_members m ON m.space_id = s.id AND m.user_id = $1
   ${SPACE_AI_JOIN}
   ORDER BY s.created_at, s.id`
@@ -60,6 +63,9 @@ const SELECT_MEMBERS = `SELECT m.user_id, u.username, m.role, m.created_at, u.av
   WHERE m.space_id = $1 ORDER BY m.created_at, m.user_id`
 const SELECT_MEMBER_ROLE = 'SELECT role FROM space_members WHERE space_id = $1 AND user_id = $2'
 const DELETE_MEMBER = 'DELETE FROM space_members WHERE space_id = $1 AND user_id = $2'
+// 他在这个空间收到的分享（含回收站里的页）：分享不要求对方是成员，不删的话移除了他照样看得到被分享过的页
+export const DELETE_SHARES_IN_SPACE = `DELETE FROM page_shares s USING pages p
+  WHERE p.id = s.page_id AND p.space_id = $1 AND s.user_id = $2 RETURNING s.page_id`
 const SELECT_MEMBER = `SELECT m.user_id, u.username, m.role, m.created_at, u.avatar_file_id AS avatar
   FROM space_members m JOIN users u ON u.id = m.user_id WHERE m.space_id = $1 AND m.user_id = $2`
 const SELECT_USER_BY_NAME = 'SELECT id FROM users WHERE username = $1'
@@ -101,10 +107,12 @@ function canAdminister(user: AuthUser, space: { owner_id: string }): boolean {
 // GET 与邀请创建/撤销/预览不通知。
 // dropConnectors:成员被移出空间 / 降为只读 / 空间被删时,他在该空间接入的机器已在库里删掉,这里断开它们的在线连接
 // (注入 hub.closeOne,测试可不传保持原签名)。reason 是给 connector 的断开原因。
+// sharesCleared:成员被移出 / 退出时他在该空间收到的分享已删,这些页(分享的根连同子树)要提醒收件箱、断开协同连接
 export function spacesRoutes(
   pool: Pool,
   notify?: () => void,
   dropConnectors?: (connectorIds: string[], reason: string) => void,
+  sharesCleared?: (pageIds: string[]) => void,
 ) {
   const app = new Hono<AuthEnv>()
   // 全族路由都要求登录,鉴权统一挂全量
@@ -116,9 +124,9 @@ export function spacesRoutes(
     // ai:这个空间的空间 AI(启用没有 + 名字,@ 菜单与回复抬头不另拉);个人空间也有,没配过就是没启用
     const rows = await pool.query<ListedSpaceRow>(SELECT_MY_SPACES, [user.id])
     return c.json(
-      rows.rows.map(({ ai_name, ai_enabled, ...row }) => ({
+      rows.rows.map(({ ai_name, ai_enabled, ai_chat, ...row }) => ({
         ...row,
-        ai: { enabled: ai_enabled, name: ai_name ?? SPACE_AI_DEFAULT_NAME },
+        ai: { enabled: ai_enabled, name: ai_name ?? SPACE_AI_DEFAULT_NAME, chat: ai_chat },
       })),
     )
   })
@@ -198,13 +206,15 @@ export function spacesRoutes(
     // 目标不在空间里,或目标是 owner(owner 不可被移除也不可自退,退群语义不适用于空间的最后锚点)
     if (!target) return c.json({ error: 'not a member' }, 400)
     if (target.role === 'owner') return c.json({ error: 'owner cannot be removed' }, 400)
-    // 删成员行与删他在该空间接入的机器同一事务(确认配对建机器时对成员行 FOR SHARE,两者互斥,不会漏出无主的机器);
-    // 在线连接在提交后断开。退出空间 = 他的机器不再属于这个空间
-    const dropped = await withTransaction(pool, async (client) => {
+    // 删成员行与删他在该空间接入的机器、他收到的分享同一事务(确认配对建机器时对成员行 FOR SHARE,两者互斥,不会漏出无主的机器);
+    // 在线连接在提交后断开。退出空间 = 他的机器不再属于这个空间,分享给他的页也不再给他(移除就是彻底移除,不留成访客)
+    const { dropped, shared } = await withTransaction(pool, async (client) => {
       await client.query(DELETE_MEMBER, [id, targetId])
-      return deleteMemberConnectors(client, id, targetId)
+      const shared = (await client.query<{ page_id: string }>(DELETE_SHARES_IN_SPACE, [id, targetId])).rows.map((r) => r.page_id)
+      return { dropped: await deleteMemberConnectors(client, id, targetId), shared }
     })
     dropConnectors?.(dropped, '已不是空间成员')
+    if (shared.length > 0) sharesCleared?.((await pool.query<{ id: string }>(SELECT_SUBTREE_ALL, [shared])).rows.map((r) => r.id))
     notify?.()
     return c.json({})
   })

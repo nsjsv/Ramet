@@ -1,4 +1,4 @@
-/* ---------- 浮窗里的 Genet 对话：Genet 页的第二个编辑器会话 + 完整的对话视图 ----------
+/* ---------- 浮窗里的 Genet 对话：Genet 页的第二个编辑器会话 + 完整的对话视图（空间 AI 页的直接对话也用这一套） ----------
  * 和对话页的聊天模式是同一套：ChatView（消息、步骤、审批卡、@ 提及、附件）+ 兜底的审批弹条。正文编辑器只是 ChatView 的底座
  * （schema 与写入通道），挂在一个藏着的节点上，用对话档（page-session.ts），不装页面外壳。
  * 输入框桥、运行错误、审批宿主都按页面分存，当前页开着聊天模式也互不串。浮窗关掉 = 本组件卸载 = 会话、连接一起拆掉。 */
@@ -53,6 +53,7 @@ export default function AssistantChat({
   username,
   onPagesChanged,
   focus,
+  spaceAi,
 }: {
   pageId: string
   pages: Page[] | null
@@ -60,6 +61,8 @@ export default function AssistantChat({
   onPagesChanged: () => void
   /** 浮窗：用户正在看的那一页（消息默认关于它）；AI 页里的整页对话没有 */
   focus?: { id: string; title: string } | null
+  /** 和空间 AI 的直接对话（空间 AI 页复用这一套）：不给「去配模型连接」的引导（用的是空间 owner 的连接），空对话的提示换成它的 */
+  spaceAi?: { emptyHint: string }
 }) {
   const session = usePageSession(pageId, { profile: 'chat', username, readOnly: false, pages })
   const agentState = useAgentEvents(pageId)
@@ -70,7 +73,7 @@ export default function AssistantChat({
   }, [pageId])
   return (
     <div className="assistant-scroll" {...{ [CHAT_SCROLLER_ATTR]: '' }}>
-      <ModelGuide />
+      {!spaceAi && <ModelGuide />}
       <div ref={session.rootRef} className="chat-hidden" aria-hidden="true" />
       <ChatView
         pageId={pageId}
@@ -81,7 +84,7 @@ export default function AssistantChat({
         getDoc={session.getDoc}
         tick={session.tick}
         agentState={agentState}
-        emptyHint={C.empty}
+        emptyHint={spaceAi?.emptyHint ?? C.empty}
         focusPage={focus?.id ?? null}
         placeholder={focus ? C.focusPlaceholder : undefined}
       />

@@ -1,7 +1,7 @@
 // ---------- 来源：评论找我（source = 'comment'） ----------
 // 有人新开评论串 / 回复之后（routes/comments.ts、Genet 代发的回复 routes/comment-reply.ts），找出该让谁知道：
 // 与收件箱的评论条目同一个判定（comments/inbox.ts 的 commentReason）—— @了他 > 他在串里发过言 > 首条且他是页面创建者；
-// 页面活着、他仍是那个空间的成员、那种评论在页面上开着、不是他自己写的。每个人按他自己的规则各发一次事件。
+// 页面活着、他仍看得到这页（page-visibility.ts）、那种评论在页面上开着、不是他自己写的。每个人按他自己的规则各发一次事件。
 // 触发者是写评论的人，规则主人是被找的人，所以事件恒是外来的：通知标「外来」，Genet 之后动手要先问主人。
 // 空间 AI 写的回复（authorId = null）照样找人：它是别人叫起来的，内容同样当外来的看。
 // 幂等键 comment:<评论 id>：同一条评论重复调只落一次记录。调用方不等这里（hub.background）：评论接口不能被派发拖慢。
@@ -9,6 +9,7 @@
 import type { Pool } from 'pg'
 import { SPACE_AI_DEFAULT_NAME, SPACE_AI_ID, spaceAiNames } from '../../agents/space-ai.js'
 import { KIND_ENABLED, plainMentions } from '../../comments/store.js'
+import { pageViewersJoin } from '../../page-visibility.js'
 import { commentReason } from '../../comments/inbox.js'
 import { aiState, commentMatches, dormantReason, ensureBuiltin, REASON_TEXT, type CommentReason } from '../builtin.js'
 import type { TriggerHub } from '../hub.js'
@@ -25,7 +26,7 @@ const SELECT_RECIPIENTS = `SELECT m.user_id, why.reason, p.space_id, p.title, c.
   FROM comments c
   JOIN comment_threads t ON t.id = c.thread_id
   JOIN live_pages p ON p.id = t.page_id
-  JOIN space_members m ON m.space_id = p.space_id
+  ${pageViewersJoin('p', 'm')}
   LEFT JOIN users u ON u.id = c.author_id
   CROSS JOIN LATERAL (SELECT ${commentReason('m.user_id')} AS reason) why
   WHERE c.id = $1 AND c.deleted_at IS NULL AND ${KIND_ENABLED} AND c.author_id IS DISTINCT FROM m.user_id AND why.reason IS NOT NULL

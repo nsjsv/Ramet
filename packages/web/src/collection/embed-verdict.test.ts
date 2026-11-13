@@ -60,4 +60,6 @@ test('块里能不能改集合：宿主页可写且集合所在空间里不是 v
   expect(blockWritable(true, spaces, 'ro')).toBe(false) // 别的空间粘贴来的链接视图，我在那边是 viewer
   expect(blockWritable(false, spaces, 'mine')).toBe(false) // 宿主页只读
   expect(blockWritable(true, spaces, 'other')).toBe(true) // 不在我的空间列表里：同 PageRoute 口径，以服务端为准
+  expect(blockWritable(true, spaces, 'ro', true)).toBe(true) // 在我的列表里：按页算好的（可编辑的分享）为准
+  expect(blockWritable(true, spaces, 'mine', false)).toBe(false)
 })

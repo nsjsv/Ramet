@@ -152,7 +152,7 @@ export type MarkOut = { at: string; user_id: string | null; actor: 'user' | 'age
 
 /** GET /api/pages/:id/edit-marks：整页 + 全部块一次给齐（进页面预取，菜单打开即画，不等请求） */
 export type EditMarks = {
-  /** 头像文件 id：只在编辑者仍是该页所在空间成员时给（头像只给有共同空间的人看） */
+  /** 头像文件 id：只在编辑者仍是该页所在空间的成员或访客时给（头像只给有共同空间的人看） */
   users: Record<string, { username: string; avatar: string | null }>
   page: MarkOut | null
   blocks: Record<string, MarkOut>
@@ -164,7 +164,10 @@ const SELECT_MARKS = 'SELECT block_id, edited_at, user_id, actor, actor_agent FR
 // 整页没有精确记录（老页面 / 不经协同写入的过程页）：回落最新一条版本快照
 const SELECT_SNAPSHOT_MARK = `SELECT '' AS block_id, created_at::timestamptz AS edited_at, author_id AS user_id, actor, actor_agent
   FROM page_snapshots WHERE page_id = $1 ORDER BY created_at DESC, id DESC LIMIT 1`
-const SELECT_USERS = `SELECT u.id, u.username, CASE WHEN m.user_id IS NOT NULL THEN u.avatar_file_id END AS avatar
+// 头像只给同一空间里的人看：编辑者是成员，或是这个空间的访客（有页分享给他）
+const SELECT_USERS = `SELECT u.id, u.username, CASE WHEN m.user_id IS NOT NULL OR EXISTS (
+      SELECT 1 FROM page_shares s JOIN live_pages p ON p.id = s.page_id WHERE s.user_id = u.id AND p.space_id = $2
+    ) THEN u.avatar_file_id END AS avatar
   FROM users u LEFT JOIN space_members m ON m.space_id = $2 AND m.user_id = u.id
   WHERE u.id = ANY($1::text[])`
 

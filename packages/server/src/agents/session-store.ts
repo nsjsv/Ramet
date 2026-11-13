@@ -144,8 +144,10 @@ export async function persistTurnSession(
   seen: string,
   userId: string,
   tools: ToolProfile,
+  /** Genet 带过的跨空间上下文（别的 agent 不传，记录形状不变） */
+  context?: Record<string, string>,
 ): Promise<void> {
-  const record = { sessionId, cwd, seen, userId, tools }
+  const record = { sessionId, cwd, seen, userId, tools, ...(context ? { context } : {}) }
   await pool.query(SAVE_TURN_STATE, [pageId, agentId, JSON.stringify(record), toolOf(agentId)])
 }
 

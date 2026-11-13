@@ -185,7 +185,7 @@ describe('评论里 @空间 AI', () => {
     const asked = t.comments[0]!
     await waitFor(async () => (await callState(asked.id))?.state === 'failed')
     expect(await callState(asked.id)).toEqual({ state: 'failed', reason: SPACE_AI_OFF })
-    expect((await commentsOf(w.carol, w.pageId, t.id))[0]?.call).toEqual({ state: 'failed', reason: SPACE_AI_OFF, ai: 'AI' })
+    expect((await commentsOf(w.carol, w.pageId, t.id))[0]?.call).toEqual({ state: 'failed', reason: SPACE_AI_OFF, ai: '空间 AI' })
 
     // bob 的个人空间（没开）：手打了记号也一样
     const personal = (await (await postJson('/api/pages', w.bob, {})).json()) as { id: string }

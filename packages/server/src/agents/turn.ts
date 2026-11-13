@@ -11,11 +11,14 @@
 //   - 轮次监听只投影 RunRecord；会话级状态（命令 / 配置 / 待批审批）归会话镜像，这里只在会话建好后 bind
 //   - 带队（run.team 非空）的两种轮：计划轮 `/带队 <目标>`、执行轮（continue 带 team）。会话口径与普通对话不同，都新建会话、
 //     不复用旧的、不写会话记录，组长的提示词末尾拼带队说明（team.ts 文件头有完整口径）；没有带队时下面的路径逐字节不变
+//   - Genet：每一轮在最前面带跨空间上下文（genet-context.ts：空间清单、个人记忆、眼前的空间的约定，带过没变的不再带），
+//     全文重放不拼页面所在空间的公共记忆（Genet 页放在哪个空间不代表它在那里干活）；别的 agent 不走这条
 import { extractTitle, insertSnapshot, loadDocFromDb } from '../collab.js'
 import { NO_NAMES, deltaPrompt, resolveNames } from './catch-up.js'
 import { toolOf } from '@ramet/shared/reply-stats'
 import { ReplyWriter, lastUserMessage, lastUserMessageImages, lockedTool, redoTarget, serializeDoc } from './doc.js'
-import { canLeadTeam, NO_TEAM_LEAD } from './assistant-agent.js'
+import { canLeadTeam, isAssistantId, NO_TEAM_LEAD } from './assistant-agent.js'
+import { genetContext, withGenetContext } from './genet-context.js'
 import { SPACE_AI_NO_TEAM } from './space-ai.js'
 import { resolvePromptEnv, withMemory } from './prompt-env.js'
 import { ReplyNotFoundError, type ManagerHost, type ResolvedAgent } from './manager-types.js'
@@ -165,7 +168,14 @@ export async function runTurn(
     const opened = await useSession(entry, carried && saved && (delta !== null || adopt) ? saved.sessionId : null, cwd, tools)
     move?.settle(opened.fresh)
     sessionId = opened.sessionId
-    const text = !opened.fresh && delta !== null ? delta : teamNote ? `${replayText}\n\n${teamNote}` : replayText
+    const incremental = !opened.fresh && delta !== null
+    // Genet 的跨空间上下文：增量接着会话记录里带过的，全文重放从空的开始
+    const genet = isAssistantId(agent.id)
+      ? await genetContext(host.pool, { user, fragment, viewEnd, seen: incremental ? (saved?.seen ?? null) : null, prior: (incremental && saved?.context) || {} })
+      : null
+    const text = genet
+      ? withGenetContext(genet.text, incremental ? delta : docText)
+      : incremental ? delta : teamNote ? `${replayText}\n\n${teamNote}` : replayText
     // 带队的会话不写记录（下一轮普通对话接着用原来的会话，补发带队那几轮）；新建的先记成准备会话，发出提示词前再记看到哪一块
     if (opened.fresh && !run.team) await persistSession(host.pool, pageId, agent.id, sessionId, cwd, null, user.id, profile)
     await readySession(host, pageId, agent, entry, sessionId, opened.configOptions, user, run)
@@ -174,7 +184,7 @@ export async function runTurn(
     if (!(await bindRun(host, run, { pageId, replyId: writer.id, sessionId, agentId: agent.id, userId: user.id, cwd }))) return
     const blocks = await withImages(host.pool, [{ type: 'text', text }], lastUserMessageImages(fragment, viewEnd))
     // 发出去之前记下会话看到哪一块（本轮的回复块）：不论这一轮怎么收尾，下一轮都只补发这块之后的内容、接着这个会话
-    if (!run.team) await persistTurnSession(host.pool, pageId, agent.id, sessionId, cwd, writer.id, user.id, profile)
+    if (!run.team) await persistTurnSession(host.pool, pageId, agent.id, sessionId, cwd, writer.id, user.id, profile, genet?.record)
     prompted = true
     const res = await sendPrompt(entry, sessionId, blocks, run)
     agentFinished = true

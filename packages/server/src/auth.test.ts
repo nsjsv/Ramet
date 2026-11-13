@@ -429,7 +429,7 @@ test('删号:名下空间转给剩余成员(角色优先、加入最早),单人�
   // 预览只给数量，与真删一致
   const impact = await fetch(`${base}/api/admin/users/${victimId}/delete-impact`, { headers: { cookie: adminCookie } })
   expect(impact.status).toBe(200)
-  expect(await impact.json()).toEqual({ transferSpaces: 2, purgeSpaces: 1, purgePages: 1 })
+  expect(await impact.json()).toEqual({ transferSpaces: 2, purgeSpaces: 1, purgePages: 1, purgePrivatePages: 0 })
   const userCookie = (await login('host', 'pw')).cookie!
   expect((await fetch(`${base}/api/admin/users/${victimId}/delete-impact`, { headers: { cookie: userCookie } })).status).toBe(403)
   expect((await fetch(`${base}/api/admin/users/${crypto.randomUUID()}/delete-impact`, { headers: { cookie: adminCookie } })).status).toBe(404)

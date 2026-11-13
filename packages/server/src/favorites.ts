@@ -10,7 +10,7 @@ import { randomUUID } from 'node:crypto'
 import type { Pool } from 'pg'
 import type * as Y from 'yjs'
 import { findBlockElement } from './block-ids.js'
-import { visiblePages } from './page-visibility.js'
+import { pageVisibleSql, visiblePages } from './page-visibility.js'
 import { textOf } from './updates.js'
 
 export type FavoriteView = {
@@ -43,12 +43,11 @@ type Row = {
   created_at: Date
 }
 
-/** 这页上此刻仍有权限的人的收藏（空间成员，admin 不例外，与收藏列表的 visiblePages 同口径；
+/** 这页上此刻仍看得到它的人的收藏（admin 不例外，与收藏列表的 visiblePages 同口径；
  *  回收站里的页不刷新，存档停住） */
 const REFRESHABLE = `SELECT f.* FROM favorites f
   JOIN live_pages p ON p.id = f.page_id
-  JOIN space_members m ON m.space_id = p.space_id AND m.user_id = f.user_id
-  WHERE f.page_id = $1`
+  WHERE f.page_id = $1 AND ${pageVisibleSql('p', 'f.user_id')}`
 
 const TEXT_MAX = 200
 const LIST_MAX = 500

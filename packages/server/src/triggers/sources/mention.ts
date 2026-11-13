@@ -6,7 +6,7 @@
 // 谁 @ 的：那一块最后的编辑者（agent 写的记发起人）——还没落库的编辑先看内存里的（edit-marks.ts 的 pendingEditor），再看库里的。
 //   一次存盘里同一块有几个人改过时归给最后那个人；被 @ 的人自己就是最后编辑者时不触发（宁可漏掉，也不替自己 @ 自己发通知）。
 //   认不出编辑者的（导入、复制、模板建出来的页里本来就有的 @）记下但不触发。
-// 不触发：自己 @ 自己（含自己的 agent 写的）、被 @ 的人不是这一页所在空间的成员、页面不是 doc。
+// 不触发：自己 @ 自己（含自己的 agent 写的）、被 @ 的人看不到这一页、页面不是 doc。
 // 上线时已经有的页（mention_baseline）第一次扫描只记底，不把存量的 @ 当新的补发。
 // 存盘是热路径：文档里的集合在钩子里同步读出（之后文档可能卸载），落库与派发交给 hub.background，不挡存盘；
 // 同一页的扫描排成一条链，前后两次存盘的差集不会交错写乱。尽力而为：失败只记日志，下一次存盘按文档重新对齐。
@@ -18,6 +18,7 @@ import { isAddressable } from '@ramet/shared/block-address'
 import { PAGE_DOC_NAME } from '../../collab.js'
 import { withTransaction } from '../../db.js'
 import { pendingEditor } from '../../edit-marks.js'
+import { viewersAmong } from '../../page-visibility.js'
 import { textOf } from '../../updates.js'
 import { aiState, dormantReason, ensureBuiltin, mentionMatches } from '../builtin.js'
 import type { TriggerHub } from '../hub.js'
@@ -95,18 +96,14 @@ async function record(pool: Pool, pageId: string, pairs: MentionPair[]): Promise
   })
 }
 
-/** 一次存盘之后：对齐集合，新 @ 到的人（不是自己 @ 自己、是这一页所在空间的成员）各发一次事件 */
+/** 一次存盘之后：对齐集合，新 @ 到的人（不是自己 @ 自己、看得到这一页）各发一次事件 */
 export async function mentionsChanged(deps: MentionDeps, pageId: string, pairs: MentionPair[]): Promise<void> {
   const { pool, hub } = deps
   const rec = await record(pool, pageId, pairs)
   const fresh = rec?.added.filter((r): r is Added & { actor_id: string } => !!r.actor_id && r.actor_id !== r.user_id) ?? []
   if (!rec || fresh.length === 0) return
-  const members = new Set(
-    (await pool.query<{ user_id: string }>('SELECT user_id FROM space_members WHERE space_id = $1 AND user_id = ANY($2::text[])', [rec.spaceId, fresh.map((r) => r.user_id)])).rows.map(
-      (r) => r.user_id,
-    ),
-  )
-  const found = fresh.filter((r) => members.has(r.user_id))
+  const viewers = new Set(await viewersAmong(pool, pageId, fresh.map((r) => r.user_id)))
+  const found = fresh.filter((r) => viewers.has(r.user_id))
   if (found.length === 0) return
   deps.poke()
   const names = new Map(

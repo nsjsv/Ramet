@@ -79,6 +79,11 @@ function LastResult({ rule: r }: { rule: AutomationView }) {
 }
 
 /** 一条规则。others = 别人的规则（合集上列出来的）：写明是谁的，没有开关 / 编辑 / 删除；hideScope = 已经在挂靠页上了，不再写「挂在…」 */
+/** 规则里有没有要花 AI 额度的动作（叫 Genet、叫机器上的 agent、刷新 AI 块、填 AI 属性） */
+export function usesAi(r: Pick<AutomationView, 'actions'>): boolean {
+  return r.actions.some((a) => a.type === 'genet' || a.type === 'agent' || a.type === 'ai_gen' || a.type === 'ai_prop')
+}
+
 export function RuleRow({
   rule: r,
   zone,
@@ -114,7 +119,7 @@ export function RuleRow({
           )}
           {others && (
             <span className="ai-rule-tag" data-tip={C.here.ownerTip}>
-              {C.here.owner(r.ownerName ?? '')}
+              {C.here.owner(r.ownerName ?? '', usesAi(r))}
             </span>
           )}
           <span className="ai-timer-when">{triggerLabel(r)}</span>

@@ -103,6 +103,17 @@ export type InboxItem =
       excerpt: string
     }
 
+  // 别人把一页分享给了你：每页一条；打开那一页就算看过（同「正文里 @了你」）。actor = 分享的人（删号了 = null）
+  | {
+      type: 'share'
+      key: string
+      at: string
+      pageId: string
+      pageTitle: string
+      level: 'edit' | 'view'
+      actor: { id: string; name: string } | null
+    }
+
 export const inboxApi = {
   list: () => request<{ items: InboxItem[] }>('/api/inbox').then((r) => r.items),
   /** 打开了这一页（「做完待你看」「正文里 @了你」据此消掉） */

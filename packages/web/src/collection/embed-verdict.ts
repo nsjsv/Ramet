@@ -58,8 +58,14 @@ export function needsState(o: Pick<VerdictInput, 'pages' | 'collectionId' | 'cre
   return o.pages !== null && !!o.collectionId && !o.creating && !o.failed && !o.pages.some((p) => p.id === o.collectionId)
 }
 
-/** 块里能不能改集合（改值、属性与视图定义、改名、恢复）：宿主页可写，且集合所在空间里我不是 viewer
- *  （与 PageRoute 同一个口径 spaceReadOnly；空间未知时以服务端为准，见 space-role.ts） */
-export function blockWritable(hostEditable: boolean, spaces: readonly Space[] | null, collectionSpaceId: string | null | undefined): boolean {
-  return hostEditable && !spaceReadOnly(spaces, collectionSpaceId)
+/** 块里能不能改集合（改值、属性与视图定义、改名、恢复）：宿主页可写，且我在集合页上能写。
+ *  集合在我的页面列表里时调用方已按 PageRoute 同一口径算好（listedWritable，page-share.ts 的 canWritePage：空间角色与分享给我的取宽）；
+ *  不在列表里时只知道它所在的空间，按空间角色（空间未知时以服务端为准，见 space-role.ts） */
+export function blockWritable(
+  hostEditable: boolean,
+  spaces: readonly Space[] | null,
+  collectionSpaceId: string | null | undefined,
+  listedWritable: boolean | null = null,
+): boolean {
+  return hostEditable && (listedWritable ?? !spaceReadOnly(spaces, collectionSpaceId))
 }

@@ -10,6 +10,7 @@
  * 写值先整批换算、校验（collections/ai-write.ts → write-row.ts 的 readSet），有一个不行就一行都不写；写进行文档记给 agent（同 edit_page）。
  * 写有副作用：读到过外来事件的 Genet 先问主人（guard）。时间（创建时间、公式里的 TODAY()）按发起这一轮的用户的时区。 */
 
+import { GUEST_AI_READONLY, isGuestOf } from '../agents/guest-gate.js'
 import type { Context, Hono } from 'hono'
 import type { Pool } from 'pg'
 import type * as Y from 'yjs'
@@ -42,7 +43,7 @@ export type CollectionToolDeps = {
     user: User
     space?: string
     guard(what: string, run: () => Promise<Outcome>): Promise<Response>
-    parent(raw: unknown): Promise<{ spaceId: string; parentId: string | null } | { status: 400 | 403 | 404; error: string }>
+    parent(raw: unknown): Promise<{ spaceId: string; parentId: string | null; privateOwner: string | null } | { status: 400 | 403 | 404; error: string }>
   } | null>
   /** 行改了名：页面列表变了，广播 changed */
   notify?: () => void
@@ -58,6 +59,7 @@ async function gateFor(pool: Pool, user: User, space: string | undefined, id: st
   const gate = await collectionGate(pool, user, id, need)
   if (!gate.ok) return gate.status === 403 ? { status: 403, error: '你在这个合集里只能看，不能改' } : { status: 404, error: '没有这个合集' }
   if (space !== undefined && gate.collection.space_id !== space) return { status: 404, error: '没有这个合集' }
+  if (need === 'write' && (await isGuestOf(pool, user.id, id))) return { status: 403, error: GUEST_AI_READONLY }
   return { collection: gate.collection }
 }
 
@@ -219,7 +221,7 @@ export function collectionToolRoutes(app: Hono, deps: CollectionToolDeps): void 
       throw err
     }
     return g.guard(`新建合集「${title}」`, async () => {
-      if (!(await createCollection(pool, { id, spaceId: where.spaceId, parentId: where.parentId, ownerId: g.user.id, inline: false, title, doc }))) {
+      if (!(await createCollection(pool, { id, spaceId: where.spaceId, parentId: where.parentId, ownerId: g.user.id, inline: false, title, doc, privateOwner: where.privateOwner }))) {
         return { status: 409, body: { error: '合集 id 冲突了，再试一次' } }
       }
       // 本合集的结构已经演练进 doc 里一起写下去了，这里只补对方合集的反向关联

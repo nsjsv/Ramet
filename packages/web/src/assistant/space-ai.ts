@@ -1,4 +1,4 @@
-/* ---------- 空间 AI 在前端的数据：这一页在哪个团队空间、那个空间的 AI 开没开、叫什么 ----------
+/* ---------- 空间 AI 在前端的数据：这一页在哪个空间、那个空间的 AI 开没开、叫什么 ----------
  * 空间 AI 只有一个 id，按页面所在空间解析（服务端 agents/space-ai.ts），所以前端认它也得先知道「这一页在哪个空间」。
  * 数据就是 App 已有的两份列表：空间列表（GET /api/spaces 每项带 ai）与页面列表（space_id），App 经 syncSpaceAi 喂进来，不另发请求；
  * 空间 owner 改配置 / 删连接时服务端广播 control 的 changed，App 重拉空间列表，这里跟着变。
@@ -8,24 +8,23 @@
 import { useCallback, useSyncExternalStore } from 'react'
 import type { Page, Space } from '../api'
 
-/** 一个空间的空间 AI（个人空间也有：个人空间也能加成员一起用，开不开由 owner 决定） */
+/** 一个空间的空间 AI（任何空间都能开，开不开由 owner 决定）。chat = 我和它的直接对话页（没有 = null） */
 export interface SpaceAiInfo {
   spaceId: string
   enabled: boolean
   name: string
-  /** 个人空间：空间 AI 没开时，评论里叫的是写评论的人自己的 Genet（comments/comment-ai.ts） */
-  personal: boolean
+  chat: string | null
 }
 
 /** 服务端没配过名字时的叫法，与服务端 SPACE_AI_DEFAULT_NAME 一致 */
-export const SPACE_AI_DEFAULT_NAME = 'AI'
+export const SPACE_AI_DEFAULT_NAME = '空间 AI'
 /** 名字上限，与服务端 SPACE_AI_NAME_MAX 一致（码点） */
 export const SPACE_AI_NAME_MAX = 20
 
 /** 一个空间的空间 AI：还不知道是哪个空间 = null。列表接口之外来的空间对象（老缓存）没有 ai，按没启用算 */
 export function spaceAiOfSpace(space: Space | undefined): SpaceAiInfo | null {
   if (!space) return null
-  return { spaceId: space.id, enabled: space.ai?.enabled === true, name: space.ai?.name.trim() || SPACE_AI_DEFAULT_NAME, personal: space.is_personal }
+  return { spaceId: space.id, enabled: space.ai?.enabled === true, name: space.ai?.name.trim() || SPACE_AI_DEFAULT_NAME, chat: space.ai?.chat ?? null }
 }
 
 /** 名字是否合法：trim、压空白后 1–20 个码点（同服务端 normalizeSpaceAiName） */
@@ -37,23 +36,25 @@ export function normalizeSpaceAiName(raw: string): string | null {
 
 let spacesNow: readonly Space[] | null = null
 let pagesNow: readonly Page[] | null = null
-/** 页面 → 空间；页面列表换了才重建 */
+/** 页面 → 空间（只记公共区的页：私人页上没有空间 AI，它碰不到私人区；唯一的例外是我和它的直接对话页，见 syncSpaceAi）；页面列表 / 空间列表换了才重建 */
 let pageSpace = new Map<string, string>()
 /** 空间 → 空间 AI；内容没变就沿用旧对象（useSyncExternalStore 靠引用判断要不要重画） */
 let bySpace = new Map<string, SpaceAiInfo>()
 const listeners = new Set<() => void>()
 
 function sameInfo(a: SpaceAiInfo | undefined, b: SpaceAiInfo): boolean {
-  return a !== undefined && a.enabled === b.enabled && a.name === b.name && a.personal === b.personal
+  return a !== undefined && a.enabled === b.enabled && a.name === b.name && a.chat === b.chat
 }
 
 /** App 喂进来的最新列表。只在页面归属或空间 AI 真变了时通知 */
 export function syncSpaceAi(spaces: readonly Space[] | null, pages: readonly Page[] | null): void {
   let changed = false
-  if (pages !== pagesNow) {
+  if (pages !== pagesNow || spaces !== spacesNow) {
     pagesNow = pages
     const next = new Map<string, string>()
-    for (const p of pages ?? []) if (p.space_id) next.set(p.id, p.space_id)
+    for (const p of pages ?? []) if (p.space_id && !p.private_owner) next.set(p.id, p.space_id)
+    // 我和空间 AI 的直接对话页在我的私人区：空间 AI 能在那一页上回复（服务端 space-ai.ts 的例外）
+    for (const s of spaces ?? []) if (s.ai?.chat) next.set(s.ai.chat, s.id)
     if (next.size !== pageSpace.size || [...next].some(([id, space]) => pageSpace.get(id) !== space)) changed = true
     pageSpace = next
   }
@@ -79,7 +80,8 @@ export function subscribeSpaceAi(cb: () => void): () => void {
   }
 }
 
-/** 这一页所在空间的空间 AI；不知道这一页在哪（公开页、列表还没到）= null */
+/** 这一页所在空间的空间 AI；不知道这一页在哪（公开页、列表还没到）、或这页在私人区（空间 AI 碰不到）= null。
+ *  @ 候选、来源目录、回复抬头都经这里，私人页上一处都不会出现空间 AI */
 export function spaceAiOfPage(pageId: string | undefined): SpaceAiInfo | null {
   if (!pageId) return null
   const space = pageSpace.get(pageId)

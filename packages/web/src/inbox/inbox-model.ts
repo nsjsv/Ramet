@@ -16,6 +16,7 @@ const GROUP: Record<InboxItem['type'], InboxGroup> = {
   timer_failed: 'news',
   automation: 'news',
   doc_mention: 'news',
+  share: 'news',
   running: 'running',
 }
 
@@ -59,10 +60,11 @@ export function dropByKey(items: readonly InboxItem[], key: string): InboxItem[]
   return items.some((item) => item.key === key) ? items.filter((item) => item.key !== key) : (items as InboxItem[])
 }
 
-/** 打开这一页就算看过的条目：「做完待你看」与「正文里 @了你」（服务端同一张 inbox_seen） */
-const seenByOpening = (item: InboxItem, pageId: string): boolean => (item.type === 'done' || item.type === 'doc_mention') && item.pageId === pageId
+/** 打开这一页就算看过的条目：「做完待你看」「正文里 @了你」「分享给你」（服务端同一张 inbox_seen） */
+const seenByOpening = (item: InboxItem, pageId: string): boolean =>
+  (item.type === 'done' || item.type === 'doc_mention' || item.type === 'share') && item.pageId === pageId
 
-/** 打开某一页后，它的「做完待你看」「正文里 @了你」就算看过了 */
+/** 打开某一页后，它的「做完待你看」「正文里 @了你」「分享给你」就算看过了 */
 export function dropSeenOf(items: readonly InboxItem[], pageId: string): InboxItem[] {
   return items.some((item) => seenByOpening(item, pageId)) ? items.filter((item) => !seenByOpening(item, pageId)) : (items as InboxItem[])
 }

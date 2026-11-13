@@ -112,6 +112,8 @@ export type SavedSession = {
   userId?: string
   /** 这个会话建 / 加载时交付的工具档位（tool-profile.ts）；没有 = full（老记录照常复用）。与页面档位不等 = 不复用 */
   tools?: ToolProfile
+  /** 只有 Genet 有：这个会话里带过的跨空间上下文的指纹（genet-context.ts，键 list / personal / space:<id>） */
+  context?: Record<string, string>
 }
 
 /** 可选 agent：本地直 spawn 的配置，或某个在线 connector 上的 agent（id 已带 c: 前缀）。

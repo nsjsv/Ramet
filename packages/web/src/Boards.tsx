@@ -10,6 +10,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { pagesInPageTree } from '@ramet/shared/page-tree'
+import { pagesOfArea, type PageArea } from './page-area'
+import { shareLevelOf, useMyShares } from './page-share'
 import { api, type Board, type BoardItem, type BoardsPayload, type Page } from './api'
 import { useCachedLoad } from './cached-load'
 import { subscribeControl } from './control'
@@ -34,12 +36,15 @@ type MenuPos = { top?: number; bottom?: number; right: number }
 
 export default function Boards({
   pages,
+  me,
   selectedSpaceId,
   spaceIds,
   readOnly,
+  guest = false,
   onNavigate,
   onCreatePage,
   onCreateCollection,
+  canPrivatize,
   onRemovePage,
   onPagesTrashed,
   onPageCreated,
@@ -47,16 +52,22 @@ export default function Boards({
 }: {
   /** listPages 全量（页面树行在此组装，按空间过滤）；null = 加载中 */
   pages: Page[] | null
+  /** 当前登录用户 id：分得出我的私人页与别人分享给我的 */
+  me: string
   selectedSpaceId: string | null
   /** 我参与的空间 id 集（新建/克隆空间后触发重拉目录树列表） */
   spaceIds: string[]
   /** viewer 空间：写入口整体关闭（服务端另有 403 一道闸） */
   readOnly: boolean
+  /** 我在这个空间是访客：只有「分享给我的」一栏（看得到的页全是分享来的），没有公共 / 私人 / 目录树 */
+  guest?: boolean
   onNavigate: (pageId: string) => void
-  /** 页面树行「新建子页」（parentId = 空间内父页；null = 新建顶层页） */
-  onCreatePage: (parentId: string | null) => void
-  /** 页面树 ＋ 菜单「新建集合」（整页集合，空间顶层） */
-  onCreateCollection: () => void
+  /** 页面树行「新建子页」（parentId = 空间内父页；null = 新建顶层页，inPrivate 定建在哪一栏） */
+  onCreatePage: (parentId: string | null, inPrivate?: boolean) => void
+  /** 页面树 ＋ 菜单「新建集合」（整页集合，空间顶层；inPrivate 定建在哪一栏） */
+  onCreateCollection: (inPrivate?: boolean) => void
+  /** 这一页（公共的）能不能挪进私人区：页面创建人、空间 owner（page-area.ts） */
+  canPrivatize: (pageId: string) => boolean
   /** 页面树行删除（移入回收站） */
   onRemovePage: (node: PageNode) => void
   /** 目录树操作把页面移入回收站后（删条目 / 删目录 / 删目录树）：带服务端返回的权威 id 集，
@@ -278,20 +289,38 @@ export default function Boards({
   const scopedPages = pages && selectedSpaceId ? pages.filter((p) => p.space_id === selectedSpaceId) : pages
   // 页面树只画成员。目录树自建文档（in_page_tree false）及其子孙留在 pages 里供打开/改名，但不进这棵树
   const pageTreePages = scopedPages === null ? null : pagesInPageTree(scopedPages)
-  const dirBoard = (data?.boards ?? []).find((b) => b.space_id === selectedSpaceId) ?? null
+  // 页面树按区分两栏：公共（空间成员都看得到）与我的私人区（page-area.ts）
+  const publicPages = pageTreePages === null ? null : pagesOfArea(pageTreePages, 'public', me)
+  const privatePages = pageTreePages === null ? null : pagesOfArea(pageTreePages, 'private', me)
+  // 别人私人区里分享给我的：按分享的根成树（根的父页我看不到，buildTree 把它当顶层）。访客看到的全是分享来的，公共区的也在这一栏
+  const sharedPages = pageTreePages === null ? null : guest ? pageTreePages : pagesOfArea(pageTreePages, 'shared', me)
+  const shares = useMyShares(me)
+  const lookup = (id: string): Page | undefined => scopedPages?.find((p) => p.id === id)
+  const dirBoard = guest ? null : ((data?.boards ?? []).find((b) => b.space_id === selectedSpaceId) ?? null)
   // section 折叠 key：页面树无实体 id，用空间 id；目录树用行 id
   const pageKey = `page_tree:${selectedSpaceId ?? ''}`
+  const privateKey = `private_tree:${selectedSpaceId ?? ''}`
+  const sharedKey = `shared_tree:${selectedSpaceId ?? ''}`
   const forest = buildForest(data?.folders ?? [], items)
-  const showPageTree = data !== null && pageTreePages !== null && pageTreePages.length > 0
+  const showPageTree = !guest && data !== null && publicPages !== null && publicPages.length > 0
+  // 私人栏常驻（空着也在，写明只有你看得到）：只读空间、访客没有，不显示
+  const showPrivateTree = !guest && data !== null && privatePages !== null && !readOnly
+  // 「分享给我的」有才显示（在公共与私人之间，同 Notion 的顺序）
+  const showSharedTree = data !== null && sharedPages !== null && sharedPages.length > 0
   const showDirTree = dirBoard !== null && data !== null
 
-  /** 页面树 section 头：名字恒定「页面树」，无 ⋯ 菜单（空间派生视图，不可删） */
-  function pageTreeHeader(): React.ReactNode {
-    const isCollapsed = collapsed.has(pageKey)
+  /** 页面树 section 头：名字恒定（「公共」/「私人」），无 ⋯ 菜单（空间派生视图，不可删）；＋ 菜单建在这一栏 */
+  function pageTreeHeader(key: string, area: PageArea): React.ReactNode {
+    const isCollapsed = collapsed.has(key)
+    const name = area === 'private' ? COPY.area.privateTree : area === 'shared' ? COPY.area.sharedTree : COPY.tree.pageTree
+    const menuId = `${area}:${selectedSpaceId ?? ''}`
+    const inPrivate = area === 'private'
     return (
-      <div className="dir-board-header" onClick={() => toggleCollapsed(pageKey)}>
-        <span className="dir-board-name" data-tip={COPY.tree.pageTree}>
-          {COPY.tree.pageTree}
+      <div className="dir-board-header" onClick={() => toggleCollapsed(key)}>
+        <span className="dir-board-name" data-tip={name}>
+          {area === 'private' && <Icon name="lock" size={12} />}
+          {area === 'shared' && <Icon name="users" size={12} />}
+          {name}
         </span>
         <button
           className="icon-btn dir-board-chev"
@@ -299,29 +328,29 @@ export default function Boards({
           aria-expanded={!isCollapsed}
           onClick={(e) => {
             e.stopPropagation()
-            toggleCollapsed(pageKey)
+            toggleCollapsed(key)
           }}
         >
           <Icon name="chevron" size={12} className={'chev' + (isCollapsed ? '' : ' open')} />
         </button>
-        {!readOnly && selectedSpaceId && (
+        {!readOnly && area !== 'shared' && selectedSpaceId && (
           <span className="tree-actions dir-board-actions" onClick={(e) => e.stopPropagation()}>
             <button
               className="icon-btn"
-              data-tip={COPY.collection.addMenu} aria-label={COPY.collection.addMenu}
+              data-tip={inPrivate ? COPY.area.privateMenu : COPY.area.publicMenu} aria-label={inPrivate ? COPY.area.privateMenu : COPY.area.publicMenu}
               onClick={(e) => {
-                if (menu?.type === 'page-plus' && menu.id === selectedSpaceId) setMenu(null)
-                else openMenu({ type: 'page-plus', id: selectedSpaceId }, e)
+                if (menu?.type === 'page-plus' && menu.id === menuId) setMenu(null)
+                else openMenu({ type: 'page-plus', id: menuId }, e)
               }}
             >
               <Icon name="plus" size={14} />
             </button>
-            {menu?.type === 'page-plus' && menu.id === selectedSpaceId && (
+            {menu?.type === 'page-plus' && menu.id === menuId && (
               <div className="dir-menu" style={menuStyle}>
                 <button
                   onClick={() => {
                     setMenu(null)
-                    onCreatePage(null)
+                    onCreatePage(null, inPrivate)
                   }}
                 >
                   {COPY.tree.newPage}
@@ -329,7 +358,7 @@ export default function Boards({
                 <button
                   onClick={() => {
                     setMenu(null)
-                    onCreateCollection()
+                    onCreateCollection(inPrivate)
                   }}
                 >
                   {COPY.collection.newCollection}
@@ -433,14 +462,59 @@ export default function Boards({
       {menu && <div className="space-menu-backdrop" onClick={() => setMenu(null)} />}
       {showPageTree && selectedSpaceId && (
         <section key={pageKey} className={'dir-board' + (collapsed.has(pageKey) ? ' closed' : '')}>
-          {pageTreeHeader()}
+          {pageTreeHeader(pageKey, 'public')}
           {sectionBody(
             pageKey,
             <PageTreeBoard
               spaceId={selectedSpaceId}
-              pages={pageTreePages}
+              area="public"
+              pages={publicPages}
               readOnly={readOnly}
-              onCreateChild={onCreatePage}
+              canPrivatize={canPrivatize}
+              lookup={lookup}
+              emptyText={COPY.tree.pageTreeEmpty}
+              onCreateChild={(parentId) => onCreatePage(parentId)}
+              onRemove={onRemovePage}
+              onChanged={onPageChanged}
+            />,
+          )}
+        </section>
+      )}
+      {showSharedTree && selectedSpaceId && (
+        <section key={sharedKey} className={'dir-board' + (collapsed.has(sharedKey) ? ' closed' : '')}>
+          {pageTreeHeader(sharedKey, 'shared')}
+          {sectionBody(
+            sharedKey,
+            <PageTreeBoard
+              spaceId={selectedSpaceId}
+              area="shared"
+              pages={sharedPages}
+              readOnly={false}
+              rowReadOnly={(node) => shareLevelOf(node.id, lookup, shares.byPage) !== 'edit'}
+              canPrivatize={canPrivatize}
+              lookup={lookup}
+              emptyText=""
+              onCreateChild={(parentId) => onCreatePage(parentId)}
+              onRemove={onRemovePage}
+              onChanged={onPageChanged}
+            />,
+          )}
+        </section>
+      )}
+      {showPrivateTree && selectedSpaceId && (
+        <section key={privateKey} className={'dir-board' + (collapsed.has(privateKey) ? ' closed' : '')}>
+          {pageTreeHeader(privateKey, 'private')}
+          {sectionBody(
+            privateKey,
+            <PageTreeBoard
+              spaceId={selectedSpaceId}
+              area="private"
+              pages={privatePages}
+              readOnly={readOnly}
+              canPrivatize={canPrivatize}
+              lookup={lookup}
+              emptyText={COPY.area.privateEmpty}
+              onCreateChild={(parentId) => onCreatePage(parentId, true)}
               onRemove={onRemovePage}
               onChanged={onPageChanged}
             />,
@@ -534,14 +608,15 @@ export default function Boards({
         </section>
       )}
       {/* 空态/缺树入口：两棵树各自按有没有给入口，点掉一个不会把另一个的入口带走
-          （新空间没有页面也没有目录树行，两棵树都靠用户显式建） */}
-      {selectedSpaceId && pages !== null && data !== null && (!showPageTree || !showDirTree) && (
+          （新空间没有页面也没有目录树行，两棵树都靠用户显式建）。访客在这个空间里什么都建不了，不给 */}
+      {selectedSpaceId && !guest && pages !== null && data !== null && (!showPageTree || !showDirTree) && (
         <div className="tree-empty">
-          {!showPageTree && !showDirTree && <div>{COPY.tree.spaceEmpty}</div>}
+          {!showPageTree && !showDirTree && !privatePages?.length && <div>{COPY.tree.spaceEmpty}</div>}
           {!readOnly && (
             <div className="tree-empty-actions">
-              {!showPageTree && <button onClick={() => onCreatePage(null)}>{COPY.tree.newPage}</button>}
-              {!showPageTree && <button onClick={onCreateCollection}>{COPY.collection.newCollection}</button>}
+              {/* 空态的新建没说放哪：建进私人区（同 Notion），想公开再挪 */}
+              {!showPageTree && <button onClick={() => onCreatePage(null, true)}>{COPY.tree.newPage}</button>}
+              {!showPageTree && <button onClick={() => onCreateCollection(true)}>{COPY.collection.newCollection}</button>}
               {!showDirTree && (
                 <button onClick={() => run(() => api.createDirTree(selectedSpaceId))}>{COPY.tree.newDirTree}</button>
               )}

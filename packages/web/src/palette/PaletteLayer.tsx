@@ -83,7 +83,8 @@ export default function PaletteLayer({ pages, spaceId, canWritePage, onCreated }
         compact: close(() => pageId && void api.enqueue(pageId, { agent: current, kind: 'message', text: '/compact' }).catch(fail)),
         newPage: close(() => {
           if (!spaceId) return
-          void api.createPage(null, spaceId).then((p) => {
+          // ⌘K 新建没说放哪：进私人区（同 Notion），想公开再挪
+          void api.createPage(null, spaceId, { private: true }).then((p) => {
             onCreated()
             navigate(`/page/${p.id}`)
           }, fail)

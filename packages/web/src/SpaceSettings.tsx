@@ -8,6 +8,7 @@ import { Card, ConfirmButton, Row } from './ui/form-kit'
 import { Icon } from './icons'
 import { Select } from './ui/Select'
 import SpaceAiCard from './SpaceAiCard'
+import GuestsCard from './share/GuestsCard'
 
 /** 加成员 / 邀请链接的角色选项 */
 const JOIN_ROLES = [
@@ -19,7 +20,8 @@ const JOIN_ROLES = [
  * - 所有成员（含只读成员）可看成员列表
  * - owner：改成员角色、按用户名添加成员、移除成员、生成 / 撤销邀请链接、改名（行内编辑）、删空间
  * - member/viewer：退出空间（自己移除自己）
- * - 团队空间多一张「空间 AI」卡（SpaceAiCard.tsx）：owner 选连接 / 改名字，其他人只读
+ * - 一张「空间 AI」卡（SpaceAiCard.tsx，任何空间都能开）：owner 选连接 / 改名字，其他人只读
+ * - owner 多一张「访客」卡（share/GuestsCard.tsx）：空间外被分享了页的人、成员能不能邀请访客
  * 危险动作用行内两步确认（ui/form-kit.tsx ConfirmButton），不弹 window.confirm。
  * 外壳（遮罩 / 导航 / 标题）在 SettingsModal，这里只管内容与权限。 */
 export default function SpaceSettings({
@@ -143,7 +145,7 @@ export default function SpaceSettings({
                   ]}
                   onChange={(role) => void changeRole(m, role)}
                 />
-                <ConfirmButton confirmLabel="确认移除" onConfirm={() => void removeMember(m)} tip={`将「${m.username}」移出空间`}>
+                <ConfirmButton confirmLabel="确认移除" onConfirm={() => void removeMember(m)} tip={`将「${m.username}」移出空间，分享给 TA 的页面一并收回`}>
                   移除
                 </ConfirmButton>
               </>
@@ -168,6 +170,8 @@ export default function SpaceSettings({
       </Card>
 
       {canManage && <InviteCard space={space} invites={invites} onChanged={refresh} onError={setError} />}
+
+      {canManage && <GuestsCard spaceId={space.id} onError={setError} />}
 
       {(canLeave || (canManage && !space.is_personal)) && (
         <Card title="危险操作" danger>

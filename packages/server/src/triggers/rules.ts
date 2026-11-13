@@ -12,6 +12,7 @@ import type * as Y from 'yjs'
 import { myPersonalSpaceId } from '../clone.js'
 import { pageAccess } from '../collab.js'
 import { withTransaction } from '../db.js'
+import { pageVisibleSql } from '../page-visibility.js'
 import { agentNames, type AgentNameHost } from '../agents/agent-names.js'
 import { checkActions } from './action-check.js'
 import {
@@ -195,8 +196,7 @@ async function views(deps: RuleDeps, viewerId: string, rows: RuleRow[]): Promise
   const titles = new Map(
     (
       await deps.pool.query<{ id: string; title: string }>(
-        `SELECT p.id, p.title FROM live_pages p WHERE p.id = ANY($1::text[])
-           AND EXISTS (SELECT 1 FROM space_members m WHERE m.space_id = p.space_id AND m.user_id = $2)`,
+        `SELECT p.id, p.title FROM live_pages p WHERE p.id = ANY($1::text[]) AND ${pageVisibleSql('p', '$2')}`,
         [[...pageIds], viewerId],
       )
     ).rows.map((r) => [r.id, r.title || '无标题']),

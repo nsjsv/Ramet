@@ -13,8 +13,10 @@
 // 空间 AI（agents/space-ai.ts）复用同一个驱动，追加在串尾：
 // assistant_sessions.space_id：空间 AI 的会话属于空间（同空间的成员接着同一段对话），这时 user_id 为空；Genet 的会话 space_id 为空。
 //   空间删掉连会话一起删（里面有那个空间的页面片段）。
-// space_ai：团队空间的 AI 配置。connection_id 是空间 owner 自己的模型连接（owner 删了连接就置空 = 停用）；
-//   连接属不属于此刻的 owner 在读的时候判（spaces.owner_id 会因删号转交而变），这里不约束。
+// space_ai：空间的 AI 配置。connection_id 是空间 owner 自己的模型连接（owner 删了连接就置空 = 停用）；
+//   连接属不属于此刻的 owner 在读的时候判（spaces.owner_id 会因删号转交而变），这里不约束。缺省名「空间 AI」（早先是「AI」，存量一并改）。
+// space_ai_chats：每个成员和这个空间的空间 AI 的直接对话页（agents/space-ai-chat.ts）。page_id 不挂外键：页面物理删后行留着，
+//   下次打开按「页不在 / 在回收站」新建（同 assistants）；人删号行级联删掉，页面随他的私人区一起处理。
 export const ASSISTANT_DDL = `
 CREATE TABLE IF NOT EXISTS assistants (
   user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
@@ -47,4 +49,13 @@ CREATE TABLE IF NOT EXISTS space_ai (
   name TEXT NOT NULL DEFAULT 'AI',
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE space_ai ALTER COLUMN name SET DEFAULT '空间 AI';
+UPDATE space_ai SET name = '空间 AI' WHERE name = 'AI';
+CREATE TABLE IF NOT EXISTS space_ai_chats (
+  space_id TEXT NOT NULL REFERENCES spaces(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  page_id TEXT,
+  PRIMARY KEY (space_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_space_ai_chats_page ON space_ai_chats(page_id);
 `

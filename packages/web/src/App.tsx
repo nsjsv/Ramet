@@ -11,7 +11,7 @@ import CollectionPage from './collection/CollectionPage'
 import { resetCollectionCache, syncCollectionPages, syncCollectionSpaces } from './collection/collection-store'
 import { syncSpaceAi } from './assistant/space-ai'
 import { resetCachedLoads } from './cached-load'
-import { spaceReadOnly } from './space-role'
+import { canWritePage, isGuestIn, isSharedToMe, noteSyncKey, useMyShares } from './page-share'
 import { Icon } from './icons'
 import { flip, motionMs } from './motion'
 import Login from './Login'
@@ -38,6 +38,7 @@ const Admin = lazy(() => import('./Admin'))
 const Join = lazy(() => import('./Join'))
 const ConnectMachine = lazy(() => import('./ConnectMachine'))
 const AiHub = lazy(() => import('./ai/AiHub'))
+const SpaceAiHub = lazy(() => import('./ai/SpaceAiHub'))
 const PublicPage = lazy(() => import('./PublicPage'))
 const InboxPage = lazy(() => import('./inbox/InboxPage'))
 const Lazy = ({ children }: { children: ReactNode }) => <Suspense fallback={null}>{children}</Suspense>
@@ -256,6 +257,8 @@ function Shell({ user }: { user: User }) {
   // hydrated：首次 refresh() 两个 GET 都成功后置 true（之后重复置位无害）。置位前 Home 不跳页
   const [hydrated, setHydrated] = useState(false)
   const [selectedSpaceId, setSelectedSpaceId] = useState<string | null>(null)
+  // 分享给我的（含作为访客进得去的空间）：选中空间时也认访客空间
+  const shares = useMyShares(user.id)
   // 收藏：外壳挂载拉一次，窗口回到前台再拉（星标状态、侧栏列表、块菜单都读这一份）
   useEffect(() => startFavoritesSync(), [])
   // 收件箱：外壳挂载拉一次，之后跟着 control:global 的 'inbox' 信号重拉（不另开连接）；退出 / 换账号时拆掉并清空
@@ -447,6 +450,7 @@ function Shell({ user }: { user: User }) {
       onResult: (res, mark, confirmed) => {
         // 并进当前列表（本地乐观改动没被这次增量碰到的保留）；缓存只存服务端确认过的那份
         setPages((cur) => applyPageSync(cur, res))
+        noteSyncKey(user.id, res.members)
         writeCache(pagesCacheKey(user.id), writePagesCache(mark, confirmed))
         loaded.current.pages = true
         settle()
@@ -537,12 +541,16 @@ function Shell({ user }: { user: User }) {
     // 恢复优先级：当前选中 > localStorage 上次空间 > 个人空间
     // last 在 effect 里取一次，updater 保持纯函数；写 effect 只在选中真正变化时写，二者不打架
     const last = localStorage.getItem(LAST_SPACE_KEY)
+    // 作为访客进得去的空间也能选。上次选的不在成员空间里（可能是访客空间）时，等「分享给我的」到了再定：
+    // 先选一个再换，会被下面「切空间跳到那个空间上次的页」当成手动切换，把正在看的页跳走
+    const known = (id: string | null): id is string => !!id && (spaces.some((s) => s.id === id) || shares.guestSpaces.some((g) => g.id === id))
     setSelectedSpaceId((cur) => {
-      if (cur && spaces.some((s) => s.id === cur)) return cur
-      if (last && spaces.some((s) => s.id === last)) return last
+      if (known(cur)) return cur
+      if (known(last)) return last
+      if (last && !shares.loaded) return cur
       return (spaces.find((s) => s.is_personal) ?? spaces[0])?.id ?? null
     })
-  }, [spaces, searchParams, setSearchParams])
+  }, [spaces, searchParams, setSearchParams, shares])
 
   // 记住上次选中空间，刷新后恢复
   useEffect(() => {
@@ -595,7 +603,10 @@ function Shell({ user }: { user: User }) {
     if (!selectedSpaceId || prev === null || prev === selectedSpaceId) return
     const last = readLastPageMap()[selectedSpaceId]
     const hit = last ? pages?.find((p) => p.id === last && p.space_id === selectedSpaceId) : undefined
-    navigate(hit ? `/page/${hit.id}` : '/')
+    // 切换时本来就在首页就不再跳：首页（子组件，effect 先跑）这时已经跳去了新空间的第一页，再跳回 / 它就停在「加载中」。
+    // 看的是这次渲染时的路径（effect 跑的时候地址已经被首页改了）
+    if (hit) navigate(`/page/${hit.id}`)
+    else if (location.pathname !== '/') navigate('/')
   }, [selectedSpaceId, pages, navigate])
 
   // 页面可写（项目面板改文件、工作台停止这一轮）：只读成员（viewer）不行（服务端也拦：viewer 403）
@@ -668,12 +679,14 @@ function Shell({ user }: { user: User }) {
             }
           />
           <Route path="/inbox" element={<Lazy><InboxPage /></Lazy>} />
-          {/* AI 页：Genet / 任务 / 定时 / Skill / 记忆五个分页（ai/AiHub.tsx）；/skills、/memory 的书签与外面的链接落到对应分页 */}
+          {/* Genet 页：Genet / 任务 / 自动 / 记忆四个分页（ai/AiHub.tsx）；/skills、/memory 的书签与外面的链接落到对应分页（skill 转到当前空间的空间 AI 页） */}
           <Route
             path="/ai/*"
             element={<Lazy><AiHub space={spaces?.find((s) => s.id === selectedSpaceId) ?? null} spaces={spaces} pages={pages} username={user.username} onChanged={refresh} /></Lazy>}
           />
           <Route path="/skills" element={<Navigate to="/ai/skills" replace />} />
+          {/* 空间 AI 页：对话 / 记忆 / Skill（ai/SpaceAiHub.tsx），侧栏页面树上方那一行进来 */}
+          <Route path="/spaces/:id/ai/*" element={<Lazy><SpaceAiHub spaces={spaces} pages={pages} username={user.username} onChanged={refresh} /></Lazy>} />
           <Route path="/memory" element={<Navigate to="/ai/memory" replace />} />
           <Route
             path="/page/:id"
@@ -684,6 +697,7 @@ function Shell({ user }: { user: User }) {
                 onChanged={refresh}
                 user={user}
                 onTitleLive={patchPageTitle}
+                hydrated={hydrated}
               />
             }
           />
@@ -701,32 +715,40 @@ function Shell({ user }: { user: User }) {
   )
 }
 
-/** /page/:id：按页面所属空间的 my_role 算 readOnly/canPublish 传给编辑器（viewer 只读，只有 owner 能发布，
- *  全局 admin 也不例外） */
+/** /page/:id：按页面所属空间的 my_role 与分享给我的档位算 readOnly（page-share.ts）、按区算 canPublish 传给编辑器
+ *  （公共页只有空间 owner 能发布、私人页由它的主人发布；全局 admin 也不例外）。列表校准过却没有这一页（被挪进别人的私人区、被移出空间、删了）：
+ *  不挂一个连不上的编辑器，直接说看不到了 */
 function PageRoute({
   pages,
   spaces,
   onChanged,
   user,
   onTitleLive,
+  hydrated,
 }: {
   pages: Page[] | null
   spaces: Space[] | null
   onChanged: () => void
   user: User
   onTitleLive: (id: string, title: string) => void
+  hydrated: boolean
 }) {
   const { id } = useParams<{ id: string }>()
   const page = pages?.find((p) => p.id === id) ?? null
   const space = page?.space_id ? spaces?.find((s) => s.id === page.space_id) : undefined
-  const readOnly = spaceReadOnly(spaces, page?.space_id)
+  const shares = useMyShares(user.id)
+  const lookup = (pid: string): Page | undefined => pages?.find((p) => p.id === pid)
+  const readOnly = page ? !canWritePage(page, lookup, spaces, user.id, shares.byPage) : false
   // 公开态只有 doc 页承载（过程页跟着父文档走，skill 页是空间内部的做事方法）：源头不给入口，不靠各处特判
-  const canPublish = page?.kind === 'doc' && space?.my_role === 'owner'
+  const canPublish = page?.kind === 'doc' && (page.private_owner ? page.private_owner === user.id : space?.my_role === 'owner')
   // 列表还没到时先不挂：viewer 只读要等空间角色，避免先按可写建编辑器再拆掉。
   // 过程页与普通页走同一个编辑器（正文是协同文档）；集合页没有正文，走自己的页面（collection/CollectionPage.tsx）
-  if (pages === null) return null
+  // 分享给我的页同理（别人私人区里的、我作为访客看到的）：等分享列表到了再按档位挂
+  const guest = isGuestIn(page?.space_id, spaces)
+  if (pages === null || (page && (isSharedToMe(page, user.id) || guest) && !shares.loaded)) return null
+  if (hydrated && page === null) return <div className="page-gone">{COPY.area.gone}</div>
   if (page?.kind === 'collection') {
-    return <CollectionPage pages={pages} onChanged={onChanged} onTitleLive={onTitleLive} username={user.username} readOnly={readOnly} />
+    return <CollectionPage pages={pages} onChanged={onChanged} onTitleLive={onTitleLive} username={user.username} readOnly={readOnly} guest={guest} />
   }
   return (
     <EditorPage
@@ -737,6 +759,7 @@ function PageRoute({
       readOnly={readOnly}
       canPublish={canPublish}
       spaceOwner={space?.my_role === 'owner'}
+      guest={guest}
     />
   )
 }

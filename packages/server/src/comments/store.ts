@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto'
 import type { Pool, PoolClient } from 'pg'
 import { withTransaction } from '../db.js'
 import { SPACE_AI_DEFAULT_NAME, spaceAiNames } from '../agents/space-ai.js'
+import { viewersAmong } from '../page-visibility.js'
 
 /** 人写的评论的作者 */
 export type UserAuthor = { id: string; name: string }
@@ -122,15 +123,11 @@ export function plainMentions(body: string): string {
   return body.replace(MARK_RE, (_all, name: string) => `@${name}`)
 }
 
-/** 只留这个空间的成员：@ 一个外人既不能通知到他，也不该在库里记下他的 id */
-async function memberMentions(db: Pool | PoolClient, spaceId: string, body: string): Promise<string[]> {
+/** 只留看得到这页的人：@ 一个看不到它的人既不能通知到他，也不该在库里记下他的 id */
+async function viewerMentions(db: Pool | PoolClient, pageId: string, body: string): Promise<string[]> {
   const ids = mentionIds(body)
   if (ids.length === 0) return []
-  const { rows } = await db.query<{ user_id: string }>(
-    'SELECT user_id FROM space_members WHERE space_id = $1 AND user_id = ANY($2::text[])',
-    [spaceId, ids],
-  )
-  const ok = new Set(rows.map((r) => r.user_id))
+  const ok = new Set(await viewersAmong(db, pageId, ids))
   return ids.filter((id) => ok.has(id))
 }
 
@@ -292,7 +289,7 @@ const SELECT_ONE = `SELECT c.id, c.thread_id, c.author_id, u.username, c.body, c
 /** 新开一个串（连同首条评论）。发言人自己算已读 */
 export async function createThread(
   pool: Pool,
-  input: { pageId: string; spaceId: string; userId: string; kind: ThreadKind; anchor: Anchor | null; body: string },
+  input: { pageId: string; userId: string; kind: ThreadKind; anchor: Anchor | null; body: string },
 ): Promise<Thread> {
   return withTransaction(pool, async (client) => {
     const threadId = randomUUID()
@@ -303,7 +300,7 @@ export async function createThread(
       input.anchor === null ? null : JSON.stringify(input.anchor),
       input.userId,
     ])
-    const mentions = await memberMentions(client, input.spaceId, input.body)
+    const mentions = await viewerMentions(client, input.pageId, input.body)
     await client.query(INSERT_COMMENT, [randomUUID(), threadId, input.userId, input.body, mentions, null])
     await client.query(UPSERT_READ, [input.userId, threadId])
     return (await getThread(client, input.pageId, threadId, input.userId))!
@@ -313,11 +310,11 @@ export async function createThread(
 /** 回复。发言人自己算已读（自己的话不该再出现在自己的收件箱）。via = 'genet'：Genet 代发（作者批过原文） */
 export async function addReply(
   pool: Pool,
-  input: { pageId: string; spaceId: string; threadId: string; userId: string; body: string; via?: 'genet' },
+  input: { pageId: string; threadId: string; userId: string; body: string; via?: 'genet' },
 ): Promise<Comment> {
   return withTransaction(pool, async (client) => {
     const id = randomUUID()
-    const mentions = await memberMentions(client, input.spaceId, input.body)
+    const mentions = await viewerMentions(client, input.pageId, input.body)
     await client.query(INSERT_COMMENT, [id, input.threadId, input.userId, input.body, mentions, input.via ?? null])
     await client.query(UPSERT_READ, [input.userId, input.threadId])
     const { rows } = await client.query<CommentRow>(SELECT_ONE, [id])
@@ -326,9 +323,9 @@ export async function addReply(
 }
 
 /** 空间 AI 回一条（作者是 AI、没有用户 id；invokerId = 叫它的人）。不记已读：AI 没有收件箱 */
-export async function addAiReply(pool: Pool, input: { pageId: string; spaceId: string; threadId: string; invokerId: string; body: string }): Promise<Comment> {
+export async function addAiReply(pool: Pool, input: { pageId: string; threadId: string; invokerId: string; body: string }): Promise<Comment> {
   const id = randomUUID()
-  const mentions = await memberMentions(pool, input.spaceId, input.body)
+  const mentions = await viewerMentions(pool, input.pageId, input.body)
   await pool.query(INSERT_AI_COMMENT, [id, input.threadId, input.body, mentions, input.invokerId])
   const { rows } = await pool.query<CommentRow>(SELECT_ONE, [id])
   return toComment(rows[0]!, null, await aiNameOf(pool, input.pageId))
@@ -351,8 +348,8 @@ export async function markRead(pool: Pool, userId: string, threadId: string): Pr
 }
 
 /** 改正文：mentions 跟着重算（改出来的新 @ 也要能通知到） */
-export async function editComment(pool: Pool, commentId: string, spaceId: string, body: string): Promise<Comment | null> {
-  const mentions = await memberMentions(pool, spaceId, body)
+export async function editComment(pool: Pool, commentId: string, pageId: string, body: string): Promise<Comment | null> {
+  const mentions = await viewerMentions(pool, pageId, body)
   const { rows } = await pool.query<CommentRow>(
     `WITH up AS (UPDATE comments SET body = $2, mentions = $3, edited_at = now() WHERE id = $1 AND deleted_at IS NULL RETURNING *)
      SELECT up.id, up.thread_id, up.author_id, u.username, up.body, up.created_at, up.edited_at, up.deleted_at, up.via, up.author_ai, up.invoker_id

@@ -22,11 +22,12 @@ import * as images from './tools/images.mjs'
 import * as memory from './tools/memory.mjs'
 import * as pages from './tools/pages.mjs'
 import * as skills from './tools/skills.mjs'
+import * as spaces from './tools/spaces.mjs'
 import * as team from './tools/team.mjs'
 import * as timers from './tools/timers.mjs'
 import * as watches from './tools/watches.mjs'
 
-const ALL = [...pages.tools, ...images.tools, ...collections.tools, ...hub.tools, ...memory.tools, ...dispatch.tools, ...skills.tools, ...team.tools, ...timers.tools, ...watches.tools, ...handled.tools, ...comments.tools]
+const ALL = [...pages.tools, ...images.tools, ...collections.tools, ...hub.tools, ...memory.tools, ...dispatch.tools, ...skills.tools, ...spaces.tools, ...team.tools, ...timers.tools, ...watches.tools, ...handled.tools, ...comments.tools]
 /** 中心不认识 /api/ramet/tools 或暂时不通时的兜底：只留三个基础工具 */
 const FALLBACK = { tools: ['read_page', 'read_image', 'edit_page'], agents: [] }
 

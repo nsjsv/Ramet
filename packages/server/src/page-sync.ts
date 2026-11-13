@@ -9,32 +9,40 @@
  *   - S 看不见的事务（取快照时还在跑、或之后才拿到 xid）xid 必然 >= xmin(S)，下次「xid >= 游标」一定取到。
  *   所以序号先分配、后提交不会漏；代价是长事务期间同几条会重复下发，响应按页面现状算，重复无害。
  *
- * 不泄露：只取日志 space_id 属于我所在空间的行，别的空间的页面 id 不会出现在 up / rm 里。
+ * 不泄露：日志只取我该收到的行（page-visibility.ts 的 changeVisibleSql），别的空间的页面 id 不会出现在 up / rm 里。
  * 成员关系（加入 / 退出空间、空间被删）不走日志：响应带成员指纹，客户端带回来对不上就整表。 */
 
 import { createHash } from 'node:crypto'
 import type { Pool } from 'pg'
 import { apiPageColumns, toApiPage, type ApiPage } from './page-icon.js'
+import { changeVisibleSql, pageVisibleSql } from './page-visibility.js'
 
-// 页面列表（整表）：所有人（含 admin）只看自己是成员的空间里的页面，@ 候选、侧栏、搜索都吃这份列表。
-// JOIN 打不上的行（space_id NULL 的孤儿页）天然被排除。
+// 页面列表（整表）：只列这个人看得见的页面（全局 admin 也不例外），@ 候选、侧栏、搜索都吃这份列表。
+// 看不到的（含 space_id 为空的孤儿页）不在里面，判定在 page-visibility.ts。
 // 排序：position（侧栏拖拽排序，小数可插中间）优先，NULLS LAST 兜底 created_at（后建页排最后），
 // 客户端合并增量后按同一口径重排（@ramet/shared/page-tree 的 comparePages）。两个文本列按 COLLATE "C"（逐字节）比：
 // 库的默认排序规则（en_US 等）比较时忽略标点，整秒的 created_at（没有小数部分）与同一秒带小数的会和 JS 的码元比较排反。
 // 只取对外字段（page-icon.ts 的 API_PAGE_FIELDS），不为列表读全文
 export const SELECT_ALL_MINE = `SELECT ${apiPageColumns('p')} FROM live_pages p
-  JOIN space_members m ON m.space_id = p.space_id AND m.user_id = $1
+  WHERE ${pageVisibleSql('p', '$1')}
   ORDER BY p.position ASC NULLS LAST, p.created_at COLLATE "C", p.id COLLATE "C"`
 // 增量里的现状：同一可见口径，只查日志里出现过的 id
 const SELECT_MINE_BY_IDS = `SELECT ${apiPageColumns('p')} FROM live_pages p
-  JOIN space_members m ON m.space_id = p.space_id AND m.user_id = $1
-  WHERE p.id = ANY($2::text[])`
+  WHERE p.id = ANY($2::text[]) AND ${pageVisibleSql('p', '$1')}`
 // 第一条语句定下事务快照，同时取游标与清理水位（floor 行不存在 = 从没清理过）
 const SELECT_HEAD = `SELECT pg_snapshot_xmin(pg_current_snapshot())::text AS cursor,
   (SELECT xid::text FROM page_changes_floor) AS floor`
 const SELECT_MY_SPACES = 'SELECT space_id FROM space_members WHERE user_id = $1 ORDER BY space_id'
+// 分享进指纹：直接给我的分享（页、档位：给 / 改 / 收回），加上只因分享才看得到的页（别人私人区里分享给我的那些子树、
+// 我作为访客看到的整棵子树：区不放我进来，或这个空间我不是成员）。
+// 后者是为了挪动：有人把一棵子树挪进 / 挪出分享的范围，只有挪的那一页有变更日志，它下面的子页不会出现在增量里，只能整表。
+// 我的成员空间在调用方另算（SELECT_MY_SPACES），这里用 $2 传进来，不再连一次成员表
+const SELECT_MY_SHARE_KEYS = `SELECT 's:' || page_id || ':' || level AS k FROM page_shares WHERE user_id = $1
+  UNION SELECT 'r:' || r.shared_id FROM page_share_reach($1) r JOIN pages p ON p.id = r.shared_id
+    WHERE (p.private_owner IS NOT NULL AND p.private_owner <> $1) OR NOT (p.space_id = ANY($2::text[]))
+  ORDER BY 1`
 const SELECT_CHANGED_IDS = `SELECT DISTINCT c.page_id FROM page_changes c
-  WHERE c.xid >= $1::xid8 AND c.space_id IN (SELECT space_id FROM space_members WHERE user_id = $2)`
+  WHERE c.xid >= $1::xid8 AND ${changeVisibleSql('c', '$2')}`
 
 /** 日志保留期：更久没开过的客户端带着旧游标来，整表一次 */
 export const PAGE_CHANGES_RETAIN = '7 days'
@@ -62,9 +70,11 @@ export type PageSync =
 // xid8 是无符号 64 位，十进制至多 20 位；19 位以内恒在范围里
 const CURSOR_RE = /^\d{1,19}$/
 
-/** 成员指纹：我所在空间 id 排序后的短哈希。不一致 = 加入 / 退出过空间（或空间被删），整表 */
-export function membersKey(spaceIds: readonly string[]): string {
-  return createHash('sha256').update(spaceIds.join('\n')).digest('hex').slice(0, 16)
+/** 成员指纹：我所在空间 id 排序后的短哈希，有分享给我的再接上分享的键（SELECT_MY_SHARE_KEYS）。
+ *  不一致 = 加入 / 退出过空间（或空间被删）、分享给我的变了，整表；客户端也据此重拉「分享给我的」 */
+export function membersKey(spaceIds: readonly string[], shareKeys: readonly string[] = []): string {
+  const parts = shareKeys.length ? [...spaceIds, '', ...shareKeys] : spaceIds
+  return createHash('sha256').update(parts.join('\n')).digest('hex').slice(0, 16)
 }
 
 /** 能不能从 since 增量：格式对、不比清理水位旧、也不比现在的游标新（库被重建 / 从备份恢复后事务号会回到更小的值，
@@ -90,7 +100,11 @@ export async function syncPages(
     await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY')
     const head = (await client.query<{ cursor: string; floor: string | null }>(SELECT_HEAD)).rows[0]!
     const spaces = (await client.query<{ space_id: string }>(SELECT_MY_SPACES, [userId])).rows
-    const fingerprint = membersKey(spaces.map((r) => r.space_id))
+    const shares = (await client.query<{ k: string }>(SELECT_MY_SHARE_KEYS, [userId, spaces.map((r) => r.space_id)])).rows
+    const fingerprint = membersKey(
+      spaces.map((r) => r.space_id),
+      shares.map((r) => r.k),
+    )
     const from = members === fingerprint ? deltaFrom(since, head.cursor, head.floor) : null
     let out: PageSync
     if (from === null) {

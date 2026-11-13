@@ -118,8 +118,8 @@ describe('空间 AI 的配置', () => {
   it('成员看得到启用没有和名字；只有 owner 看得到 / 改得了连接；非成员与个人空间 404；空间列表带 ai', async () => {
     const t = await team({ enable: false })
     const bob = await join(t.spaceId, 'bob')
-    expect(await getJson(`/api/spaces/${t.spaceId}/ai`, bob.cookie)).toEqual({ status: 200, body: { enabled: false, name: 'AI' } })
-    expect((await getJson(`/api/spaces/${t.spaceId}/ai`, t.alice)).body).toEqual({ enabled: false, name: 'AI', connectionId: null })
+    expect(await getJson(`/api/spaces/${t.spaceId}/ai`, bob.cookie)).toEqual({ status: 200, body: { enabled: false, name: '空间 AI' } })
+    expect((await getJson(`/api/spaces/${t.spaceId}/ai`, t.alice)).body).toEqual({ enabled: false, name: '空间 AI', connectionId: null })
 
     // bob 自己的连接：选它也不行（只能选 owner 自己的），bob 也改不了
     const bobConn = await insertConnection(pool, bob.id, { name: 'b', protocol: 'anthropic', baseUrl: null, model: 'claude-opus-5-5' }, BOB_KEY, assistantSecret)
@@ -145,13 +145,13 @@ describe('空间 AI 的配置', () => {
     expect((await getJson('/api/spaces/no-such/ai', t.alice)).status).toBe(404)
     await postJson('/api/pages', t.alice, {})
     const personal = (await pool.query<{ id: string }>('SELECT id FROM spaces WHERE owner_id = $1 AND is_personal', [t.aliceId])).rows[0]!.id
-    expect((await getJson(`/api/spaces/${personal}/ai`, t.alice)).body).toEqual({ enabled: false, name: 'AI', connectionId: null })
+    expect((await getJson(`/api/spaces/${personal}/ai`, t.alice)).body).toEqual({ enabled: false, name: '空间 AI', connectionId: null })
     expect((await putJson(`/api/spaces/${personal}/ai`, t.alice, { connectionId: t.connectionId })).status).toBe(200)
 
     const list = (await getJson<Array<{ id: string; ai: unknown }>>('/api/spaces', bob.cookie)).body
-    expect(list.find((s) => s.id === t.spaceId)?.ai).toEqual({ enabled: true, name: 'AI 秘书' })
+    expect(list.find((s) => s.id === t.spaceId)?.ai).toEqual({ enabled: true, name: 'AI 秘书', chat: null })
     const own = (await getJson<Array<{ id: string; ai: unknown }>>('/api/spaces', t.alice)).body
-    expect(own.find((s) => s.id === personal)?.ai).toEqual({ enabled: true, name: 'AI' })
+    expect(own.find((s) => s.id === personal)?.ai).toEqual({ enabled: true, name: '空间 AI', chat: null })
 
     // owner 删了连接：停用（列表与 GET 都是），名字留着
     await deleteConnection(pool, t.aliceId, t.connectionId)
@@ -159,6 +159,7 @@ describe('空间 AI 的配置', () => {
     expect((await getJson<Array<{ id: string; ai: unknown }>>('/api/spaces', bob.cookie)).body.find((s) => s.id === t.spaceId)?.ai).toEqual({
       enabled: false,
       name: 'AI 秘书',
+      chat: null,
     })
   })
 })
@@ -231,7 +232,7 @@ describe('>> 里 @AI', () => {
 
     const names = await agentNames(pool, { localAgents: () => [], onlineAgents: () => undefined }, [SPACE_AI_ID], t.pageId)
     expect(names.get(SPACE_AI_ID)).toEqual({ label: '小助手' })
-    expect((await agentNames(pool, { localAgents: () => [], onlineAgents: () => undefined }, [SPACE_AI_ID])).get(SPACE_AI_ID)).toEqual({ label: 'AI' })
+    expect((await agentNames(pool, { localAgents: () => [], onlineAgents: () => undefined }, [SPACE_AI_ID])).get(SPACE_AI_ID)).toEqual({ label: '空间 AI' })
     sse.stop()
     bobDoc.destroy()
     carolDoc.destroy()
@@ -426,6 +427,6 @@ describe('显示名', () => {
     expect((await agentNames(pool, host, [SPACE_AI_ID], t.pageId)).get(SPACE_AI_ID)?.label).toBe('新名字')
     // 没配过空间 AI 的团队空间
     const fresh = (await otherSpace(t.alice, '空的')).pageId
-    expect((await agentNames(pool, host, [SPACE_AI_ID], fresh)).get(SPACE_AI_ID)?.label).toBe('AI')
+    expect((await agentNames(pool, host, [SPACE_AI_ID], fresh)).get(SPACE_AI_ID)?.label).toBe('空间 AI')
   })
 })

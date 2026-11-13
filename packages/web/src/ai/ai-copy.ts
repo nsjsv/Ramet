@@ -1,16 +1,15 @@
 import { AUTOMATION_COPY } from './automation-copy'
 
-/* ---------- AI 页（/ai：Genet / 任务 / 自动 / Skill / 记忆）的界面文案（并进 copy.ts 的 COPY.ai；单独成文件是为了让 copy.ts 不超过 800 行）---------- */
+/* ---------- Genet 页（/ai：Genet / 任务 / 自动 / 记忆）的界面文案（并进 copy.ts 的 COPY.ai；单独成文件是为了让 copy.ts 不超过 800 行）---------- */
 export const AI_COPY = {
-  /** 侧栏入口 */
-  nav: 'AI',
+  /** 侧栏入口：个人的 Genet（各空间的空间 AI 在页面树上方另有一行） */
+  nav: 'Genet',
   /** 分页栏（这一页的标题）的无障碍名 */
-  tabsLabel: 'AI',
+  tabsLabel: 'Genet',
   tabs: {
     genet: 'Genet',
     tasks: '任务',
     automations: '自动',
-    skills: 'Skill',
     memory: '记忆',
   },
   tasks: {

@@ -2,7 +2,8 @@
 // 与评论里 @Genet（genet-call.ts）的区别：Genet 是叫的人自己的 AI，经他的 Genet 页处理；空间 AI 是空间的，直接在中心跑一轮
 // （drivers/assistant/run-once.ts，不挂在任何对话页上），回复以 AI 自己的名义写进串里（comments.author_ai = 'space'，没有用户作者）。
 // 发起（posted，评论接口写成功之后在后台跑）：新串首条 / 回复里带空间 AI 记号、作者不是 AI → 记一次呼叫。
-//   页面所在空间没启用（没配、连接没了）或叫的人不是成员 → 直接记 failed「这个空间还没有启用 AI」；否则记 waiting 排队。
+//   页面在私人区 → 直接记 failed「私人页上叫不了空间 AI」；页面所在空间没启用（没配、连接没了）或叫的人不是成员 → failed「这个空间还没有启用 AI」；
+//   否则记 waiting 排队。
 // 同一个串里的呼叫一个接一个跑（后叫的要看得到前一次的回复，并发回两条也乱）；不同串互不等。
 // 跑：排到时再按此刻的配置解析一次（排队期间可能被停用）→ 签一把只读、收窄到这个空间、权限上限是叫的人的凭证 →
 //   一轮（输入：空间记忆、页面、划词原文、整串评论带署名、叫它的那条、去掉记号后的要求）→ 文字非空就写回串里 → answered。
@@ -38,11 +39,13 @@ export const CALL_RESTARTED = '服务重启了，请再叫一次'
 export const CALL_TIMED_OUT = '等了太久没有结果，请再叫一次'
 export const CALL_EMPTY = '没有给出回复'
 export const CALL_GONE = '评论串或页面已经不在了'
+export const CALL_PRIVATE = '私人页上叫不了空间 AI：它是整个空间共用的，碰不到某个人的私人区'
 /** 失败原因的长度上限（上游报错可能很长） */
 const REASON_MAX = 300
 const LINE_MAX = 1500
 
 const SELECT_CALL = 'SELECT body, author_ai, deleted_at IS NOT NULL AS deleted FROM comments WHERE id = $1'
+const SELECT_PRIVATE = 'SELECT 1 FROM pages WHERE id = $1 AND private_owner IS NOT NULL'
 const INSERT_CALL = `INSERT INTO comment_ai_calls (comment_id, thread_id, invoker_id, state, reason, created_at, settled_at)
   VALUES ($1, $2, $3, $4::text, $5, $6, CASE WHEN $4::text = 'waiting' THEN NULL ELSE now() END)
   ON CONFLICT (comment_id) DO NOTHING RETURNING comment_id`
@@ -114,7 +117,8 @@ export class SpaceAiCalls {
     const row = (await pool.query<{ body: string; author_ai: string | null; deleted: boolean }>(SELECT_CALL, [c.commentId])).rows[0]
     if (!row || row.deleted || row.author_ai || !callsSpaceAi(row.body)) return
     const agent = await resolveSpaceAi(pool, { id: invoker }, c.pageId)
-    const created = await pool.query(INSERT_CALL, [c.commentId, c.threadId, invoker, agent ? 'waiting' : 'failed', agent ? '' : SPACE_AI_OFF, new Date()])
+    const off = agent ? '' : (await pool.query(SELECT_PRIVATE, [c.pageId])).rowCount ? CALL_PRIVATE : SPACE_AI_OFF
+    const created = await pool.query(INSERT_CALL, [c.commentId, c.threadId, invoker, agent ? 'waiting' : 'failed', off, new Date()])
     if (!created.rowCount) return
     this.deps.changed(c.pageId)
     if (agent) await this.enqueue(c.threadId, () => this.answer(c, invoker))
@@ -194,7 +198,7 @@ export class SpaceAiCalls {
     // 跑的这段时间里串可能被删、页面进了回收站、那种评论被关掉：不往看不见的地方写
     const still = (await pool.query<Ctx>(SELECT_CONTEXT, [c.threadId])).rows[0]
     if (!still) return CALL_GONE
-    const comment = await addAiReply(pool, { pageId: still.page_id, spaceId: still.space_id, threadId: c.threadId, invokerId: invoker, body: answer })
+    const comment = await addAiReply(pool, { pageId: still.page_id, threadId: c.threadId, invokerId: invoker, body: answer })
     await this.settle(c, 'answered')
     this.deps.posted({ commentId: comment.id, threadId: c.threadId, pageId: still.page_id, authorId: null })
     return null

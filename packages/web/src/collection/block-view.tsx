@@ -23,6 +23,7 @@ import { useCollection, useCollectionPages, useCollectionSchema, useCollectionSp
 import CollectionSurface from './CollectionSurface'
 import { BulkSlot } from './bulk-slot'
 import { blockVerdict, blockWritable, needsState } from './embed-verdict'
+import { canWritePage, useMyShares, useSelfId } from '../page-share'
 import { NameInput } from './name-input'
 import { toastError } from '../ui/toast'
 
@@ -137,10 +138,13 @@ function CollectionBlock({ attrs, link, opts, setViewId, removeBlock }: BlockPro
   const listed = pages?.find((p) => p.id === cid)
   const title = listed?.title ?? state?.title ?? attrs.title
   const show = verdict.kind === 'show'
-  // 集合层面的写（改值、属性与视图定义、改名、恢复）按集合所在空间的角色算，不按宿主页：
+  // 集合层面的写（改值、属性与视图定义、改名、恢复）按我在集合页上的角色算，不按宿主页：
   // 从别的空间粘贴来的链接视图，我在那个空间是 viewer 就只读。块自己的 attr（看哪个视图、删块）仍归宿主页
   const spaces = useCollectionSpaces()
-  const writable = blockWritable(opts.editable, spaces, listed?.space_id ?? (verdict.kind === 'show' ? verdict.spaceId : null))
+  const me = useSelfId()
+  const shares = useMyShares(me)
+  const listedWritable = listed && pages ? canWritePage(listed, (id) => pages.find((p) => p.id === id), spaces, me, shares.byPage) : null
+  const writable = blockWritable(opts.editable, spaces, listed?.space_id ?? (verdict.kind === 'show' ? verdict.spaceId : null), listedWritable)
 
   const rename = (name: string, h: CollectionHandle): void => {
     h.doc.transact(() => writeTitleFragment(h.doc.getXmlFragment('title'), name))

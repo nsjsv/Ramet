@@ -1,12 +1,13 @@
 // ---------- 收件箱里规则相关的两类：「自动化通知」与「正文里 @了你」 ----------
 // 自动化通知（automation_notices，规则的「发通知」动作写的）：
 // 只给收件人自己；7 天内、最多 30 条、新的在前；收件人必须仍是规则所在空间的成员（列举类只含自己是成员的空间，同别的类型）。
-// 带的页面（事件所在页）只在它还活着、收件人是那个空间的成员时给标题和 id，否则当没有。可「知道了」（automation:<通知 id>）。
+// 带的页面（事件所在页）只在它还活着、收件人看得到它时给标题和 id，否则当没有。可「知道了」（automation:<通知 id>）。
 // 规则删了通知留着（rule_name 是写通知时记下的），ruleId 变成 null。
-// 正文里 @了你（page_mentions，triggers/sources/mention.ts 记的）：别人加的（认得出是谁、不是我自己）、30 天内、页面活着且我仍是它所在空间的成员、
+// 正文里 @了你（page_mentions，triggers/sources/mention.ts 记的）：别人加的（认得出是谁、不是我自己）、30 天内、页面活着且我仍看得到它、
 // 晚于我上次打开那一页（inbox_seen，同「做完待你看」：打开那一页就算看过）；每页只给最新的一条，最多 30 条。不用配模型连接也有。
 
 import type { Pool } from 'pg'
+import { pageAccessJoin, pageVisibleSql } from '../page-visibility.js'
 
 export const AUTOMATION_PREFIX = 'automation:'
 
@@ -26,7 +27,7 @@ const WINDOW_DAYS = 7
 const LIST_MAX = 30
 
 const SELECT_NOTICES = `SELECT n.id, n.trigger_id, n.rule_name, n.text, n.created_at,
-    CASE WHEN p.id IS NOT NULL AND EXISTS (SELECT 1 FROM space_members m WHERE m.space_id = p.space_id AND m.user_id = $1) THEN p.id END AS page_id,
+    CASE WHEN p.id IS NOT NULL AND ${pageVisibleSql('p', '$1')} THEN p.id END AS page_id,
     p.title AS page_title
   FROM automation_notices n LEFT JOIN live_pages p ON p.id = n.page_id
   WHERE n.user_id = $1 AND n.created_at > now() - interval '${WINDOW_DAYS} days'
@@ -78,7 +79,7 @@ const SELECT_DOC_MENTIONS = `SELECT * FROM (
   SELECT DISTINCT ON (pm.page_id) pm.id, pm.page_id, pm.block_id, pm.excerpt, pm.created_at, pm.actor_id, u.username, p.title
   FROM page_mentions pm
   JOIN live_pages p ON p.id = pm.page_id
-  JOIN space_members m ON m.space_id = p.space_id AND m.user_id = $1
+  ${pageAccessJoin('p', '$1', 'm')}
   JOIN users u ON u.id = pm.actor_id
   LEFT JOIN inbox_seen s ON s.user_id = $1 AND s.page_id = pm.page_id
   WHERE pm.user_id = $1 AND pm.actor_id <> $1 AND pm.created_at > now() - interval '${MENTION_DAYS} days'

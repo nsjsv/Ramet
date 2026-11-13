@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react'
-import { api, type BoardFolder, type BoardsPayload, type Page } from './api'
+import type { BoardFolder, BoardsPayload, Page } from './api'
 import { useBoardsSnapshot } from './boards-store'
 import { editInfoOf, refreshEditMarks, subscribeEditMarks, type EditInfo } from './edit-marks-store'
-import { copyText } from './clipboard'
 import { isFavorite, toggleFavorite, useFavorites } from './favorites-store'
 import { COPY } from './copy'
 import { EditedAgo, EditInfoLines } from './edit-info'
@@ -14,7 +13,9 @@ import PreviewToggle from './project/PreviewToggle'
 import ProjectToggle from './project/ProjectToggle'
 import CommentsButton from './comments/CommentsButton'
 import CommentSwitches, { type CommentSwitchState } from './comments/CommentSwitches'
-import { Checkbox } from './ui/Checkbox'
+import { isPrivatePage } from './page-area'
+import { isSharedToMe, nearestShare, useMyShares, useSelfId } from './page-share'
+import SharePanel from './share/SharePanel'
 
 /* ---------- 页面顶栏 ----------
  * 一条 48px，sticky 钉在 .main 滚动口顶部：左面包屑（[data-flip]：侧栏收起 / 展开时 FLIP 跟着滑），
@@ -29,6 +30,8 @@ interface Props {
   /** 同页其他人（awareness，去掉自己）；editor-session 维护 */
   peers: Identity[]
   canPublish: boolean
+  /** 能编辑这页：分享弹层里能邀请成员、改档位（share/SharePanel.tsx）；缺省 = 不能 */
+  canShare?: boolean
   /** pages 里该页当前 published；分享弹层按它换形态 */
   published: boolean
   /** pages 里该页的 publish_includes_runs：公开时是否连 agent 过程页一起公开（默认否） */
@@ -88,7 +91,8 @@ export default function TopBar(p: Props) {
       setShareOpen(false)
     }
     const onDown = (e: MouseEvent) => {
-      if (!(e.target as Element | null)?.closest('.topbar-actions')) close()
+      // 弹层里的下拉列表挂在 body 上（ui/popover.tsx 的 .pop-card），点它不算外点
+      if (!(e.target as Element | null)?.closest('.topbar-actions, .pop-card')) close()
     }
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') close()
@@ -149,7 +153,7 @@ export default function TopBar(p: Props) {
             </button>
             {/* 打包只给普通文档页（过程页 / skill 页不导出） */}
             {isDoc && p.onExport && <ExportItem onExport={p.onExport} onDone={() => setMenuOpen(false)} />}
-            {p.canPublish && (
+            {(p.canPublish || p.canShare) && (
               <button
                 type="button"
                 onClick={() => {
@@ -157,7 +161,7 @@ export default function TopBar(p: Props) {
                   setShareOpen(true)
                 }}
               >
-                <Icon name="globe" className="menu-icon" />
+                <Icon name="users" className="menu-icon" />
                 {COPY.top.share}
               </button>
             )}
@@ -174,8 +178,16 @@ export default function TopBar(p: Props) {
             <EditInfoLines words={words} info={editInfo} />
           </div>
         )}
-        {shareOpen && p.canPublish && p.pageId && (
-          <SharePopover pageId={p.pageId} published={p.published} includeRuns={p.includeRuns} onChanged={p.onChanged} />
+        {shareOpen && (p.canPublish || p.canShare) && p.pageId && (
+          <SharePanel
+            pageId={p.pageId}
+            spaceId={p.pages?.find((pg) => pg.id === p.pageId)?.space_id ?? null}
+            canShare={!!p.canShare}
+            canPublish={p.canPublish}
+            published={p.published}
+            includeRuns={p.includeRuns}
+            onChanged={p.onChanged}
+          />
         )}
       </div>
     </header>
@@ -229,7 +241,8 @@ function folderPathOf(boards: BoardsPayload | null, pageId: string | undefined):
 }
 
 /** 目录 → … → 根祖先 → … → 父页 → 当前页。根页也渲染（只有当前页一段，位置常驻不跳变）。
- *  集合祖先不列：行页面的面包屑直接从集合所在的页接到行，不显示集合名。目录段只是位置提示，不可点 */
+ *  集合祖先不列：行页面的面包屑直接从集合所在的页接到行，不显示集合名。目录段只是位置提示，不可点。
+ *  私人页最前面一段锁形的「私人」：只有我看得到；别人分享给我的私人页是「分享给你的」（文档页与集合页共用这一条面包屑） */
 function Crumbs({ pages, pageId, onNavigate }: { pages: Page[] | null; pageId: string | undefined; onNavigate: (to: string) => void }) {
   const boards = useBoardsSnapshot()
   const byId = new Map((pages ?? []).map((pg) => [pg.id, pg]))
@@ -245,8 +258,26 @@ function Crumbs({ pages, pageId, onNavigate }: { pages: Page[] | null; pageId: s
     cur = parent
   }
   const folders = folderPathOf(boards, cur?.id)
+  // 别人私人区里分享给我的页、我作为访客看到的页：最前面一段写「分享给你的」，悬停写是谁分享的（最近的那条分享）
+  const me = useSelfId()
+  const shares = useMyShares(me)
+  const sharedBy = current ? (nearestShare(current.id, (id) => byId.get(id), shares.byPage)?.by ?? null) : null
+  const sharedToMe = !!current && (isSharedToMe(current, me) || shares.guestSpaces.some((g) => g.id === current.space_id))
   return (
     <nav className="crumbs" aria-label={COPY.top.crumbs} data-flip>
+      {sharedToMe ? (
+        <span className="crumb crumb-private" data-tip={COPY.area.sharedBy(sharedBy)} aria-label={COPY.area.sharedBy(sharedBy)}>
+          <Icon name="users" size={14} />
+          <span>{COPY.area.sharedCrumb}</span>
+        </span>
+      ) : (
+        isPrivatePage(current) && (
+          <span className="crumb crumb-private" data-tip={COPY.area.privateBadge} aria-label={COPY.area.privateBadge}>
+            <Icon name="lock" size={14} />
+            <span>{COPY.area.privateTree}</span>
+          </span>
+        )
+      )}
       {folders.map((f) => (
         <span key={f.id} className="crumb" data-tip={f.name}>
           <Icon name="folder" size={16} />
@@ -282,85 +313,5 @@ function Presence({ peers }: { peers: Identity[] }) {
       ))}
       {peers.length > 4 && <i className="is-more">+{peers.length - 4}</i>}
     </span>
-  )
-}
-
-/** 「分享」弹层：读当前页 published 决定形态；操作后 onChanged() 刷 pages，弹层状态随之更新。
- *  includeRuns（是否连 agent 过程页一起公开）是这个页面自己的属性，不是过程页上的开关：
- *  发布语义是「祖先公开即子树公开」，子页上的 published 表达不了「我不要公开」 */
-function SharePopover({
-  pageId,
-  published,
-  includeRuns,
-  onChanged,
-}: {
-  pageId: string
-  published: boolean
-  includeRuns: boolean
-  onChanged: () => void
-}) {
-  const [busy, setBusy] = useState(false)
-  const [copied, setCopied] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const link = `${location.origin}/p/${pageId}`
-
-  /** 发布态与「连过程一起公开」同一条写路径；未发布时也允许先设好过程开关 */
-  async function save(nextPublished: boolean, nextRuns?: boolean) {
-    setBusy(true)
-    setError(null)
-    try {
-      await api.setPublished(pageId, nextPublished, nextRuns)
-      onChanged() // pages 刷新 → EditorPage 重渲染，本弹层按新 published 换形态
-    } catch (err) {
-      setError(err instanceof Error && err.message ? err.message : COPY.retry)
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function copy() {
-    if (await copyText(link)) {
-      setCopied(true)
-      window.setTimeout(() => setCopied(false), 2000)
-    }
-    // 失败：不阻断，链接框可手动选中复制
-  }
-
-  const runsToggle = (
-    <Checkbox className="share-option" label={COPY.share.includeRuns} checked={includeRuns} disabled={busy} onChange={(on) => void save(published, on)} />
-  )
-
-  return (
-    <div className="share-pop">
-      {published ? (
-        <>
-          <div className="share-link-row">
-            <input className="share-link" readOnly value={link} onFocus={(e) => e.currentTarget.select()} />
-            <button className="admin-btn" onClick={() => void copy()}>
-              {copied ? COPY.share.copied : COPY.share.copy}
-            </button>
-          </div>
-          {runsToggle}
-          <div className="share-actions">
-            <span className="share-state is-on">{COPY.share.on}</span>
-            <button className="admin-btn danger" disabled={busy} onClick={() => void save(false)}>
-              {COPY.share.unpublish}
-            </button>
-          </div>
-        </>
-      ) : (
-        <>
-          <p className="share-hint">{COPY.share.hint}</p>
-          {runsToggle}
-          <div className="share-actions">
-            <span className="share-state">{COPY.share.off}</span>
-            <button className="admin-btn primary" disabled={busy} onClick={() => void save(true)}>
-              {COPY.share.publish}
-            </button>
-          </div>
-        </>
-      )}
-      {error && <p className="share-error">{error}</p>}
-    </div>
   )
 }

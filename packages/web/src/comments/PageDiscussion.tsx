@@ -58,6 +58,7 @@ export default function PageDiscussion({ pageId, ctx }: { pageId: string; ctx: C
           getSchema={ctx.getSchema}
           tick={ctx.tick}
           spaceId={ctx.spaceId}
+          privatePage={ctx.privatePage}
           placeholder={C.pagePlaceholder}
           onSubmit={async (text) => {
             await createThread('page', text)

@@ -8,6 +8,7 @@
  * 例外：主人在这个串里 @Genet 叫过它、还在等（comments/genet-call.ts 的 claim）→ 这次直接发出，不弹卡：是他叫它回在这里的；一次呼叫只免一次。
  * 发出去的回复记 via = 'genet'（界面上不另标，作者就是主人），广播、收件箱刷新、「评论找我」的触发与界面上回复同一条（posted）。 */
 
+import { GUEST_AI_READONLY, isGuestOf } from '../agents/guest-gate.js'
 import type { Context, Hono } from 'hono'
 import type { Pool } from 'pg'
 import { ASSISTANT_ID } from '../agents/assistant-agent.js'
@@ -36,6 +37,7 @@ async function replyable(pool: Pool, user: { id: string; role: string }, threadI
   const ctx = await threadContext(pool, threadId)
   const role = ctx ? await pageAccess(pool, ctx.pageId, user) : null
   if (!ctx || !role) return { status: 404, body: { error: '没有这个评论串，或者你看不到它了' } }
+  if (await isGuestOf(pool, user.id, ctx.pageId)) return { status: 403, body: { error: GUEST_AI_READONLY } }
   if (ctx.pageKind !== 'doc') return { status: 400, body: { error: '只有文档页能评论' } }
   if (!ctx.kindEnabled) return { status: 403, body: { error: '这一页关掉了这种评论' } }
   const title = (await pool.query<{ title: string }>('SELECT title FROM pages WHERE id = $1', [ctx.pageId])).rows[0]?.title || '无标题'
@@ -57,7 +59,7 @@ export function commentReplyRoutes(app: Hono, deps: CommentReplyDeps): void {
     const first = await replyable(pool, g.user, threadId)
     if ('status' in first) return c.json(first.body, first.status)
     const post = async (ctx: ThreadContext): Promise<{ ok: true; commentId: string }> => {
-      const comment = await addReply(pool, { pageId: ctx.pageId, spaceId: ctx.spaceId, threadId, userId: g.user.id, body: parsed.body, via: 'genet' })
+      const comment = await addReply(pool, { pageId: ctx.pageId, threadId, userId: g.user.id, body: parsed.body, via: 'genet' })
       deps.changed(ctx.pageId)
       deps.posted({ commentId: comment.id, threadId, pageId: ctx.pageId, authorId: g.user.id })
       return { ok: true, commentId: comment.id }

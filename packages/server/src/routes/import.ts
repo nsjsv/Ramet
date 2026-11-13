@@ -42,8 +42,9 @@ function mimeOf(path: string): string {
 const baseName = (path: string): string => path.split('/').pop() ?? path
 const dirOf = (path: string): string => path.split('/').slice(0, -1).join('/')
 
-/** 父页下现有子页的最大排序号（导入的页排在它们后面） */
-const MAX_POSITION = `SELECT coalesce(max(position), -1) AS max FROM live_pages WHERE parent_id IS NOT DISTINCT FROM $1 AND space_id = $2`
+/** 父页下现有子页的最大排序号（导入的页排在它们后面）。顶层按区分开：别人的私人页不算兄弟 */
+const MAX_POSITION = `SELECT coalesce(max(position), -1) AS max FROM live_pages
+  WHERE parent_id IS NOT DISTINCT FROM $1 AND space_id = $2 AND private_owner IS NOT DISTINCT FROM $3`
 
 /** onStored：新落的附件交给图床镜像入队（同 POST /api/files，见 file-store.ts） */
 export function importRoutes(
@@ -67,6 +68,9 @@ export function importRoutes(
     if (!(file instanceof File)) return c.json({ error: 'file required' }, 400)
     const parentId = typeof body['parent'] === 'string' && body['parent'] ? body['parent'] : null
     if (!(await parentOk(pool, user, parentId, spaceId))) return c.json({ error: 'parent not found' }, 400)
+    // 落在顶层时建在哪一区：private=true 进我的私人区，缺省公共；有父页就跟父页（数据库触发器）
+    const privateOwner = !parentId && body['private'] === 'true' ? user.id : null
+    const area = parentId ? ((await pool.query<{ private_owner: string | null }>('SELECT private_owner FROM pages WHERE id = $1', [parentId])).rows[0]?.private_owner ?? null) : privateOwner
 
     const buf = Buffer.from(await file.arrayBuffer())
     let files: ImportFile[]
@@ -106,11 +110,11 @@ export function importRoutes(
 
     const idOf = new Map(pages.map((p) => [p.key, p.id]))
     const titles = pages.map((p, i) => rewritten[i]!.title ?? p.title)
-    const base = Number((await pool.query<{ max: number }>(MAX_POSITION, [parentId, spaceId])).rows[0]?.max ?? -1) + 1
+    const base = Number((await pool.query<{ max: number }>(MAX_POSITION, [parentId, spaceId, area])).rows[0]?.max ?? -1) + 1
     await withTransaction(pool, async (client) => {
       for (const [i, page] of pages.entries()) {
         const parent = page.parentKey ? idOf.get(page.parentKey)! : parentId
-        await client.query(INSERT, [page.id, parent, user.id, spaceId, true])
+        await client.query(INSERT, [page.id, parent, user.id, spaceId, true, parent ? null : privateOwner])
         await client.query(SET_TITLE, [titles[i], page.id])
         await client.query('UPDATE pages SET position = $1 WHERE id = $2', [page.parentKey ? i : base + i, page.id])
       }
@@ -135,8 +139,9 @@ export function importRoutes(
     const user = c.get('user')
     const sourceId = c.req.param('id')
     const source = (await pool.query<{ space_id: string | null; owner_id: string | null }>(SELECT, [sourceId])).rows[0]
-    if (!source || (await pageRole(pool, user, source)) === null) return c.json({ error: 'page not found' }, 404)
-    const body = (await c.req.json().catch(() => ({}))) as { space_id?: unknown; parent_id?: unknown }
+    if (!source || (await pageRole(pool, user, { id: sourceId })) === null) return c.json({ error: 'page not found' }, 404)
+    const body = (await c.req.json().catch(() => ({}))) as { space_id?: unknown; parent_id?: unknown; private?: unknown }
+    if (body.private !== undefined && typeof body.private !== 'boolean') return c.json({ error: 'private must be a boolean' }, 400)
     const spaceId = typeof body.space_id === 'string' ? body.space_id : source.space_id
     if (!spaceId) return c.json({ error: 'space_id required' }, 400)
     const role = await roleInSpace(pool, user, spaceId)
@@ -144,7 +149,8 @@ export function importRoutes(
     if (role === 'viewer') return c.json({ error: 'forbidden' }, 403)
     const parentId = typeof body.parent_id === 'string' && body.parent_id ? body.parent_id : null
     if (!(await parentOk(pool, user, parentId, spaceId))) return c.json({ error: 'parent not found' }, 400)
-    const newId = await instantiatePage(pool, getLiveDoc, user, sourceId, spaceId, parentId)
+    // private = true：落在顶层时建进我的私人区（有父页时跟父页）
+    const newId = await instantiatePage(pool, getLiveDoc, user, sourceId, spaceId, parentId, body.private === true)
     if (!newId) return c.json({ error: 'page not found' }, 404)
     notify?.()
     return c.json({ id: newId }, 201)

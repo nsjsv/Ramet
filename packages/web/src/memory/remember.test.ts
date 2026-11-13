@@ -1,9 +1,9 @@
 import { afterEach, expect, test, vi } from 'vitest'
 import { COPY } from '../copy'
-import { bindPageSpace, parseRemember, remember, spaceOfPage } from './remember'
+import { parseRemember, remember } from './remember'
 
 /* 不变量：只有「/记住」后面跟空白或结尾才是命令（/记住了、记住 都不是）；内容取其后的全部（含换行）并去首尾空白；
- * 没内容 / 没空间在本地就给原因、不发请求；服务端拒绝（403 / 413）的人话原样给；页面卸载后不再查得到空间。 */
+ * 没内容在本地就给原因、不发请求；记到哪按服务端回的去处提示；服务端拒绝（403 / 413）的人话原样给。 */
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -22,36 +22,25 @@ test('parseRemember：识别 /记住 命令，取其后的内容', () => {
   expect(parseRemember('')).toBeNull()
 })
 
-test('remember：没内容 / 没空间在本地就给原因，不发请求', async () => {
+test('remember：没内容在本地就给用法，不发请求', async () => {
   const fetchMock = vi.fn()
   vi.stubGlobal('fetch', fetchMock)
-  expect(await remember('s1', '')).toEqual({ ok: false, message: COPY.memory.command.usage })
-  expect(await remember(undefined, '内容')).toEqual({ ok: false, message: COPY.memory.command.noSpace })
-  expect(await remember(null, '内容')).toEqual({ ok: false, message: COPY.memory.command.noSpace })
+  expect(await remember('p1', '')).toEqual({ ok: false, message: COPY.memory.command.usage })
   expect(fetchMock).not.toHaveBeenCalled()
 })
 
-test('remember：POST 到该空间的记忆接口；服务端拒绝时把人话带出来', async () => {
+test('remember：POST 到这一页的记忆接口，按服务端回的去处提示；服务端拒绝时把人话带出来', async () => {
   const fetchMock = vi
     .fn()
-    .mockResolvedValueOnce(new Response(JSON.stringify({ memory: { id: 'm1' } }), { status: 201 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ memory: { id: 'm1' }, target: 'personal' }), { status: 201 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ memory: { id: 'm2' }, target: { space: '研发组' } }), { status: 201 }))
     .mockResolvedValueOnce(new Response(JSON.stringify({ error: 'space_full', message: '这个空间的记忆已满' }), { status: 413 }))
     .mockResolvedValueOnce(new Response(JSON.stringify({ error: 'forbidden' }), { status: 403 }))
   vi.stubGlobal('fetch', fetchMock)
-  expect(await remember('s/1', '约定')).toEqual({ ok: true })
-  expect(fetchMock.mock.calls[0]![0]).toBe('/api/spaces/s%2F1/memories')
-  expect(fetchMock.mock.calls[0]![1]).toMatchObject({ method: 'POST', body: JSON.stringify({ text: '约定' }) })
-  expect(await remember('s1', '再来一条')).toEqual({ ok: false, message: '这个空间的记忆已满' })
-  expect(await remember('s1', '只读成员')).toEqual({ ok: false, message: 'forbidden' })
-})
-
-test('bindPageSpace：登记 / 注销；重复登记时旧的注销不会误删新的', () => {
-  const off1 = bindPageSpace('p1', () => 'space-a')
-  expect(spaceOfPage('p1')).toBe('space-a')
-  expect(spaceOfPage('p2')).toBeUndefined()
-  const off2 = bindPageSpace('p1', () => 'space-b')
-  off1()
-  expect(spaceOfPage('p1')).toBe('space-b')
-  off2()
-  expect(spaceOfPage('p1')).toBeUndefined()
+  expect(await remember('p/1', '偏好')).toEqual({ ok: true, message: COPY.memory.command.savedPersonal })
+  expect(fetchMock.mock.calls[0]![0]).toBe('/api/pages/p%2F1/memories')
+  expect(fetchMock.mock.calls[0]![1]).toMatchObject({ method: 'POST', body: JSON.stringify({ text: '偏好' }) })
+  expect(await remember('p1', '约定')).toEqual({ ok: true, message: COPY.memory.command.savedSpace('研发组') })
+  expect(await remember('p1', '再来一条')).toEqual({ ok: false, message: '这个空间的记忆已满' })
+  expect(await remember('p1', '只读成员')).toEqual({ ok: false, message: 'forbidden' })
 })

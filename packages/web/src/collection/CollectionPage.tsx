@@ -25,11 +25,13 @@ type Props = {
   onTitleLive: (id: string, title: string) => void
   username: string
   readOnly?: boolean
+  /** 我在这个空间是访客：能编辑也不能再分享 */
+  guest?: boolean
 }
 
 const noop = (): void => undefined
 
-export default function CollectionPage({ pages, onChanged, onTitleLive, username, readOnly = false }: Props) {
+export default function CollectionPage({ pages, onChanged, onTitleLive, username, readOnly = false, guest = false }: Props) {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const titleRef = useRef<HTMLDivElement>(null)
@@ -125,6 +127,7 @@ export default function CollectionPage({ pages, onChanged, onTitleLive, username
         pageId={id}
         peers={[]}
         canPublish={false}
+        canShare={!readOnly && !guest}
         published={false}
         includeRuns={false}
         onChanged={onChanged}

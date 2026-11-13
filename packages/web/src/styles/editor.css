@@ -1,5 +1,16 @@
 /* ---------- 编辑区 ---------- */
 
+/* 打开着的页看不到了（被挪进别人的私人区、被移出空间、删了）：路由不挂编辑器，只留一句说明 */
+.page-gone {
+  max-width: 480px;
+  margin: 96px auto 0;
+  padding: 0 24px;
+  color: var(--ink-2);
+  font-size: var(--t-sm);
+  line-height: 1.7;
+  text-align: center;
+}
+
 .editor-page {
   /* 正文 720px + 左 gutter 40（拖拽手柄落脚）+ 左右各 48 */
   max-width: calc(720px + 40px + 96px);

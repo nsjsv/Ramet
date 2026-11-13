@@ -5,6 +5,7 @@
  *   只有空间 owner 能改（成员 403，全局 admin 也不例外）；连接必须是 owner 自己的（别人的 / 不存在的 400）；名字 trim 后 1–20 字（400）。
  *   改完经 notify 广播，在线端重拉空间列表（列表里带 ai，@ 菜单与回复抬头用它）。
  * owner 在设置里删 / 改了自己的连接也会让空间 AI 停用或恢复（删掉的连接被 SET NULL），watchSpaceAiConnections 同样广播。
+ * POST /api/spaces/:id/ai/chat → { pageId, created }：我和空间 AI 的直接对话页（在我的私人区），没有就建；只读成员 403 { error: 'viewer' }、没开 409 { error: 'off' }、非成员 404。
  * 生效与否的判定只有 agents/space-ai.ts 的 SPACE_AI_JOIN 一份。每条路由自带 requireAuth，挂载顺序无影响。 */
 
 import { Hono, type Context } from 'hono'
@@ -12,6 +13,7 @@ import type { Pool } from 'pg'
 import { getConnection, onConnectionsChanged } from '../ai-connections.js'
 import { requireAuth, type AuthEnv } from '../auth.js'
 import { normalizeSpaceAiName, SPACE_AI_DEFAULT_NAME, SPACE_AI_JOIN, SPACE_AI_NAME_MAX } from '../agents/space-ai.js'
+import { ensureSpaceAiChat } from '../agents/space-ai-chat.js'
 
 type ConfigRow = { owner_id: string; my_role: string | null; name: string | null; connection_id: string | null }
 
@@ -89,6 +91,17 @@ export function spaceAiRoutes(pool: Pool, notify?: () => void) {
     notify?.()
     const updated = await load(c)
     return updated ? c.json(view(updated, user.id)) : c.json({ error: 'space not found' }, 404)
+  })
+
+  // 我和这个空间的空间 AI 的直接对话页：没有就建（agents/space-ai-chat.ts）。只读成员 403、没开 409、非成员 404
+  app.post('/api/spaces/:id/ai/chat', auth, async (c) => {
+    const res = await ensureSpaceAiChat(pool, c.get('user'), c.req.param('id'))
+    if ('error' in res) {
+      if (res.error === 'not found') return c.json({ error: 'space not found' }, 404)
+      return c.json({ error: res.error }, res.error === 'viewer' ? 403 : 409)
+    }
+    if (res.created) notify?.()
+    return c.json(res)
   })
 
   return app

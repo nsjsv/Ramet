@@ -39,6 +39,12 @@
   white-space: nowrap;
 }
 
+/* 私人页的面包屑头一段：只有我看得到（不可点，和目录段一样只是位置提示） */
+.crumb-private {
+  flex: none;
+  color: var(--ink-3);
+}
+
 button.crumb {
   transition: background var(--d-1), color var(--d-1);
 }
@@ -318,4 +324,96 @@ button.crumb:hover {
   bottom: 0;
   left: 100%;
   width: 10px;
+}
+
+/* 分享弹层的分段：邀请成员 / 有权限的人 / 发布到网上（share/SharePanel.tsx） */
+.share-section + .share-section {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.share-title {
+  margin: 0 0 8px;
+  font-size: var(--t-xs);
+  font-weight: 600;
+  color: var(--ink-3);
+}
+
+.share-invite {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.share-invite-who {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--t-sm);
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--bg);
+  color: var(--ink);
+  outline: none;
+}
+
+.share-invite-who:focus {
+  border-color: var(--accent);
+}
+
+.share-invite + .share-hint {
+  margin: 6px 0 0;
+  font-size: var(--t-xs);
+  color: var(--ink-3);
+}
+
+.share-person-who {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* 访客：不是这个空间的成员 */
+.share-person-tag {
+  flex: none;
+  padding: 0 5px;
+  border-radius: var(--r-sm);
+  background: var(--hover);
+  font-size: var(--t-xs);
+  color: var(--ink-2);
+}
+
+.share-people {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.share-person {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  font-size: var(--t-sm);
+  color: var(--ink);
+}
+
+.share-person-name {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.share-person-from,
+.share-person-level {
+  font-size: var(--t-xs);
+  color: var(--ink-3);
 }

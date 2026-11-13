@@ -14,7 +14,7 @@ import { queueHost } from './queue-host.js'
 import { AssistantDriver, type AssistantDeps } from './drivers/assistant/driver.js'
 import { ASSISTANT_ID, isAssistantId, resolveAssistant } from './assistant-agent.js'
 import { isSpaceAiId, pageToolCtx, resolveSpaceAi } from './space-ai.js'
-import { memoryBlockOfPage } from '../memories.js'
+import { pageMemory } from './space-context.js'
 import { DriverBase } from './drivers/base.js'
 import { createAdapter } from './drivers/create.js'
 import { listDirs, type DirListing } from './dirs.js'
@@ -32,6 +32,7 @@ import { TeamExec, type TeamRoundHost } from './team.js'
 import { TeamPlanError, TeamPlans } from './team-plan.js'
 import { TeamToolError } from './team.js'
 import { agentPosture, authorize, ForbiddenError } from './posture.js'
+import { assertNotGuest } from './guest-gate.js'
 import { agentVersions, unavailableAgents } from './drivers/cli-version.js'
 import { ASSISTANT_MACHINE, assertCanUse, assertLocalOwner, inConnectorSpace, LOCAL_MACHINE, MachinePass, usableConnectors, type MachineScope } from './machine-access.js'
 import { recordMachineUse } from './machine-grants.js'
@@ -254,7 +255,7 @@ export class AgentManager {
         this.toolGrant(agent, mintPageToken(user.id, entry.key, { pageId, agentId: agent.id, canDispatch: false })),
       ],
       cwd: (pageId, agent) => effectiveCwd(this.pool, pageId, agent),
-      memory: (pageId) => memoryBlockOfPage(this.pool, pageId),
+      memory: (pageId) => pageMemory(this.pool, pageId),
       mirror: this.mirror,
       attachStep: (pageId, ev) => this.pages.get(pageId)?.run?.record?.tool(ev),
       onPageStop: (pageId, fn) => {
@@ -398,6 +399,7 @@ export class AgentManager {
    *  - 看得到但不是接入人、也没有有效的 agent 授权，抛 ForbiddenError（403，文案带主人名）
    *  授权判定在「是否在线」之前，离线不能成为绕过判定的缝；空间成员资格对所有人一视同仁（admin 没有特权）。 */
   async resolve(agentId: string, user: { id: string; role: string }, pageId?: string): Promise<ResolvedAgent | null> {
+    if (pageId) await assertNotGuest(this.pool, user.id, pageId)
     // Genet 不在目录里、不用任何机器：只在这个人自己的 Genet 页上解析得出来（判定在 assistant-agent.ts），没给页面就是未知
     if (isAssistantId(agentId)) return pageId ? resolveAssistant(this.pool, user, pageId) : null
     // 空间 AI 同理：按页面所在的团队空间解析（判定在 space-ai.ts）

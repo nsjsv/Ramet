@@ -48,6 +48,8 @@ export const API_PAGE_FIELDS = [
   'inline_comments',
   'page_comments',
   'position',
+  // 私人区的主人（空 = 公共区）：客户端据此分侧栏的「公共 / 私人」
+  'private_owner',
 ] as const
 
 export type ApiPageField = (typeof API_PAGE_FIELDS)[number]

@@ -21,9 +21,11 @@
 //                     source = 规则的来源（timer = 定时器）。跳过的（上一次还排着、超了每日上限）不进收件箱，只在 AI 页的列表里显示最近一次结果
 //   automation        规则的「发通知」动作写给我的一条通知（triggers/inbox-items.ts）：7 天内、最多 30 条，可「知道了」消掉
 //   doc_mention       有人在正文里 @了我（triggers/inbox-items.ts）：每页一条，打开那一页即看过（inbox_seen，同 done）
+//   share             有人把一页分享给了我（page-share-inbox.ts）：每页一条，打开那一页即看过（同 doc_mention）
 // 列举类读路径一律只含自己是成员的空间，全局 admin 也一样。
 import type { Pool } from 'pg'
 import { pageAccess } from './collab.js'
+import { pageAccessJoin } from './page-visibility.js'
 import { approvalPreview, type ApprovalPreview } from './agents/approval-detail.js'
 import { canUse, inConnectorSpace, type MachineScope } from './agents/machine-access.js'
 import { parseRemoteId, type ActiveRun, type PendingApproval } from './agents/manager-types.js'
@@ -33,6 +35,7 @@ import { agentNames, type AgentNameHost } from './agents/agent-names.js'
 import { isSpaceAiId, SPACE_AI_DEFAULT_NAME, spaceAiNames } from './agents/space-ai.js'
 import { commentItems, type CommentInboxItem } from './comments/inbox.js'
 import { AUTOMATION_PREFIX, automationItems, docMentionItems, SELECT_MY_NOTICE, type AutomationInboxItem, type DocMentionInboxItem } from './triggers/inbox-items.js'
+import { shareItems, type ShareInboxItem } from './page-share-inbox.js'
 
 export type InboxUser = { id: string; role: string }
 
@@ -125,6 +128,8 @@ export type InboxItem =
   | AutomationInboxItem
   /** 正文里 @了你：pageId / blockId 定位到那一块；actor = 加 @ 的人 */
   | DocMentionInboxItem
+  /** 分享给你：level = 可编辑 / 只读；actor = 分享的人 */
+  | ShareInboxItem
 
 const DONE_WINDOW_DAYS = 7
 const LIST_MAX = 30
@@ -158,12 +163,12 @@ export class InboxPoke {
 
 type PageInfo = { title: string; role: string }
 
-/** 这些页面里我是成员的那些（live_pages + space_members）：标题与我的角色。不是成员 / 已回收 / 不存在的页面没有这一行 */
+/** 这些页面里我看得到的那些（live_pages + page-visibility.ts）：标题与我的角色。看不到 / 已回收 / 不存在的页面没有这一行 */
 async function myPages(pool: Pool, userId: string, pageIds: string[]): Promise<Map<string, PageInfo>> {
   if (pageIds.length === 0) return new Map()
   const { rows } = await pool.query<{ id: string; title: string; role: string }>(
     `SELECT p.id, p.title, m.role FROM live_pages p
-     JOIN space_members m ON m.space_id = p.space_id AND m.user_id = $2
+     ${pageAccessJoin('p', '$2', 'm')}
      WHERE p.id = ANY($1::text[])`,
     [pageIds, userId],
   )
@@ -346,7 +351,7 @@ const SELECT_DONE = `SELECT p.id AS page_id, p.title, rp.id AS run_page_id, rp.d
     ORDER BY parent_id, done_at DESC, id
   ) rp
   JOIN live_pages p ON p.id = rp.parent_id
-  JOIN space_members m ON m.space_id = p.space_id AND m.user_id = $1
+  ${pageAccessJoin('p', '$1', 'm')}
   LEFT JOIN inbox_seen s ON s.user_id = $1 AND s.page_id = p.id
   LEFT JOIN runs r ON r.page_id = rp.id
   WHERE s.seen_at IS NULL OR rp.done_at > s.seen_at
@@ -396,12 +401,12 @@ async function runningItems(pool: Pool, user: InboxUser, host: InboxHost): Promi
   return out
 }
 
-// 我发起的草稿计划。页面是活的（live_pages），且我在它所在空间是 owner / member（能开工 / 取消才给；全局 admin 也不例外）
+// 我发起的草稿计划。页面是活的（live_pages），且我在这页上是 owner / member（能开工 / 取消才给；全局 admin 也不例外）
 const SELECT_PLANS = `SELECT t.id, t.page_id, t.plan->>'title' AS title, t.created_at, p.title AS page_title
   FROM team_plans t
   JOIN live_pages p ON p.id = t.page_id
-  JOIN space_members m ON m.space_id = p.space_id AND m.user_id = $1 AND m.role IN ('owner', 'member')
-  WHERE t.user_id = $1 AND t.status = 'draft'
+  ${pageAccessJoin('p', '$1', 'm')}
+  WHERE t.user_id = $1 AND t.status = 'draft' AND m.role IN ('owner', 'member')
   ORDER BY t.created_at DESC, t.id LIMIT ${LIST_MAX}`
 
 async function planItems(pool: Pool, user: InboxUser): Promise<InboxItem[]> {
@@ -467,7 +472,7 @@ async function displayNames(pool: Pool, host: InboxHost, ids: Set<string>): Prom
 
 /** 当前用户的收件箱。顺序只是同类挨着，分组与排序是前端的事 */
 export async function collectInbox(pool: Pool, user: InboxUser, host: InboxHost): Promise<InboxItem[]> {
-  const [approvals, pending, requests, firstUse, plans, done, running, comments, timers, automations, mentions] = await Promise.all([
+  const [approvals, pending, requests, firstUse, plans, done, running, comments, timers, automations, mentions, shares] = await Promise.all([
     approvalItems(pool, user, host),
     pendingConnectorItems(pool, user, host),
     accessRequestItems(pool, user),
@@ -479,8 +484,9 @@ export async function collectInbox(pool: Pool, user: InboxUser, host: InboxHost)
     timerFailedItems(pool, user),
     automationItems(pool, user),
     docMentionItems(pool, user),
+    shareItems(pool, user),
   ])
-  const items = [...approvals, ...pending, ...requests, ...firstUse, ...plans, ...done, ...running, ...comments, ...timers, ...automations, ...mentions]
+  const items = [...approvals, ...pending, ...requests, ...firstUse, ...plans, ...done, ...running, ...comments, ...timers, ...automations, ...mentions, ...shares]
   const ids = new Set<string>()
   for (const item of items) if ('agentId' in item && item.agentId) ids.add(item.agentId)
   const names = await displayNames(pool, host, ids)

@@ -1,18 +1,14 @@
 import { Pool, type PoolClient } from 'pg'
-import { COVER_COLUMNS } from './page-cover.js'
-import { API_PAGE_FIELDS } from './page-icon.js'
 import { COMMENT_SWITCHES_DDL, COMMENTS_DDL } from './comments/schema.js'
 import { COLLECTION_NUMBERS_DDL } from './collections/schema.js'
 import { ASSISTANT_DDL } from './agents/drivers/assistant/schema.js'
 import { AI_USAGE_DDL } from './ai-usage-schema.js'
 import { TRIGGERS_DDL } from './triggers/schema.js'
 import { PUSH_DDL } from './push/schema.js'
-
-// 页面变更日志（page-sync.ts）的 UPDATE 触发列：对外字段（API_PAGE_FIELDS，含 position）+ 图标两列 + 封面三列 + deleted_at。
-// 由白名单拼出，不另抄一份列清单，对外字段加列时触发条件跟着变。content_text / agent_session /
-// content_updated_at 每次存储都在写又不下发，不在内，正文存盘不产生日志。
-const PAGE_CHANGE_COLUMNS = [...API_PAGE_FIELDS, 'icon_emoji', 'icon_file_id', ...COVER_COLUMNS, 'deleted_at']
-const PAGE_CHANGE_WHEN = PAGE_CHANGE_COLUMNS.map((col) => `OLD.${col} IS DISTINCT FROM NEW.${col}`).join(' OR ')
+import { PAGE_AREA_COLUMN_DDL, PAGE_AREA_MIGRATION, PAGE_AREA_TRIGGERS_DDL } from './page-area-schema.js'
+import { PAGE_CHANGES_DDL } from './page-changes-schema.js'
+import { PAGE_SHARES_DDL } from './page-share-schema.js'
+import { PERSONAL_MEMORIES_DDL, PERSONAL_MEMORIES_MIGRATION } from './personal-memories-schema.js'
 
 // owner_id 保持可空:避免在有数据的老库上加 NOT NULL 的迁移复杂度,新建页面由应用层必写,
 // 残留 NULL 的只是记录缺失,可见性只看 space_id。
@@ -275,6 +271,8 @@ DO $$ BEGIN
       AND cover_y BETWEEN 0 AND 100);
   END IF;
 END $$;
+-- 私人区一列(见 page-area-schema.ts)。同样排在视图重建之前
+${PAGE_AREA_COLUMN_DDL}
 -- 视图重建必须排在加列之后:视图的列集合在创建时固定,SELECT * 不会自动带出新列
 CREATE OR REPLACE VIEW live_pages AS SELECT * FROM pages WHERE deleted_at IS NULL;
 -- 本地 connector(托管云拓扑):归属空间,出站 WSS 反连中心。明文 token 只在配对响应里
@@ -581,41 +579,10 @@ CREATE TABLE IF NOT EXISTS collection_rows (
 -- trashed_by_block = 是不是因为块从正文里消失才进的回收站(侧栏 / agent 删的不是,块回来也不替它恢复)
 ALTER TABLE collections ADD COLUMN IF NOT EXISTS ref_host TEXT;
 ALTER TABLE collections ADD COLUMN IF NOT EXISTS trashed_by_block BOOLEAN NOT NULL DEFAULT false;
--- 页面变更日志(page-sync.ts):页面列表的增量同步只拉日志里出现过的页。唯一采集点是下面 pages 上的触发器
--- —— 改父页 / 标题 / 回收 / 恢复 / 删除的写路径有几十处,一处都不用挂回调。
--- xid = 写入它的事务号:客户端游标取读取时快照的 xmin,下次取 xid >= 它的行,晚提交的事务也不会漏(推理见 page-sync.ts)。
--- page_id 不加外键:物理删除后日志还要留着(要告诉客户端摘掉它)。space_id = 变更时所在空间,按它判可见,
--- 换空间时新旧各记一条。7 天前的行由 prunePageChanges 清掉,同时把 floor 推过被删的最大 xid:游标比它旧就整表
-CREATE TABLE IF NOT EXISTS page_changes (
-  xid xid8 NOT NULL DEFAULT pg_current_xact_id(),
-  page_id TEXT NOT NULL,
-  space_id TEXT,
-  at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS idx_page_changes_xid ON page_changes (xid);
-CREATE TABLE IF NOT EXISTS page_changes_floor (
-  one BOOLEAN PRIMARY KEY DEFAULT true CHECK (one),
-  xid xid8 NOT NULL
-);
-CREATE OR REPLACE FUNCTION page_changes_log() RETURNS trigger LANGUAGE plpgsql AS $fn$
-BEGIN
-  IF TG_OP = 'DELETE' THEN
-    INSERT INTO page_changes (page_id, space_id) VALUES (OLD.id, OLD.space_id);
-    RETURN NULL;
-  END IF;
-  INSERT INTO page_changes (page_id, space_id) VALUES (NEW.id, NEW.space_id);
-  IF TG_OP = 'UPDATE' AND OLD.space_id IS DISTINCT FROM NEW.space_id THEN
-    INSERT INTO page_changes (page_id, space_id) VALUES (OLD.id, OLD.space_id);
-  END IF;
-  RETURN NULL;
-END
-$fn$;
--- 增删(含外键级联的物理删除)一律记;UPDATE 只在对外可见的列变了才记(WHEN 由 API_PAGE_FIELDS 拼出,见文件头)。
--- 每次启动 CREATE OR REPLACE:白名单变了,触发条件随之更新
-CREATE OR REPLACE TRIGGER page_changes_ins_del AFTER INSERT OR DELETE ON pages
-  FOR EACH ROW EXECUTE FUNCTION page_changes_log();
-CREATE OR REPLACE TRIGGER page_changes_upd AFTER UPDATE ON pages
-  FOR EACH ROW WHEN (${PAGE_CHANGE_WHEN}) EXECUTE FUNCTION page_changes_log();
+${PAGE_CHANGES_DDL}
+${PAGE_AREA_TRIGGERS_DDL}
+${PAGE_SHARES_DDL}
+${PERSONAL_MEMORIES_DDL}
 ${COMMENTS_DDL}
 -- 续跑的远端回合接着记的过程页 id:跨重启认领时先接上旧档案再折重放的事件,收尾写回同一页(普通回合为空)
 ALTER TABLE open_runs ADD COLUMN IF NOT EXISTS base_run TEXT;
@@ -687,6 +654,8 @@ UPDATE page_snapshots SET is_base = true WHERE NOT is_base AND id IN (
 -- 收藏补空间:加列之前的收藏从所在页回填;原页已物理删除的回填不了,保持 NULL(哪个空间都不列)
 UPDATE favorites f SET space_id = p.space_id FROM pages p
 WHERE f.space_id IS NULL AND p.id = f.page_id AND p.space_id IS NOT NULL;
+${PAGE_AREA_MIGRATION}
+${PERSONAL_MEMORIES_MIGRATION}
 `
 
 let pool: Pool | undefined

@@ -30,6 +30,7 @@ import { memberRowsAmong, readSchema } from '../../collections/store.js'
 import { rawText, referenced, rowTexts, type TextCtx } from '../../collections/value-text.js'
 import type { Editor } from '../../edit-marks.js'
 import type { TriggerHub } from '../hub.js'
+import { pageVisibleSql } from '../../page-visibility.js'
 import { tzOffset } from '../store.js'
 import type { EventPayload } from '../payload.js'
 
@@ -105,12 +106,11 @@ export type CollectionEventDeps = {
 
 type Candidate = { id: string; owner_id: string; config: CollectionConfig; time_zone: string; member: boolean }
 
-/** 挂在这个合集上、启用中、这种 on 的规则（附带主人还是不是合集所在空间的成员） */
+/** 挂在这个合集上、启用中、这种 on 的规则（附带主人还看不看得到这个合集） */
 async function candidates(pool: Pool, collectionId: string, on: CollectionOn): Promise<Candidate[]> {
   const { rows } = await pool.query<{ id: string; owner_id: string; config: unknown; time_zone: string; member: boolean }>(
     `SELECT t.id, t.owner_id, t.config, t.time_zone,
-        EXISTS (SELECT 1 FROM live_pages p JOIN space_members m ON m.space_id = p.space_id AND m.user_id = t.owner_id
-                WHERE p.id = $1 AND p.kind = 'collection') AS member
+        EXISTS (SELECT 1 FROM live_pages p WHERE p.id = $1 AND p.kind = 'collection' AND ${pageVisibleSql('p', 't.owner_id')}) AS member
        FROM agent_triggers t WHERE t.source = 'collection' AND t.enabled AND t.scope_page = $1 AND t.config->>'on' = $2`,
     [collectionId, on],
   )

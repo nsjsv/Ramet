@@ -16,6 +16,8 @@ import { readEditMarks } from '../edit-marks.js'
 import { restorePageSubtree, SELECT_SUBTREE_ALL, TRASH_ENTRY_PREDICATE, trashPageSubtree } from '../page-trash.js'
 import { SELECT_ALL_MINE, syncPages } from '../page-sync.js'
 import { coverParams, parseCoverInput, SET_PAGE_COVER } from '../page-cover.js'
+import { pageRole, pageVisibleSql } from '../page-visibility.js'
+import { areaChanged, nextArea, SET_TOP_LEVEL } from '../page-area.js'
 
 // 用 type 而非 interface:pg 的 query<T> 约束要求隐式索引签名,interface 给不了
 /** 页面闸门只看身份与角色（REST 的登录用户与 AI 凭证对应的用户都满足） */
@@ -45,6 +47,8 @@ export type PageRow = {
   /** 评论开关:划词评论 / 整页讨论各一个,关掉的那种不显示、不收新评论 */
   inline_comments: boolean
   page_comments: boolean
+  /** 私人区的主人;null = 公共区(page-area-schema.ts) */
+  private_owner: string | null
 }
 
 type SpaceRole = 'owner' | 'member' | 'viewer'
@@ -95,7 +99,8 @@ type UpdateEntry = {
 export const SELECT = 'SELECT * FROM live_pages WHERE id = $1'
 /** 响应里的单个页面(建页 / 改页 / 建集合):对外字段,同 SELECT_ALL_MINE */
 export const SELECT_API_PAGE = `SELECT ${apiPageColumns('p')} FROM live_pages p WHERE p.id = $1`
-export const INSERT = 'INSERT INTO pages (id, parent_id, owner_id, space_id, in_page_tree) VALUES ($1, $2, $3, $4, $5)'
+// $6 = 顶层页的区（私人区主人，空 = 公共）；有父页时数据库触发器按父页改写，传什么都一样
+export const INSERT = 'INSERT INTO pages (id, parent_id, owner_id, space_id, in_page_tree, private_owner) VALUES ($1, $2, $3, $4, $5, $6)'
 export const SET_TITLE = 'UPDATE pages SET title = $1 WHERE id = $2'
 export const SET_PARENT = 'UPDATE pages SET parent_id = $1 WHERE id = $2'
 const SET_PUBLISHED = 'UPDATE pages SET published = $1 WHERE id = $2'
@@ -111,7 +116,7 @@ const SELECT_TRASH_MINE = `SELECT p.id, p.title, p.space_id, p.parent_id, p.kind
       SELECT count(*)::int FROM sub WHERE sub.kind = 'doc') AS descendants
   FROM pages p
   WHERE ${TRASH_ENTRY_PREDICATE}
-    AND p.space_id IN (SELECT space_id FROM space_members WHERE user_id = $1)
+    AND ${pageVisibleSql('p', '$1')}
   ORDER BY p.deleted_at DESC, p.id`
 // restore 守卫:目标必须(此刻)是条目本身 —— 已回收页面的子孙不是条目,不能单独恢复(会还原成孤儿)
 const SELECT_TRASH_ENTRY = `SELECT p.* FROM pages p
@@ -126,7 +131,8 @@ const DETACH_TRASHED = `UPDATE pages SET parent_id = NULL
 const SELECT_PURGE_TARGET = `SELECT p.* FROM pages p
   WHERE p.id = $1 AND (p.deleted_at IS NULL OR NOT EXISTS (
     SELECT 1 FROM pages a WHERE a.id = p.parent_id AND a.deleted_at IS NOT NULL))`
-const SELECT_SPACE_TRASH = 'SELECT id FROM pages WHERE space_id = $1 AND deleted_at IS NOT NULL'
+// 清空回收站只清自己看得到的:公共区的,加上自己私人区的(别人的私人页他看不到,也轮不到他删)
+const SELECT_SPACE_TRASH = 'SELECT id FROM pages WHERE space_id = $1 AND deleted_at IS NOT NULL AND (private_owner IS NULL OR private_owner = $2)'
 // 页面快照三端点:列表/详情任意角色可见,POST 手动存版需可写;倒序 = 链序倒排(created_at 页内严格递增)
 // 分页:before 游标 = 上一页最后一条的 created_at(页内严格递增且唯一,不必再拿 id 兜 tie);
 // 不传游标 = 首页(最新 limit 条)
@@ -183,9 +189,8 @@ function historyPage(limitRaw: string | undefined, beforeRaw: string | undefined
   }
 }
 
-// 请求者在某空间的有效角色:按成员行给,非成员/无空间(null)一律 null = 不可见。
-// 全局 admin 没有例外。
-// 模块级:boards.ts 的目录树门型也要判空间角色(共用同一份定义)
+// 请求者在某空间的有效角色:按成员行给,非成员/无空间(null)一律 null。全局 admin 没有例外。
+// 只给空间级判定用(在空间里建页、导入、目录树、skill 库……);判某一页看不看得到用 pageRole / pageAccess(page-visibility.ts)
 export async function roleInSpace(
   pool: Pool,
   user: Actor,
@@ -196,16 +201,8 @@ export async function roleInSpace(
   return rows[0]?.role ?? null
 }
 
-/** 页面可见性闸门（页面读写的唯一不变量，所有页面闸门经此）：
- *  页面恒属一个空间 → 按空间成员角色，admin 也不例外。返回 null = 不可见（与不存在同响应）；
- *  没有空间的迁移前遗留行谁都看不到。 */
-export async function pageRole(
-  pool: Pool,
-  user: Actor,
-  page: { space_id: string | null },
-): Promise<SpaceRole | null> {
-  return roleInSpace(pool, user, page.space_id)
-}
+// 页面级闸门的判定在 page-visibility.ts（页面可见性的唯一出口）；这里原样导出，各路由照旧从这里取
+export { pageRole }
 
 // null 表示"顶层";其余必须指向存在的页面,且不能是自己或自己的子孙(成环)。
 // WITH RECURSIVE 沿 parent 链一次取全祖先;UNION 去重保证库里已有环时递归也会终止。
@@ -224,19 +221,19 @@ export async function validParent(pool: Pool, pageId: string, parentId: string |
   return rows.length === 0
 }
 
-// parent 闸门(创建/移动共用):parent 必须可见,且与页面同属一个空间;违规与"不存在"同响应
+// parent 闸门(创建 / 移动 / 导入共用):放到父页下 = 父页我能写,且与页面同属一个空间;放在空间顶层 = 我在这个空间有可写的成员角色。
+// 访客和只读成员没有可写的区角色,只能在分享给他、能写的页下面建 / 挪,页出不了分享的范围。违规与"不存在"同响应
 export async function parentOk(
   pool: Pool,
   user: Actor,
   parentId: string | null,
   pageSpaceId: string | null,
 ): Promise<boolean> {
-  if (parentId === null) return true
+  if (parentId === null) return writable(await roleInSpace(pool, user, pageSpaceId))
   if (typeof parentId !== 'string') return false
   const parent = (await pool.query<PageRow>(SELECT, [parentId])).rows[0]
   if (!parent) return false
-  const role = await roleInSpace(pool, user, parent.space_id)
-  return role !== null && parent.space_id === pageSpaceId
+  return writable(await pageRole(pool, user, parent)) && parent.space_id === pageSpaceId
 }
 
 // notify:树变更广播回调(注入 notifyPagesChanged,测试可不传保持原签名)。
@@ -255,6 +252,8 @@ export function pagesRoutes(
   created?: (parentId: string | null, pageIds: readonly string[], userId: string) => void,
   /** 页面拖进合集时补成一行要落副本（collections/adopt.ts）；缺省 = 不补（只有不走这类写的测试才缺省） */
   projector?: Pick<Projector, 'flushRow'>,
+  /** 这些页有人刚失去访问（挪进了私人区）：断开它们的协同连接，重连时按新的权限判（index.ts 接 hocuspocus.closeConnections） */
+  dropAccess?: (pageIds: string[]) => void,
 ) {
   // 该子应用只有 /api/pages 一族路由,鉴权统一挂全量,未登录一律 401
   const app = new Hono<AuthEnv>()
@@ -299,8 +298,12 @@ export function pagesRoutes(
       in_page_tree?: unknown
       title?: unknown
       link_in_parent?: unknown
+      private?: unknown
     }
     const parentId = body.parent_id ?? null
+    // 顶层页建在哪一区：private = true 建进我的私人区，缺省公共；有父页就跟父页（数据库触发器）
+    if (body.private !== undefined && typeof body.private !== 'boolean') return c.json({ error: 'private must be a boolean' }, 400)
+    const privateOwner = body.private === true ? user.id : null
     // 带标题建页（`[[新名字` 直接建页）：标题同时写进 pages.title 与文档的 title 片段 —— 编辑器以文档为准，
     // 只写其一，打开页面标题会被空文档冲掉。缺省 = 空页（标题由用户在编辑器里打）
     if (body.title !== undefined && typeof body.title !== 'string') return c.json({ error: 'title must be a string' }, 400)
@@ -312,30 +315,36 @@ export function pagesRoutes(
       inPageTree = body.in_page_tree
     }
     // 目标空间:页面恒属一个空间,缺省落我个人空间;给了就校验(存在 + 可写)。
-    // 不接受 `space_id: null`,无空间页面在模型上不可达
+    // 不接受 `space_id: null`,无空间页面在模型上不可达。
+    // 有父页时空间角色不作数(访客、只读成员在分享给他可编辑的页下也能建子页),由下面的 parentOk 按父页判
     let spaceId: string
     if (body.space_id !== undefined) {
       if (typeof body.space_id !== 'string') return c.json({ error: 'space_id must be a string' }, 400)
       if (!(await pool.query('SELECT 1 FROM spaces WHERE id = $1', [body.space_id])).rows[0]) {
         return c.json({ error: 'space_id not found' }, 400)
       }
-      const role = await roleInSpace(pool, user, body.space_id)
-      // viewer 只能看 403;非成员与"空间不存在"同响应,不泄露存在性
-      if (role === 'viewer') return c.json({ error: 'forbidden' }, 403)
-      if (role === null) return c.json({ error: 'space_id not found' }, 400)
+      if (parentId === null) {
+        const role = await roleInSpace(pool, user, body.space_id)
+        // viewer 只能看 403;非成员与"空间不存在"同响应,不泄露存在性
+        if (role === 'viewer') return c.json({ error: 'forbidden' }, 403)
+        if (role === null) return c.json({ error: 'space_id not found' }, 400)
+      }
       spaceId = body.space_id
+    } else if (parentId !== null) {
+      // 没给空间但给了父页:跟父页(父页不存在 / 看不到时下面 parentOk 照样拒)
+      spaceId = (await pool.query<{ space_id: string }>('SELECT space_id FROM live_pages WHERE id = $1', [parentId])).rows[0]?.space_id ?? ''
     } else {
       const personal = await myPersonalSpaceId(pool, user.id)
       if (!personal) return c.json({ error: 'personal space unavailable' }, 500)
       spaceId = personal
     }
-    // parent 必须可见且与页面同空间
+    // parent 必须可写且与页面同空间
     if (!(await parentOk(pool, user, parentId, spaceId))) {
       return c.json({ error: 'parent_id not found' }, 400)
     }
     const id = crypto.randomUUID()
     // owner_id 照旧写入,但不参与可见性判定
-    await pool.query(INSERT, [id, parentId, user.id, spaceId, inPageTree])
+    await pool.query(INSERT, [id, parentId, user.id, spaceId, inPageTree, privateOwner])
     if (title) {
       await pool.query(SET_TITLE, [title, id])
       await writeDocState(pool, `page:${id}`, newPageDoc(title, []))
@@ -375,9 +384,13 @@ export function pagesRoutes(
       inline_comments?: unknown
       page_comments?: unknown
       cover?: unknown
+      private?: unknown
     }
     let written = false
     let adopted = false
+    // 换区:落点有父页 = 父页的区,落在顶层 = private 决定(缺省不变)。先算出换区之后的区再判权限、再写
+    const area = await nextArea(pool, user, page, body)
+    if ('error' in area) return c.json({ error: area.error }, area.status)
     // 全宽：页面属性，写了就广播（协作者的列宽跟着变）
     if (body.full_width !== undefined) {
       if (typeof body.full_width !== 'boolean') return c.json({ error: 'full_width must be a boolean' }, 400)
@@ -431,14 +444,16 @@ export function pagesRoutes(
     if (body.parent_id !== undefined) {
       const parentId = body.parent_id ?? null
       // 空间顶层页(parent_id NULL)是合法状态,所以允许置 null;parent 合法性只由 parentOk / validParent 两道校验定义。
-      // parent 必须可见,且与页面同属一个空间(跨空间移动一律拒绝)
+      // parent 必须可写,且与页面同属一个空间(跨空间移动一律拒绝);挪到顶层要可写的空间角色
       if (!(await parentOk(pool, user, parentId, page.space_id))) {
         return c.json({ error: 'parent_id not found' }, 400)
       }
       if (!(await validParent(pool, id, parentId))) return c.json({ error: 'parent_id would create a cycle' }, 400)
       const refusal = await intoCollectionError(pool, page.kind, parentId)
       if (refusal) return c.json({ error: refusal }, 400)
-      await pool.query(SET_PARENT, [parentId, id])
+      // 落在顶层时区由这里定(一条语句,触发器带着子树);挪到父页下时触发器取父页的区
+      if (parentId === null) await pool.query(SET_TOP_LEVEL, [area.owner, id])
+      else await pool.query(SET_PARENT, [parentId, id])
       written = true
       // 换了父页：新父页正文补入口（补不上把父子关系改回去再报错），旧父页的入口摘掉
       const oldParent = page.parent_id ?? null
@@ -460,6 +475,12 @@ export function pagesRoutes(
         adopted = await adoptIntoCollection({ deps, ...(created ? { rowsAdded: created } : {}) }, user, id, oldParent, parentId, 'user')
       }
     }
+    // 只换区不挪父页(顶层页拖进 / 拖出私人区)
+    if (body.parent_id === undefined && area.changed) {
+      await pool.query(SET_TOP_LEVEL, [area.owner, id])
+      written = true
+    }
+    if (area.changed) await areaChanged(pool, id, area.owner, dropAccess)
     // 同级排序(侧栏拖拽插入线):index = 该页在目标父页子列表(按展示序)里的落点下标。
     // 摘除自身后钳制插入,整列重写 position 0..n-1(单事务);不传 index 不动排序。
     // 只传 index 不传 parent_id = 同父内重排
@@ -469,13 +490,14 @@ export function pagesRoutes(
       }
       const targetParent = body.parent_id !== undefined ? body.parent_id ?? null : page.parent_id ?? null
       if (page.space_id === null) return c.json({ error: 'page has no space' }, 400)
-      // 兄弟列表必须限同一空间(同级=同空间,服务端约束;缺过滤会把别的用户的同级页一起重排!)。
+      // 兄弟列表必须限同一空间、同一区(同级=同空间同区,服务端约束;缺过滤会把别的用户的同级页、别人的私人页一起重排!)。
       // 只算页面树成员:前端下标按页面树算,根级的目录树文档算进来落点就错位
       const kids = (
         await pool.query<{ id: string }>(
           `SELECT id FROM live_pages WHERE parent_id IS NOT DISTINCT FROM $1 AND space_id = $2 AND in_page_tree AND id <> $3
+             AND private_owner IS NOT DISTINCT FROM $4
            ORDER BY position ASC NULLS LAST, created_at, id`,
-          [targetParent, page.space_id, id],
+          [targetParent, page.space_id, id, area.owner],
         )
       ).rows.map((r) => r.id)
       const at = Math.min(body.index, kids.length)
@@ -494,7 +516,7 @@ export function pagesRoutes(
   })
 
   // 公开/取消公开:发布页面即发布整棵子树(匿名经 /api/public 可达),取消发布整棵收回。
-  // 仅空间 owner 可切换;member/viewer 403,非成员与不存在同响应 404 不泄露存在性
+  // 公共页仅空间 owner 可切换,私人页由它的主人切换;别的人 403,看不到与不存在同响应 404 不泄露存在性
   app.patch('/api/pages/:id/publish', async (c) => {
     const user = c.get('user')
     const id = c.req.param('id')
@@ -506,7 +528,8 @@ export function pagesRoutes(
     const page = (await pool.query<PageRow>(SELECT, [id])).rows[0]
     const role = page ? await pageRole(pool, user, page) : null
     if (!page || role === null) return c.json({ error: 'page not found' }, 404)
-    if (role !== 'owner') return c.json({ error: 'forbidden' }, 403)
+    // 私人页由它的主人发布(空间 owner 看不到它);公共页照旧只有空间 owner
+    if (page.private_owner ? !(page.private_owner === user.id && writable(role)) : role !== 'owner') return c.json({ error: 'forbidden' }, 403)
     // 公开态只有 doc 页承载(身份由 kind 表达,DB 约束是兜底):过程页只能跟着父文档的
     // includeRuns 开关走,skill 页是空间内部的做事方法 —— 都不给单独发布的入口
     if (page.kind !== 'doc') return c.json({ error: `${page.kind} page cannot be published` }, 400)
@@ -574,7 +597,7 @@ export function pagesRoutes(
     const role = await roleInSpace(pool, user, spaceId)
     if (role === null) return c.json({ error: 'space not found' }, 404)
     if (!writable(role)) return c.json({ error: 'forbidden' }, 403)
-    const ids = (await pool.query<{ id: string }>(SELECT_SPACE_TRASH, [spaceId])).rows.map((r) => r.id)
+    const ids = (await pool.query<{ id: string }>(SELECT_SPACE_TRASH, [spaceId, user.id])).rows.map((r) => r.id)
     if (ids.length > 0) {
       await withTransaction(pool, async (client) => {
         await purgePageRows(client, ids)

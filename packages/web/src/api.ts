@@ -41,6 +41,8 @@ export interface Page {
   /** 同父子页的顺序（侧栏拖拽，小数可插中间）；null = 没排过，排在有值之后。
    *  增量同步合并后按它重排（@ramet/shared/page-tree 的 comparePages）；旧缓存缺字段按 null */
   position?: number | null
+  /** 私人区的主人（只有他看得到这页）；null = 公共区。子页恒与父页同区（服务端保证）；旧缓存缺字段 = 公共 */
+  private_owner?: string | null
 }
 
 /** 页面列表同步（GET /api/pages/sync）：full = 整表（首次 / 游标过旧 / 空间成员关系变了）；
@@ -156,7 +158,7 @@ export interface Space {
   is_personal: boolean
   created_at: string
   my_role: MySpaceRole
-  /** 空间 AI（只有空间列表接口带；建空间 / 改名的响应、老的本地缓存里没有）：个人空间 null，团队空间没配过是 { enabled: false, name: 'AI' } */
+  /** 空间 AI（只有空间列表接口带；建空间 / 改名的响应、老的本地缓存里没有）：没配过是 { enabled: false, name: '空间 AI' } */
   ai?: SpaceAiBrief | null
 }
 
@@ -164,6 +166,8 @@ export interface Space {
 export interface SpaceAiBrief {
   enabled: boolean
   name: string
+  /** 我和它的直接对话页（在我的私人区；还没建 / 进了回收站 = null）。老服务端不给 */
+  chat?: string | null
 }
 
 /** GET / PUT /api/spaces/:id/ai：owner 另有 connectionId（此刻生效的那个连接；没启用 / 连接没了是 null），成员没有这个键 */
@@ -196,11 +200,13 @@ export interface InvitePreview {
 }
 
 /** 删号会发生什么（GET /api/admin/users/:id/delete-impact）：只有数量。
- *  有别的成员的空间转给他们（transferSpaces），只有他一人的空间连同页面删除（purgeSpaces / purgePages） */
+ *  有别的成员的空间转给他们（transferSpaces），只有他一人的空间连同页面删除（purgeSpaces / purgePages），
+ *  他在别的空间私人区里的页一并删除（purgePrivatePages） */
 export interface DeleteImpact {
   transferSpaces: number
   purgeSpaces: number
   purgePages: number
+  purgePrivatePages: number
 }
 
 /** 公开子树元数据（匿名可达）：children 同构递归 */
@@ -568,7 +574,7 @@ export const api = {
   createPage: (
     parent_id: string | null = null,
     space_id?: string | null,
-    opts?: { in_page_tree?: boolean; title?: string; link_in_parent?: boolean },
+    opts?: { in_page_tree?: boolean; title?: string; link_in_parent?: boolean; private?: boolean },
   ) =>
     request<Page>('/api/pages', {
       method: 'POST',
@@ -581,13 +587,17 @@ export const api = {
         in_page_tree: opts?.in_page_tree,
         title: opts?.title,
         link_in_parent: opts?.link_in_parent,
+        // 顶层页建进我的私人区；有父页时服务端跟父页的区
+        private: opts?.private,
       }),
     }),
   /** 导入 markdown（.md / .zip；文件夹由调用方先打成 zip）：multipart，不走 JSON request() */
-  importMarkdown: async (spaceId: string, file: Blob, name: string, parentId: string | null): Promise<ImportResult> => {
+  importMarkdown: async (spaceId: string, file: Blob, name: string, parentId: string | null, inPrivate = false): Promise<ImportResult> => {
     const form = new FormData()
     form.append('file', file, name)
     if (parentId) form.append('parent', parentId)
+    // 落在顶层时进我的私人区（有父页时跟父页）
+    else if (inPrivate) form.append('private', 'true')
     const res = await fetch(`/api/spaces/${spaceId}/import`, { method: 'POST', body: form })
     if (res.status === 401) onUnauthorized?.()
     if (!res.ok) {
@@ -597,10 +607,10 @@ export const api = {
     return (await res.json()) as ImportResult
   },
   /** 从模板新建：复制模板页（连子页）到目标空间 / 父页下 */
-  instantiateTemplate: (templateId: string, spaceId: string, parentId: string | null) =>
+  instantiateTemplate: (templateId: string, spaceId: string, parentId: string | null, inPrivate = false) =>
     request<{ id: string }>(`/api/pages/${templateId}/instantiate`, {
       method: 'POST',
-      body: JSON.stringify({ space_id: spaceId, parent_id: parentId }),
+      body: JSON.stringify({ space_id: spaceId, parent_id: parentId, ...(inPrivate ? { private: true } : {}) }),
     }),
   setTemplate: (id: string, on: boolean) =>
     request<Page>(`/api/pages/${id}`, { method: 'PATCH', body: JSON.stringify({ is_template: on }) }),
@@ -614,11 +624,15 @@ export const api = {
     request<Page>(`/api/pages/${id}`, { method: 'PATCH', body: JSON.stringify({ title }) }),
   /** 挪父级/排序（树上拖拽）：同空间 + 防环校验在服务端（parent 不可见/跨空间 400，自环 400）；
    *  index = 目标父页子列表落点下标（缺省 = 服务端不重排，保持原 position） */
-  movePage: (id: string, parent_id: string | null, index?: number) =>
-    request<Page>(
-      `/api/pages/${id}`,
-      { method: 'PATCH', body: JSON.stringify(index === undefined ? { parent_id } : { parent_id, index }) },
-    ),
+  movePage: (id: string, parent_id: string | null, index?: number, inPrivate?: boolean) =>
+    request<Page>(`/api/pages/${id}`, {
+      method: 'PATCH',
+      // inPrivate：落在顶层时进 / 出私人区（换区，服务端判 P5）；落到某页下时区跟那页，不必传
+      body: JSON.stringify({ parent_id, ...(index === undefined ? {} : { index }), ...(inPrivate === undefined ? {} : { private: inPrivate }) }),
+    }),
+  /** 顶层页换区（页的菜单「挪进私人区 / 挪回公共区」）：不挪父页 */
+  setPagePrivate: (id: string, inPrivate: boolean) =>
+    request<Page>(`/api/pages/${id}`, { method: 'PATCH', body: JSON.stringify({ private: inPrivate }) }),
   /** 设/换/清页面图标。icon = null 即移除；服务端校验（emoji 长度、图片必须存在且是图片），
    *  失败抛错（400），调用方原样展示 err.message */
   setPageIcon: (id: string, icon: PageIcon | null) =>
@@ -812,6 +826,9 @@ export const api = {
     request<Space>(`/api/spaces/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) }),
   deleteSpace: (id: string) => request<unknown>(`/api/spaces/${id}`, { method: 'DELETE' }),
   listSpaceMembers: (id: string) => request<SpaceMember[]>(`/api/spaces/${id}/members`),
+  /** 这个空间里我认识的人（成员看到成员 + 访客，访客只看到分享面板上的人）：人员目录用，成员管理仍用 listSpaceMembers */
+  listSpacePeople: (id: string) =>
+    request<{ people: Array<{ id: string; username: string; avatar: string | null }> }>(`/api/spaces/${id}/people`).then((r) => r.people),
   /** 改成员角色（member ⇄ viewer），owner 才行；owner 的角色不可改 */
   setSpaceMemberRole: (id: string, userId: string, role: 'member' | 'viewer') =>
     request<SpaceMember>(`/api/spaces/${id}/members/${userId}`, { method: 'PATCH', body: JSON.stringify({ role }) }),

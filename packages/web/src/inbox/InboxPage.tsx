@@ -365,6 +365,16 @@ function DocMentionRow({ item }: { item: Of<'doc_mention'> }) {
   )
 }
 
+/** 分享给你：点进那一页（打开即算看过），先在本地摘掉 */
+function ShareRow({ item }: { item: Of<'share'> }) {
+  const navigate = useNavigate()
+  const open = (): void => {
+    dropInboxItem(item.key)
+    navigate(`/page/${item.pageId}`)
+  }
+  return <Row icon="users" head={C.share.head(item.actor?.name ?? null, pageName(item.pageTitle))} sub={`${C.share.level[item.level]} · ${relativeTime(item.at)}`} onOpen={open} />
+}
+
 function ItemRow({ item }: { item: InboxItem }) {
   switch (item.type) {
     case 'approval':
@@ -390,6 +400,8 @@ function ItemRow({ item }: { item: InboxItem }) {
       return <AutomationRow item={item} />
     case 'doc_mention':
       return <DocMentionRow item={item} />
+    case 'share':
+      return <ShareRow item={item} />
   }
 }
 

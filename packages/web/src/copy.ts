@@ -5,6 +5,7 @@
  * 公共记忆在 memory/memory-copy.ts，带队在 team/team-copy.ts，工具档位在 editor/tools-copy.ts，集合在 collection/collection-copy.ts，评论在 comments/comments-copy.ts，Genet 浮窗在 assistant/assistant-copy.ts，空间 AI 在 assistant/space-ai-copy.ts，AI 页在 ai/ai-copy.ts，组件库的确认框 / Toast 在 ui/ui-copy.ts（同理）。 */
 import { CONNECT_COPY, CONNECTORS_COPY } from './connector-copy'
 import { INBOX_COPY } from './inbox/inbox-copy'
+import { SHARING_COPY } from './share/share-copy'
 import { NOTIFY_COPY } from './notify/notify-copy'
 import { MEMORY_COPY } from './memory/memory-copy'
 import { TEAM_COPY } from './team/team-copy'
@@ -17,9 +18,12 @@ import { SPACE_AI_COPY } from './assistant/space-ai-copy'
 import { USAGE_COPY } from './usage/usage-copy'
 import { AI_COPY } from './ai/ai-copy'
 import { QUICK_SETTINGS_COPY } from './quick-settings-copy'
+import { AREA_COPY } from './area-copy'
 
 export const COPY = {
   inbox: INBOX_COPY,
+  area: AREA_COPY,
+  sharing: SHARING_COPY,
   notify: NOTIFY_COPY,
   tools: TOOLS_COPY,
   memory: MEMORY_COPY,
@@ -114,9 +118,10 @@ export const COPY = {
     noSpace: '（无空间）',
     trash: '回收站',
     addSpace: '添加空间',
+    guestSpaces: '作为访客',
   },
   tree: {
-    pageTree: '页面树',
+    pageTree: '公共',
     dirTree: '目录树',
     expand: '展开',
     collapse: '折叠',
@@ -443,13 +448,14 @@ export const COPY = {
   /** 用户管理（Admin.tsx）：admin 看不到别人的空间，删号确认只给数量 */
   adminUsers: {
     impactFailed: '网络错误，无法确认删除影响',
-    confirmDelete: (name: string, i: { transferSpaces: number; purgeSpaces: number; purgePages: number }) =>
+    confirmDelete: (name: string, i: { transferSpaces: number; purgeSpaces: number; purgePages: number; purgePrivatePages: number }) =>
       [
         `删除用户「${name}」？`,
         i.transferSpaces > 0 ? `· ${i.transferSpaces} 个有其他成员的空间将转交给其中一位成员。` : '',
         i.purgeSpaces > 0
           ? `· ${i.purgeSpaces} 个只有他一人的空间将连同其中 ${i.purgePages} 个页面和全部版本历史永久删除，无法恢复。`
           : '',
+        i.purgePrivatePages > 0 ? `· 他在其它空间私人区里的 ${i.purgePrivatePages} 个页面只有他能看到，将一并永久删除。` : '',
         '你不会获得这个用户的任何空间或页面。',
       ]
         .filter(Boolean)

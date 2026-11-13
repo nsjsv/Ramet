@@ -6,6 +6,7 @@ import { fillRow } from './ai-prop.js'
 import { createPiStream } from './pi-models.js'
 import { loadSecretKeyFromEnv } from './secret-box.js'
 import { memoryRoutes } from './routes/memories.js'
+import { myMemoryRoutes } from './routes/my-memories.js'
 import { skillRoutes } from './routes/skills.js'
 import { favoriteRoutes } from './routes/favorites.js'
 import { exportRoutes } from './routes/export.js'
@@ -20,6 +21,8 @@ import { getRequestListener } from '@hono/node-server'
 import type { Pool } from 'pg'
 import { closePool, getPool, initDb } from './db.js'
 import { pagesRoutes } from './routes/pages.js'
+import { pageShareRoutes } from './routes/page-shares.js'
+import { spaceGuestRoutes } from './routes/space-guests.js'
 import { PAGE_CHANGES_PRUNE_MS, prunePageChanges } from './page-sync.js'
 import { blocksRoutes } from './routes/blocks.js'
 import { spacesRoutes } from './routes/spaces.js'
@@ -300,6 +303,8 @@ export function startServer(
   )
   // 空间公共记忆的 REST（/api/spaces/:id/memories 一族，每条路由自带 requireAuth）。增删后广播 'memories'
   app.route('/', memoryRoutes(pool, () => notifyMemoriesChanged(hocuspocus)))
+  // 个人记忆与 `/记住`（记到哪由页面定）：同一个 'memories' 信号
+  app.route('/', myMemoryRoutes(pool, () => notifyMemoriesChanged(hocuspocus)))
   // 收藏（只有自己可见）+ 页面的反向链接：读正文同样活文档优先
   app.route('/', favoriteRoutes(pool, (name) => hocuspocus.documents.get(name)))
   app.route('/', exportRoutes(pool, (name) => hocuspocus.documents.get(name)))
@@ -319,7 +324,34 @@ export function startServer(
       createDocWriter(() => hocuspocus),
       rowsAddedTo,
       projector,
+      (ids) => {
+        for (const id of ids) hocuspocus.closeConnections(`page:${id}`)
+      },
     ),
+  )
+  // 单页分享（每条路由自带 requireAuth）：给 / 改 / 收回后对方重拉页面列表、收件箱多一条，这棵子树上的协同连接断开按新档位重连
+  app.route(
+    '/',
+    pageShareRoutes({
+      pool,
+      notify: () => notifyPagesChanged(hocuspocus),
+      poke: () => inbox.poke(),
+      dropAccess: (ids) => {
+        for (const id of ids) hocuspocus.closeConnections(`page:${id}`)
+      },
+    }),
+  )
+  // 空间的访客管理与人员目录（每条路由自带 requireAuth）：移出访客同分享收回
+  app.route(
+    '/',
+    spaceGuestRoutes({
+      pool,
+      notify: () => notifyPagesChanged(hocuspocus),
+      poke: () => inbox.poke(),
+      dropAccess: (ids) => {
+        for (const id of ids) hocuspocus.closeConnections(`page:${id}`)
+      },
+    }),
   )
   // 块文本端点（提及快照）：同样活文档优先，补 id 插件刚写入的块 id 立即可读
   app.route('/', blocksRoutes(pool, (name) => hocuspocus.documents.get(name)))
@@ -333,6 +365,11 @@ export function startServer(
       (connectorIds, reason) => {
         for (const id of connectorIds) hub.closeOne(id, reason)
         if (connectorIds.length > 0) notifyAgents()
+      },
+      // 他收到的分享随成员行删了：收件箱少了分享条目，这些页上他的协同连接断开（重连被拒）
+      (pageIds) => {
+        inbox.poke()
+        for (const id of pageIds) hocuspocus.closeConnections(`page:${id}`)
       },
     ),
   )

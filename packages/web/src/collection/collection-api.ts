@@ -25,6 +25,8 @@ export type NewCollectionInput = {
   parent_id?: string | null
   inline?: boolean
   title?: string
+  /** 顶层合集建进我的私人区；有父页时服务端跟父页的区 */
+  private?: boolean
 }
 
 /** id = 客户端生成的 uuid v4（乐观新建：先插行、进入命名，不等这一趟；已被占用 409） */

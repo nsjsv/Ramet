@@ -3,7 +3,7 @@
 // 消费方是 AI 侧 stdio MCP 进程（mcp/ramet.mjs）：只拿中心地址和凭证两个环境变量，HTTP 打中心的 `/api` 端点。
 // 绝不把登录 cookie 交给 AI 子进程：它的环境变量 AI 自己读得到，而 cookie 能调的远不止这几个端点。
 // `read_page` / `read_image` / `edit_page` 共用同一把凭证、同一个 MCP 进程，端点与 MCP 共用同一份内核：
-// 读走「能看见」（live_pages + space_members，与其它页面读路径同口径），写走「能改」（沿用 routes/pages.ts 的 writable：viewer 403，非成员 404）。
+// 读走「能看见」（live_pages + page-visibility.ts，与其它页面读路径同口径），写走「能改」（沿用 routes/pages.ts 的 writable：viewer 403，非成员 404）。
 //
 // 谁拉起 AI，谁在自己机器上拼 MCP 命令：stdio 配置里的 command/args 是拉起 AI 那台机器上的路径
 // （`process.execPath` + 这份代码旁边的 `mcp/ramet.mjs`），中心的路径在用户电脑上不存在，发过去只会得到 `Internal error`。
@@ -12,6 +12,7 @@
 //
 // 凭证只在内存里（进程重启即失效），TTL 是兜底；会话 / 适配器结束时按 scope 撤销。多实例部署需要改成共享存储。
 
+import { GUEST_AI_READONLY, isGuestOf } from './agents/guest-gate.js'
 import { randomBytes } from 'node:crypto'
 import { existsSync, statSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
@@ -24,6 +25,7 @@ import { loadDocForRead, type DocWriter } from './collab.js'
 import { uploadDir } from './uploads.js'
 import { fragmentSpans } from './updates.js'
 import { editPageForUser, parseOps } from './page-write.js'
+import { pageVisibleSql, publicAreaSql } from './page-visibility.js'
 import { findBlockElement } from './block-ids.js'
 import { standaloneMarkdown } from './agents/refs.js'
 import { rowForAi, type AiRow } from './collections/ai-read.js'
@@ -330,6 +332,8 @@ export function pageReadRoutes(
       if (!visible) return c.json({ error: 'page not found' }, 404)
       if (g.ctx.readOnly) return c.json({ error: 'forbidden', message: '这个会话只能读，不能改页面' }, 403)
     }
+    // 用户作为访客看到的页：AI 只能读（agents/guest-gate.ts）
+    if (await isGuestOf(pool, g.user.id, pageId)) return c.json({ error: 'forbidden', message: GUEST_AI_READONLY }, 403)
     const run = async (): Promise<Outcome> => {
       const outcome = await editPageForUser(pool, g.user, pageId, ops, write ?? unavailableWriter)
       return 'ok' in outcome ? { status: 200, body: { ok: true } } : { status: outcome.status, body: { error: outcome.error } }
@@ -346,12 +350,12 @@ export function pageReadRoutes(
   return app
 }
 
-/** 活页面 + 可见性：必须是该页所在空间的成员，全局 admin 也不例外。
- *  不存在 / 已回收（live_pages 打不上）/ 非成员一律查不到，调用方转 404，不泄露存在性。
- *  $3 = 凭证收窄到的空间（空间 AI）：不在这个空间的页同样查不到；null = 不收窄 */
+/** 活页面 + 可见性（page-visibility.ts，全局 admin 也不例外）。
+ *  不存在 / 已回收（live_pages 打不上）/ 看不到一律查不到，调用方转 404，不泄露存在性。
+ *  $3 = 凭证收窄到的空间（空间 AI）：不在这个空间的公共区的页同样查不到；null = 不收窄 */
 const SELECT_READABLE = `SELECT p.title, p.kind, p.parent_id FROM live_pages p
-  WHERE p.id = $1 AND p.space_id IN (SELECT space_id FROM space_members WHERE user_id = $2)
-    AND ($3::text IS NULL OR p.space_id = $3)`
+  WHERE p.id = $1 AND ${pageVisibleSql('p', '$2')}
+    AND ($3::text IS NULL OR (p.space_id = $3 AND ${publicAreaSql('p')}))`
 
 /** offset / limit 归一化：非法值回落缺省，limit 截到上限。offset 从 1 开始 */
 function normalizeReadParams(

@@ -73,7 +73,8 @@ export const AUTOMATION_COPY = {
       title: '这个合集的自动化',
       empty: '还没有自动化：新增一行、某个属性改成某个值、或者到点时，自动去做一串事',
       create: '新建自动化',
-      owner: (name: string) => `${name} 的`,
+      /** 别人的规则：规则属于建它的人；里面有 AI 动作时跑的是他的额度（他的模型连接 / 他的机器） */
+      owner: (name: string, ai: boolean) => `${name} 的规则${ai ? ` · 用 ${name} 的额度` : ''}`,
       ownerTip: '别人建的自动化：只有他能改',
     },
     /** 目标页上规则发出的消息：气泡顶上 / 署名行前的小标 */

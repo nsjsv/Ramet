@@ -1,5 +1,6 @@
-/* ---------- AI 页（/ai）：Genet / 任务 / 自动 / Skill / 记忆 五个分页 ----------
- * 侧栏的「AI」进来。分页栏就是这一页的标题，每个分页有自己的地址（刷新停在原分页，旧地址 /skills、/memory、/ai/timers 重定向过来）。
+/* ---------- Genet 页（/ai）：Genet / 任务 / 自动 / 记忆 四个分页 ----------
+ * 侧栏的「Genet」进来。分页栏就是这一页的标题，每个分页有自己的地址（刷新停在原分页，旧地址 /memory、/ai/timers 重定向过来）。
+ * 这里只放个人的：「记忆」是个人记忆；skill 属于空间，在各空间的空间 AI 页里（ai/SpaceAiHub.tsx），旧地址 /ai/skills、/skills 转到当前空间的。
  * Genet 分页嵌的是和右下角浮窗同一套对话（AssistantChat）。同一页不能同时开两个对话（输入框桥按页面存），
  * 所以在这个分页上浮窗收起、入口不显示（AssistantDock 认 /ai），收起时没发出去的字带过来。 */
 import { lazy, Suspense, useEffect, useState } from 'react'
@@ -10,9 +11,9 @@ import AssistantChat from '../assistant/AssistantChat'
 import { GenetStatus, useGenetPage, type GenetPage } from './genet-page'
 import AutomationList from './AutomationList'
 import TaskList from './TaskList'
+import { spaceAiPath } from './space-ai-path'
 
-const SkillLibrary = lazy(() => import('../SkillLibrary'))
-const MemoryPanel = lazy(() => import('../memory/MemoryPanel'))
+const PersonalMemory = lazy(() => import('../memory/MemoryPanel').then((m) => ({ default: m.PersonalMemory })))
 
 const C = COPY.ai
 
@@ -20,7 +21,6 @@ const TABS = [
   { to: '/ai', label: C.tabs.genet, end: true },
   { to: '/ai/tasks', label: C.tabs.tasks, end: false },
   { to: '/ai/automations', label: C.tabs.automations, end: false },
-  { to: '/ai/skills', label: C.tabs.skills, end: false },
   { to: '/ai/memory', label: C.tabs.memory, end: false },
 ] as const
 
@@ -87,19 +87,13 @@ export default function AiHub({
         <Route path="automations" element={<AutomationList pages={pages} spaces={spaces} />} />
         {/* 「定时」分页改成了「自动」：收件箱里的旧链接、书签照样能进来 */}
         <Route path="timers" element={<Navigate to="/ai/automations" replace />} />
-        <Route
-          path="skills"
-          element={
-            <Suspense fallback={null}>
-              <SkillLibrary space={space} pages={pages} onChanged={onChanged} />
-            </Suspense>
-          }
-        />
+        {/* skill 归到空间：旧地址转到当前空间的空间 AI 页 */}
+        <Route path="skills" element={<Navigate to={space ? spaceAiPath(space.id, 'skills') : '/ai'} replace />} />
         <Route
           path="memory"
           element={
             <Suspense fallback={null}>
-              <MemoryPanel space={space} />
+              <PersonalMemory />
             </Suspense>
           }
         />

@@ -10,6 +10,7 @@ import { randomUUID } from 'node:crypto'
 import type { Pool, PoolClient } from 'pg'
 import type * as Y from 'yjs'
 import { withTransaction } from '../db.js'
+import { pageVisibleSql } from '../page-visibility.js'
 import { ASSISTANT_ID, isAssistantId } from '../agents/assistant-agent.js'
 import { loadChoice } from '../agents/session-store.js'
 import { checkActions } from './action-check.js'
@@ -101,9 +102,9 @@ export type RuleRow = {
   last_results: unknown
 }
 
-// 页面标题只在它还活着、主人仍是那个空间的成员时给：被移出空间后列表里不该还看得到别人空间里的标题
+// 页面标题只在它还活着、主人仍看得到它时给：被移出空间后列表里不该还看得到别人空间里的标题
 const TITLE_IF_VISIBLE = (alias: string): string => `CASE WHEN ${alias}.deleted_at IS NULL
-      AND EXISTS (SELECT 1 FROM space_members m WHERE m.space_id = ${alias}.space_id AND m.user_id = t.owner_id) THEN ${alias}.title END`
+      AND ${pageVisibleSql(alias, 't.owner_id')} THEN ${alias}.title END`
 
 export const SELECT_RULE = `SELECT t.id, t.owner_id, t.name, t.source, t.instruction, t.spec, t.config, t.actions, t.time_zone, t.space_id, t.scope_page, t.builtin,
     t.target_page, t.agent, t.enabled, t.next_at, t.fail_streak, t.paused_reason, t.created_at,

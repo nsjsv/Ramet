@@ -30,6 +30,8 @@ interface Props {
   getSchema: () => Schema | undefined
   tick: number
   spaceId: string | null
+  /** 这页在私人区：@ 的 AI 是自己的 Genet，不是空间 AI */
+  privatePage: boolean
   /** 函数 = 按这个空间能 @ 的 AI 的名字拼（没有 = null） */
   placeholder: string | ((ai: string | null) => string)
   initial?: string
@@ -77,7 +79,7 @@ function DraftLine({ draft }: { draft: ReplyDraft }) {
   )
 }
 
-export default function CommentComposer({ getSchema, tick, spaceId, placeholder, initial = '', autoFocus, onSubmit, onCancel, onEscape, submitLabel, draftFor }: Props) {
+export default function CommentComposer({ getSchema, tick, spaceId, privatePage, placeholder, initial = '', autoFocus, onSubmit, onCancel, onEscape, submitLabel, draftFor }: Props) {
   const ref = useRef<ComposerInputHandle>(null)
   const [empty, setEmpty] = useState(!initial.trim())
   const [busy, setBusy] = useState(false)
@@ -121,7 +123,7 @@ export default function CommentComposer({ getSchema, tick, spaceId, placeholder,
     if (draft) stopReplyDraft(draft.target)
   }
 
-  const ai = commentAi(useSpaceAiOfSpace(spaceId))
+  const ai = commentAi(useSpaceAiOfSpace(spaceId), privatePage)
   const me = selfId()
   const sources: MentionSources = {
     pages: null,

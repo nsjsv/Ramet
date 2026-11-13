@@ -16,6 +16,8 @@ import { writeTitleFragment } from './editor/title-fragment'
 import { usePersistentSet } from './tree-state'
 import { peekDirPageDrag, takeDirPageDrag } from './tree-drag'
 import { toast, toastError } from './ui/toast'
+import { confirmDialog } from './ui/dialog'
+import { areaChangeConfirm, type PageArea } from './page-area'
 
 export interface PageNode extends Page {
   children: PageNode[]
@@ -35,8 +37,9 @@ function subtreeIds(node: PageNode): Set<string> {
   return ids
 }
 
-/** kind：只有文档页能拖进集合成为行（集合 / 过程页 / skill 页不是行），也只有它能拖进目录树 */
-export type PageDrag = { id: string; subtree: Set<string>; kind: Page['kind'] }
+/** kind：只有文档页能拖进集合成为行（集合 / 过程页 / skill 页不是行），也只有它能拖进目录树。
+ *  area：从哪一栏拖起（公共 / 私人两栏是两棵树，跨栏落下 = 换区；「分享给我的」不能拖） */
+export type PageDrag = { id: string; subtree: Set<string>; kind: Page['kind']; area: PageArea }
 let pageDrag: PageDrag | null = null
 
 /** 页面树的落点接受的拖拽源：本树的页，或目录树拖来的页面条目（dirItemId；它在页面树里没有子树，
@@ -45,7 +48,7 @@ type TreeDrag = PageDrag & { dirItemId?: string }
 function activeDrag(): TreeDrag | null {
   if (pageDrag) return pageDrag
   const dir = peekDirPageDrag()
-  return dir ? { id: dir.pageId, subtree: new Set([dir.pageId]), kind: 'doc', dirItemId: dir.itemId } : null
+  return dir ? { id: dir.pageId, subtree: new Set([dir.pageId]), kind: 'doc', area: 'public', dirItemId: dir.itemId } : null
 }
 const intoCollectionOk = (d: TreeDrag): boolean => d.kind === 'doc' && !d.dirItemId
 
@@ -129,16 +132,25 @@ interface TreeCallbacks {
   renamingId: string | null
   /** 只读空间（viewer）：隐藏新建 / 删除，禁用双击重命名与拖拽（REST 写会 403） */
   readOnly: boolean
+  /** 这一行单独只读（「分享给我的」里只读分享的页）；缺省 = 跟着整栏 */
+  rowReadOnly?: (node: PageNode) => boolean
+  /** 这一栏是哪一区：拖起时记下，跨栏落下 = 换区 */
+  area: PageArea
   onToggle: (id: string) => void
   onRenameStart: (id: string | null) => void
   onRenameCommit: (id: string, draft: string) => void
   onCreateChild: (parentId: string | null) => void
   onRemove: (node: PageNode) => void
   /** 树拖拽挪父级 / 排序：源页插到目标父页子列表的 index 位（index 缺省 = 服务端不重排）；
-   *  targetParentId=null = 挪回顶层（追加到根末尾）。不自动展开目标行 */
-  onMovePage: (sourceId: string, targetParentId: string | null, index?: number) => void
+   *  targetParentId=null = 挪回顶层（追加到根末尾）。fromArea = 从哪一栏拖来（跨栏 = 换区）。不自动展开目标行 */
+  onMovePage: (sourceId: string, targetParentId: string | null, index: number | undefined, fromArea: PageArea) => void
   /** 目录树的页面条目落进页面树：targetParentId null = 空间顶层 */
   onMoveFromDir: (itemId: string, targetParentId: string | null, index?: number) => void
+  /** 这一栏收不收这个拖拽源：目录树的页只回公共区；公共页拖进私人栏要有权限（创建人 / 空间 owner） */
+  accepts: (drag: TreeDrag) => boolean
+  /** 顶层页行上的换区按钮：给哪个方向（null = 不给） */
+  areaAction: (node: PageNode) => 'to-private' | 'to-public' | null
+  onToggleArea: (node: PageNode) => void
 }
 
 /**
@@ -146,22 +158,36 @@ interface TreeCallbacks {
  * 行用现有 listPages 全量（scopedPages）构建，不新增请求；展开态按空间 id 记忆。 */
 export function PageTreeBoard({
   spaceId,
+  area,
   pages,
   readOnly,
+  rowReadOnly,
+  canPrivatize,
+  lookup,
+  emptyText,
   onCreateChild,
   onRemove,
   onChanged,
 }: {
   /** 页面树所属空间（无实体 id：树由空间派生） */
   spaceId: string
-  /** 当前空间的页面（Sidebar 的 listPages 结果按 space 过滤）；null = 加载中 */
+  /** 这一栏是哪一区：公共 / 我的私人区（两栏各是一棵树，跨栏落下 = 换区）/ 分享给我的（不能拖、不能换区） */
+  area: PageArea
+  /** 当前空间这一区的页面（Sidebar 的 listPages 结果按空间、区过滤）；null = 加载中 */
   pages: Page[] | null
   readOnly: boolean
+  /** 这一行单独只读（只读分享的页：没有新建 / 删除 / 改名） */
+  rowReadOnly?: (node: PageNode) => boolean
+  /** 这一页（公共的）能不能挪进私人区（page-area.ts 的 canPrivatize，与服务端同口径） */
+  canPrivatize: (pageId: string) => boolean
+  /** 按 id 找页（跨栏拖来的源页不在本栏的 pages 里） */
+  lookup: (pageId: string) => Page | undefined
+  emptyText: string
   onCreateChild: (parentId: string | null) => void
   onRemove: (node: PageNode) => void
   onChanged: () => void
 }) {
-  // 展开态跨刷新保持（localStorage，按空间 id 分：各空间的页面树互不干扰）
+  // 展开态跨刷新保持（localStorage，按空间 id 分：各空间的页面树互不干扰；两栏共用一份，页 id 不会重）
   const [expanded, toggle] = usePersistentSet('ramet.tree.pages.' + spaceId)
   const [renamingId, setRenamingId] = useState<string | null>(null)
   // 拖页面的插入线：parentId/index = 兄弟插入边界（parentId null = 空间顶层），y/left/width = 线的渲染位置
@@ -189,13 +215,43 @@ export function PageTreeBoard({
   // 树拖拽挪父级 / 排序：PATCH parent_id + index（同父重排时只发 index）。换父时父页正文里的入口（子页面块）
   // 由服务端随这次 PATCH 一起改：新父页补、旧父页摘，补不上整个移动不生效。
   // index 缺省 = 服务端不重排（保持原 position）。不自动展开目标行
-  async function movePage(sourceId: string, targetParentId: string | null, index?: number) {
+  async function movePage(sourceId: string, targetParentId: string | null, index: number | undefined, fromArea: PageArea) {
+    // 跨栏 = 换区：先确认（进私人区要有权限）；落在顶层时告诉服务端进 / 出私人区，落在某页下时区跟那页
+    const crossing = fromArea !== area
+    if (crossing && !(await confirmArea(lookup(sourceId), fromArea, area))) return
     try {
-      await api.movePage(sourceId, targetParentId, index)
+      await api.movePage(sourceId, targetParentId, index, crossing && targetParentId === null ? area === 'private' : undefined)
     } catch (err) {
       console.error(err)
       const cycle = err instanceof Error && err.message === 'parent_id would create a cycle'
-      toast(cycle ? COPY.tree.moveIntoSelf : COPY.tree.moveFailed, { kind: 'error' })
+      toast(cycle ? COPY.tree.moveIntoSelf : crossing ? COPY.area.moveFailed : COPY.tree.moveFailed, { kind: 'error' })
+      return
+    }
+    onChanged()
+  }
+
+  /** 换区前的确认；公共页进私人区没有权限就直接说明，不弹确认 */
+  async function confirmArea(page: Page | undefined, from: PageArea, to: PageArea): Promise<boolean> {
+    const ask = areaChangeConfirm(from, to)
+    if (!ask) return true
+    if (ask === 'to-private' && !(page && canPrivatize(page.id))) {
+      toast(COPY.area.privatizeForbidden, { kind: 'error' })
+      return false
+    }
+    const title = page?.title || COPY.untitled
+    return ask === 'to-private'
+      ? confirmDialog({ message: COPY.area.confirmToPrivate(title), confirmLabel: COPY.area.toPrivate, danger: true })
+      : confirmDialog({ message: COPY.area.confirmToPublic(title), confirmLabel: COPY.area.toPublic })
+  }
+
+  async function toggleArea(node: PageNode) {
+    const to: PageArea = area === 'private' ? 'public' : 'private'
+    if (!(await confirmArea(node, area, to))) return
+    try {
+      await api.setPagePrivate(node.id, to === 'private')
+    } catch (err) {
+      console.error(err)
+      toastError(err, COPY.area.moveFailed)
       return
     }
     onChanged()
@@ -280,13 +336,22 @@ export function PageTreeBoard({
     expanded,
     renamingId,
     readOnly,
+    rowReadOnly,
+    area,
     onToggle: toggle,
     onRenameStart: setRenamingId,
     onRenameCommit: (id, draft) => void commitRename(id, draft),
     onCreateChild: (parentId) => onCreateChild(parentId),
     onRemove: (node) => onRemove(node),
-    onMovePage: (sourceId, targetId, index) => void movePage(sourceId, targetId, index),
+    onMovePage: (sourceId, targetId, index, fromArea) => void movePage(sourceId, targetId, index, fromArea),
     onMoveFromDir: (itemId, targetId, index) => void moveFromDir(itemId, targetId, index),
+    // 目录树的页只回公共区（服务端同样拒绝）；公共页拖进私人栏要有权限，没有就不亮落点
+    // 「分享给我的」不收也不出（换区只有主人能做，服务端同样拒绝）
+    accepts: (d) =>
+      area === 'shared' || d.area === 'shared' ? false : area === 'private' ? !d.dirItemId && (d.area === 'private' || canPrivatize(d.id)) : true,
+    areaAction: (node) =>
+      readOnly || area === 'shared' || node.parent_id !== null ? null : area === 'private' ? 'to-public' : canPrivatize(node.id) ? 'to-private' : null,
+    onToggleArea: (node) => void toggleArea(node),
   }
 
   return (
@@ -300,6 +365,7 @@ export function PageTreeBoard({
         if (readOnly) return
         const pg = activeDrag()
         if (!pg) return // 块拖拽：行自己接管
+        if (!callbacks.accepts(pg)) return
         const boundary = dropBoundaryAt(e.currentTarget, e.clientY, pg)
         if (!boundary) {
           setDropLine(null) // 中带（行接管变子页）/非法落点：摘掉插入线（框与线互斥）
@@ -317,6 +383,7 @@ export function PageTreeBoard({
         if (readOnly) return
         const pg = activeDrag()
         if (!pg) return // 块拖拽：行自己接管
+        if (!callbacks.accepts(pg)) return
         const boundary = dropBoundaryAt(e.currentTarget, e.clientY, pg)
         if (!boundary) return
         e.preventDefault()
@@ -325,7 +392,7 @@ export function PageTreeBoard({
         if (pg.dirItemId) {
           takeDirPageDrag()
           void moveFromDir(pg.dirItemId, boundary.parentId, boundary.index)
-        } else void movePage(pg.id, boundary.parentId, boundary.index)
+        } else void movePage(pg.id, boundary.parentId, boundary.index, pg.area)
       }}
     >
       {dropLine && (
@@ -335,7 +402,7 @@ export function PageTreeBoard({
         />
       )}
       {rows === null && <div className="tree-empty">{COPY.loading}</div>}
-      {rows !== null && rows.length === 0 && <div className="tree-empty">{COPY.tree.pageTreeEmpty}</div>}
+      {rows !== null && rows.length === 0 && <div className="tree-empty">{emptyText}</div>}
       {rows?.map((node) => (
         <TreeItem key={node.id} node={node} depth={0} {...callbacks} />
       ))}
@@ -347,7 +414,11 @@ function TreeItem({ node, depth, ...cb }: TreeCallbacks & { node: PageNode; dept
   // 集合在侧栏是叶子：行不进侧栏，从集合视图、搜索、@ 进入
   const isCollection = node.kind === 'collection'
   const hasChildren = !isCollection && node.children.length > 0
+  const areaAction = cb.areaAction(node)
   const expanded = hasChildren && cb.expanded.has(node.id)
+  const readOnly = cb.readOnly || !!cb.rowReadOnly?.(node)
+  // 「分享给我的」整栏不能拖（挪出分享的范围自己就看不到了，换区只有主人能做）
+  const fixed = readOnly || cb.area === 'shared'
   // 拖块进页：编辑器手柄拖来的顶层块落到树行 = 整块进该页（editor/page-drop.ts）。
   // 拖树行 = 挪页面：落到别的树行就挂到该页下。拖进自己 / 自己的子树是非法落点（防环，
   // 服务端 400 兜底）。与块拖拽并存：先判页面拖拽源，再判块拖拽源。
@@ -355,10 +426,10 @@ function TreeItem({ node, depth, ...cb }: TreeCallbacks & { node: PageNode; dept
   // 不能提成渲染期布尔（stale 闭包会让 dragover 判空 → 落点永远不亮）
   const [dropOver, setDropOver] = useState(false)
   const dropOk = (): boolean => {
-    if (cb.readOnly) return false
+    if (readOnly) return false
     const pg = activeDrag()
     // 合集里只放普通页（放进去就是一行），合集 / skill 页拖到合集上不亮（服务端同样 400）
-    if (pg) return !pg.subtree.has(node.id) && !(isCollection && pg.kind !== 'doc')
+    if (pg) return cb.accepts(pg) && !pg.subtree.has(node.id) && !(isCollection && pg.kind !== 'doc')
     // 拖块进页对集合禁用：集合页没有正文
     return !isCollection && blockDragTarget(node.id) !== null
   }
@@ -368,11 +439,11 @@ function TreeItem({ node, depth, ...cb }: TreeCallbacks & { node: PageNode; dept
       <div
         className={'tree-item' + (dropOver ? ' droptarget' : '')}
         style={{ '--depth': depth } as React.CSSProperties}
-        draggable={!cb.readOnly}
+        draggable={!fixed}
         onDragStart={(e) => {
           // 从按钮/改名输入框起手不算拖页面（输入框有自己的文字拖拽）
-          if (cb.readOnly || (e.target as HTMLElement).closest('button, input')) return
-          pageDrag = { id: node.id, subtree: subtreeIds(node), kind: node.kind }
+          if (fixed || (e.target as HTMLElement).closest('button, input')) return
+          pageDrag = { id: node.id, subtree: subtreeIds(node), kind: node.kind, area: cb.area }
           e.dataTransfer.effectAllowed = 'move'
           document.addEventListener(
             'dragend',
@@ -384,7 +455,7 @@ function TreeItem({ node, depth, ...cb }: TreeCallbacks & { node: PageNode; dept
         }}
         onDragOver={(e) => {
           // 页面拖拽三区：中带(25%~75%) = 变子页高亮（行自己接管）；上下边缘 = nav 画插入线
-          const pg = cb.readOnly ? null : activeDrag()
+          const pg = readOnly ? null : activeDrag()
           if (pg) {
             const r = e.currentTarget.getBoundingClientRect()
             const rel = (e.clientY - r.top) / Math.max(1, r.height)
@@ -392,8 +463,8 @@ function TreeItem({ node, depth, ...cb }: TreeCallbacks & { node: PageNode; dept
               setDropOver(false) // 移到边缘：摘掉变子页框（框与线互斥）
               return // 边缘区：nav 接管排序线
             }
-            if (pg.id === node.id || pg.subtree.has(node.id) || (isCollection && !intoCollectionOk(pg))) {
-              setDropOver(false) // 拖进自己/自己子树、非文档页拖进集合：非法，摘框
+            if (!cb.accepts(pg) || pg.id === node.id || pg.subtree.has(node.id) || (isCollection && !intoCollectionOk(pg))) {
+              setDropOver(false) // 这一栏不收、拖进自己/自己子树、非文档页拖进集合：非法，摘框
               return
             }
             e.preventDefault()
@@ -413,13 +484,13 @@ function TreeItem({ node, depth, ...cb }: TreeCallbacks & { node: PageNode; dept
         }}
         onDrop={(e) => {
           setDropOver(false)
-          const pg = cb.readOnly ? null : activeDrag()
+          const pg = readOnly ? null : activeDrag()
           if (pg) {
             // 中带落点 = 变子页：挂到该页下（子列表末尾），镜像同步在 movePage 里
             const r = e.currentTarget.getBoundingClientRect()
             const rel = (e.clientY - r.top) / Math.max(1, r.height)
             if (rel < 0.25 || rel > 0.75) return // 边缘区：nav 接管排序线
-            if (pg.id === node.id || pg.subtree.has(node.id) || (isCollection && !intoCollectionOk(pg))) return
+            if (!cb.accepts(pg) || pg.id === node.id || pg.subtree.has(node.id) || (isCollection && !intoCollectionOk(pg))) return
             e.preventDefault()
             if (pg.dirItemId) {
               takeDirPageDrag()
@@ -429,7 +500,7 @@ function TreeItem({ node, depth, ...cb }: TreeCallbacks & { node: PageNode; dept
             const sourceId = pg.id
             pageDrag = null
             // 拖进集合 = 成为行：不带 index（带了服务端会把集合所有行的 position 整列重编号），新行落在手动顺序末尾
-            cb.onMovePage(sourceId, node.id, isCollection ? undefined : node.children.length)
+            cb.onMovePage(sourceId, node.id, isCollection ? undefined : node.children.length, pg.area)
             return
           }
           if (!dropOk()) return
@@ -475,18 +546,28 @@ function TreeItem({ node, depth, ...cb }: TreeCallbacks & { node: PageNode; dept
             to={`/page/${node.id}`}
             className={({ isActive }) => 'tree-label' + (isActive ? ' active' : '')}
             data-tip={node.title || COPY.untitled}
-            onDoubleClick={() => !cb.readOnly && cb.onRenameStart(node.id)}
+            onDoubleClick={() => !readOnly && cb.onRenameStart(node.id)}
             draggable={false}
           >
             {node.title || COPY.untitled}
           </NavLink>
         )}
-        {!cb.readOnly && (
+        {!readOnly && (
           <span className="tree-actions">
             {/* 集合的行从表格「+ 新建」建，不在侧栏建子页 */}
             {!isCollection && (
               <button className="icon-btn" data-tip={COPY.tree.newChild} aria-label={COPY.tree.newChild} onClick={() => cb.onCreateChild(node.id)}>
                 <Icon name="plus" size={14} />
+              </button>
+            )}
+            {areaAction && (
+              <button
+                className="icon-btn"
+                data-tip={areaAction === 'to-private' ? COPY.area.toPrivate : COPY.area.toPublic}
+                aria-label={areaAction === 'to-private' ? COPY.area.toPrivate : COPY.area.toPublic}
+                onClick={() => cb.onToggleArea(node)}
+              >
+                <Icon name={areaAction === 'to-private' ? 'lock' : 'unlock'} size={14} />
               </button>
             )}
             <button className="icon-btn danger" data-tip={COPY.tree.remove} aria-label={COPY.tree.remove} onClick={() => cb.onRemove(node)}>

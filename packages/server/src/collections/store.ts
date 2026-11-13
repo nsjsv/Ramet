@@ -38,8 +38,9 @@ const PAGE_ID_TAKEN = 'SELECT 1 FROM pages WHERE id = $1'
 // 集合页与新行的文档由服务端整份写好、正文是空的：正文索引同时落成 ''（同 skills.ts 建页时写 content_text）。
 // 留 NULL 的话，routes/search.ts 里 content_text ILIKE 得 NULL，「每个词都要命中」那条 NOT EXISTS 会把它算作命中，
 // 没打开过的行会出现在每一次搜索里；空串也让「编辑时间」不因第一次存盘（NULL 变 ''）前移
-const INSERT_COLLECTION_PAGE = `INSERT INTO pages (id, parent_id, owner_id, space_id, in_page_tree, kind, title, content_text)
-  VALUES ($1, $2, $3, $4, true, 'collection', $5, '')`
+// $6 = 顶层合集的区（私人区主人，空 = 公共）；有父页时数据库触发器跟父页
+const INSERT_COLLECTION_PAGE = `INSERT INTO pages (id, parent_id, owner_id, space_id, in_page_tree, kind, title, content_text, private_owner)
+  VALUES ($1, $2, $3, $4, true, 'collection', $5, '', $6)`
 // 内联集合建好时 ref_host 就是父页：块是「先插后建」的，宿主正文里已经有它（collections/inline.ts）
 const INSERT_COLLECTION = 'INSERT INTO collections (page_id, inline, ref_host) VALUES ($1, $2, $3)'
 // 建行时锁住集合页（基表行锁，同 collab.ts 快照写入守卫的写法）：与回收集合的 UPDATE 互斥，
@@ -413,6 +414,8 @@ export type NewCollection = {
   ownerId: string
   inline: boolean
   title: string
+  /** 顶层合集建进谁的私人区（缺省公共）；有父页时跟父页 */
+  privateOwner?: string | null
   /** 先写好的整份文档（agent 建合集时初始结构已经演练进去了，collections/ai-schema.ts）；缺省 = newCollectionDoc */
   doc?: Y.Doc
 }
@@ -425,7 +428,7 @@ export async function createCollection(pool: Pool, input: NewCollection): Promis
   await writeDocState(pool, `page:${input.id}`, input.doc ?? newCollectionDoc(input.title))
   try {
     await withTransaction(pool, async (client) => {
-      await client.query(INSERT_COLLECTION_PAGE, [input.id, input.parentId, input.ownerId, input.spaceId, input.title])
+      await client.query(INSERT_COLLECTION_PAGE, [input.id, input.parentId, input.ownerId, input.spaceId, input.title, input.privateOwner ?? null])
       await client.query(INSERT_COLLECTION, [input.id, input.inline, input.inline ? input.parentId : null])
     })
   } catch (err) {

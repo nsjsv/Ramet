@@ -42,7 +42,7 @@ async function readIfExists(path) {
 }
 
 /** 把中心的文件清单同步到 dir：本地哈希一致的跳过，其余下载；清单里没有了的（自己写过的）删掉。返回下载个数 */
-async function syncFiles(name, dir, files) {
+async function syncFiles(name, dir, files, spaceId) {
   await mkdir(dir, { recursive: true })
   const manifestPath = join(dir, '.ramet-manifest.json')
   let previous = {}
@@ -63,7 +63,8 @@ async function syncFiles(name, dir, files) {
       next[f.path] = f.sha256
       continue
     }
-    const r = await download(`/api/ramet/skills/${encodeURIComponent(name)}/file?path=${encodeURIComponent(f.path)}`)
+    // 带上 skill 所在的空间：Genet 可能用的是别的空间的 skill（中心按凭证再判一次能不能用）
+    const r = await download(`/api/ramet/skills/${encodeURIComponent(name)}/file?path=${encodeURIComponent(f.path)}&space=${encodeURIComponent(spaceId)}`)
     if (!r.ok) throw new Error(`下载 ${f.path} 失败（${r.status}）`)
     await mkdir(dirname(target), { recursive: true })
     const tmp = `${target}.ramet-tmp`
@@ -96,19 +97,26 @@ export const tools = [
         indexText(caps.skills ?? []),
       inputSchema: {
         type: 'object',
-        properties: { name: { type: 'string', description: 'skill 的名字（见上面的列表）' } },
+        properties: {
+          name: { type: 'string', description: 'skill 的名字（见上面的列表）' },
+          // 只给 Genet（工具清单里有 read_space 的）：别的空间的 skill 列在 Ramet 带的空间上下文里
+          ...(caps.tools?.includes('read_space')
+            ? { space: { type: 'string', description: '用哪个空间的 skill（空间 id）；用上面列表里的就不填' } }
+            : {}),
+        },
         required: ['name'],
       },
     }),
     run: async (args) => {
       const name = String(args.name ?? '').trim()
       if (!name) return reply('请给出 skill 的名字。', true)
-      const r = await call(`/api/ramet/skills/${encodeURIComponent(name)}`)
+      const space = typeof args.space === 'string' ? args.space.replace(/^space:/, '').trim() : ''
+      const r = await call(`/api/ramet/skills/${encodeURIComponent(name)}${space ? `?space=${encodeURIComponent(space)}` : ''}`)
       if (!r.ok || !r.json) return failure(`加载 skill ${name} 失败`, r)
       const skill = r.json
       const dir = join(cacheRoot(), skill.spaceId, skill.name)
       try {
-        await syncFiles(skill.name, dir, skill.files)
+        await syncFiles(skill.name, dir, skill.files, skill.spaceId)
       } catch (err) {
         return reply(`skill ${name} 的文件没能同步到本机（${err instanceof Error ? err.message : String(err)}）。说明正文如下，没有文件可用：\n\n${skill.body}`, true)
       }

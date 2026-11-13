@@ -6,7 +6,7 @@ const marks: EditMarks = {
   page: { at: '2020-01-01T00:00:00.000Z', user_id: 'bob', actor: 'user', actor_agent: null },
   blocks: { b1: { at: '2020-01-01T00:00:00.000Z', user_id: 'bob', actor: 'user', actor_agent: null } },
 }
-vi.mock('./api', () => ({ api: { editMarks: vi.fn(async () => marks), listSpaceMembers: vi.fn(async () => []) } }))
+vi.mock('./api', () => ({ api: { editMarks: vi.fn(async () => marks), listSpacePeople: vi.fn(async () => []) } }))
 
 const { editInfoOf, noteLocalEdits, refreshEditMarks } = await import('./edit-marks-store')
 const { setSelf } = await import('./people')

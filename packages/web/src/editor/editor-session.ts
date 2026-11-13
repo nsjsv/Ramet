@@ -67,7 +67,6 @@ import { docModeKeys } from './mode-keys'
 import { quickAi } from './quick-ai'
 import { agentReplySchema, messageDeleteKeymap, messageEnterView, userMessageSchema, upgradeMessageBlocks } from './message-blocks'
 import { docSendView } from './doc-send'
-import { bindPageSpace } from '../memory/remember'
 import { bindPageView } from './page-views'
 import { headingInputRule } from './heading-level'
 import { sourceWatch } from './source-sync'
@@ -207,9 +206,6 @@ export function startEditorSession(deps: EditorSessionDeps): () => void {
       void idb.clearData().catch((err: unknown) => console.error('idb clearData failed:', err))
     }
   })
-
-  // 这页在哪个空间：文档模式的 `>> /记住 …` 草稿发送时要用（memory/remember.ts）
-  const unbindSpace = bindPageSpace(id, () => pagesRef.current?.find((p) => p.id === id)?.space_id ?? undefined)
 
   const getMainView = (): EditorView | undefined => {
     let view: EditorView | undefined
@@ -508,7 +504,6 @@ export function startEditorSession(deps: EditorSessionDeps): () => void {
   return () => {
     destroyed = true
     if (shell) setPageDropBridge(null) // 跨页搬块桥随本页编辑器失效（旧桥会把块搬出旧页面）；对话档没装它，别摘页面编辑器的
-    unbindSpace()
     unbindView()
     // 摘标题观察；防抖中的标题写库立刻补写，不能丢（标题视图在下方异步销毁链里才拆，此刻还读得到）
     shell?.title.stop()

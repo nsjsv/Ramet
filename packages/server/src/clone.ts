@@ -41,8 +41,9 @@ const SELECT_COPYABLE_SUBTREE = `WITH RECURSIVE sub AS (
 ) SELECT id FROM sub`
 // 图标两列原样跟着克隆:emoji 是字面量,图片是对永不删除的 files 行的引用,复制引用即共用同一份派生版,不额外占磁盘。
 // 封面同理(文件引用 / 外链 / 预设名都是值)。全宽是版式,也跟着走(模板实例化同走这里)
+// $13 = 新根的区（顶层时有用；子页由数据库触发器跟父页）
 const INSERT_PAGE = `INSERT INTO pages (id, parent_id, owner_id, space_id, title, icon_emoji, icon_file_id, in_page_tree, full_width,
-  cover_kind, cover_value, cover_y) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`
+  cover_kind, cover_value, cover_y, private_owner) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`
 const INSERT_DOC = 'INSERT INTO yjs_documents (doc_name, state) VALUES ($1, $2)'
 
 // docs 缺项(克隆 resolve 之后、事务之前页面才创建,尚无文档)时的合法空文档状态
@@ -122,8 +123,9 @@ export async function copyPageTree(
   targetSpaceId: string,
   newOwnerId: string,
   docs: Map<string, Uint8Array>,
-  /** 新根挂在哪个父页下：缺省 null(顶层);集合复制行时给集合 id(routes/collections.ts 的 rows/duplicate) */
-  opts: { rootParentId?: string | null } = {},
+  /** 新根挂在哪个父页下：缺省 null(顶层);集合复制行时给集合 id(routes/collections.ts 的 rows/duplicate)。
+   *  rootPrivateOwner：新根落在顶层时进谁的私人区(缺省公共) */
+  opts: { rootParentId?: string | null; rootPrivateOwner?: string | null } = {},
 ): Promise<{ newRootIds: string[]; idMap: Map<string, string> }> {
   // 旧页面 id → 新页面 id:子页面按映射挂父;键集兼作 visited 防环
   const idMap = new Map<string, string>()
@@ -165,6 +167,7 @@ export async function copyPageTree(
       page.cover_kind,
       page.cover_value,
       page.cover_y,
+      newParentId === null ? (opts.rootPrivateOwner ?? null) : null,
     ])
     await client.query(INSERT_DOC, [
       `page:${newId}`,

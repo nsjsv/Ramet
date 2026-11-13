@@ -78,6 +78,10 @@ export const INBOX_COPY = {
   docMention: {
     head: (who: string, page: string) => `${who} 在《${page}》正文里 @了你`,
   },
+  share: {
+    head: (who: string | null, page: string) => `${who ?? '有人'} 把《${page}》分享给了你`,
+    level: { edit: '可编辑', view: '只读' } as const,
+  },
   comment: {
     reason: { reply: '回复了你', mention: '@了你', new_thread: '发了新评论' },
     head: (who: string, what: string) => `${who} ${what}`,

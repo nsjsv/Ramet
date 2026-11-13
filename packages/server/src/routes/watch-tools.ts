@@ -9,6 +9,7 @@ import type { Context, Hono } from 'hono'
 import type { Pool } from 'pg'
 import type * as Y from 'yjs'
 import type { AgentNameHost } from '../agents/agent-names.js'
+import { pageVisibleSql } from '../page-visibility.js'
 import { createRule, deleteRule, getRule, listRules, type RuleDeps } from '../triggers/rules.js'
 import { TIMER_LIMITS, TimerError } from '../triggers/store.js'
 import type { Outcome } from './ramet-consent.js'
@@ -67,7 +68,7 @@ export function watchToolRoutes(app: Hono, deps: WatchToolDeps): void {
     const title =
       (
         await pool.query<{ title: string }>(
-          'SELECT p.title FROM live_pages p JOIN space_members m ON m.space_id = p.space_id AND m.user_id = $2 WHERE p.id = $1',
+          `SELECT p.title FROM live_pages p WHERE p.id = $1 AND ${pageVisibleSql('p', '$2')}`,
           [page, g.user.id],
         )
       ).rows[0]?.title ?? ''

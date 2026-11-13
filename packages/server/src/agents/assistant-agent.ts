@@ -5,7 +5,7 @@
 //   - 只在「这一页就是发起人自己的 Genet 页」时解析得出来（resolveAssistant，manager.resolve 带着页面调它），
 //     所以普通的继续 / @ 链 / 重新生成 / 续跑 / 排队派发 / 预备会话都走同一个判定，不在各入口另写；
 //   - 不在任何机器上跑：凭据是 machine-access.ts 的 assistantPass，不判机器使用权、不记使用；没有工作区（cwd 恒为空）。
-// Genet 页：个人空间顶层的一个 doc 页，记在 assistants 表里；进了回收站就当没有，下次唤起新建一个（旧页照常留在回收站）。
+// Genet 页：个人空间顶层、主人私人区里的一个 doc 页（只有他看得到），记在 assistants 表里；进了回收站就当没有，下次唤起新建一个（旧页照常留在回收站）。
 //   它不进页面树（in_page_tree = false，入口是侧栏的「AI」），派出去的任务页挂在它下面，跟着祖先链一起不在树里；
 //   照常能打开、搜索、提及、回收。
 
@@ -43,6 +43,18 @@ const LOCK = `SELECT a.page_id, p.id AS live FROM assistants a LEFT JOIN live_pa
   WHERE a.user_id = $1 FOR UPDATE OF a`
 const SET_PAGE = 'UPDATE assistants SET page_id = $2 WHERE user_id = $1'
 
+// 这一页或它的某个祖先是谁的 Genet 页（至多 64 层）
+const GENET_OWNER_OF = `WITH RECURSIVE up(id, parent_id, n) AS (
+    SELECT id, parent_id, 0 FROM pages WHERE id = $1
+    UNION ALL SELECT p.id, p.parent_id, up.n + 1 FROM pages p JOIN up ON p.id = up.parent_id WHERE up.n < 64
+  ) SELECT a.user_id FROM up JOIN assistants a ON a.page_id = up.id ORDER BY up.n LIMIT 1`
+
+/** 这页在谁的 Genet 子树里（Genet 页本身、它下面的任务页 / 过程页）；不在 = null。
+ *  `/记住` 与 Genet 的提议在这里缺省记进个人记忆；Genet 收「眼前的空间」时跳过这些页（它们只是放在那个空间里） */
+export async function genetOwnerOf(pool: Pick<Pool, 'query'>, pageId: string): Promise<string | null> {
+  return (await pool.query<{ user_id: string }>(GENET_OWNER_OF, [pageId])).rows[0]?.user_id ?? null
+}
+
 /** 这一页是不是这个人的 Genet 页（活的） */
 export async function isAssistantPage(pool: Pool, userId: string, pageId: string): Promise<boolean> {
   return ((await pool.query(IS_ASSISTANT_PAGE, [userId, pageId])).rowCount ?? 0) > 0
@@ -54,7 +66,7 @@ export async function resolveAssistant(pool: Pool, user: { id: string }, pageId:
   return { id: ASSISTANT_ID, pass: assistantPass(user), assistant: true }
 }
 
-/** 这个人的 Genet 页：在就直接给；没有、或进了回收站，就在个人空间顶层新建一页（标题「Genet」，来源记成 Genet，不进页面树）再登记。
+/** 这个人的 Genet 页：在就直接给；没有、或进了回收站，就在个人空间顶层的私人区新建一页（标题「Genet」，来源记成 Genet，不进页面树）再登记。
  *  同一个事务里先锁住这个人的登记行，并发唤起两次也只建一页 */
 export async function ensureAssistantPage(pool: Pool, user: { id: string }): Promise<{ pageId: string; created: boolean }> {
   const spaceId = await myPersonalSpaceId(pool, user.id)
@@ -64,7 +76,8 @@ export async function ensureAssistantPage(pool: Pool, user: { id: string }): Pro
     const row = (await db.query<{ page_id: string | null; live: string | null }>(LOCK, [user.id])).rows[0]
     if (row?.page_id && row.live) return { pageId: row.page_id, created: false }
     const id = randomUUID()
-    await db.query(INSERT, [id, null, user.id, spaceId, false])
+    // 建在主人自己那个空间的私人区：Genet 的对话只有他看得到（任务页、过程页挂在它下面，跟着同区）
+    await db.query(INSERT, [id, null, user.id, spaceId, false, user.id])
     // 标题同时写进 pages.title 与文档的 title 片段（编辑器以文档为准，只写其一会被空文档冲掉）
     await db.query(SET_TITLE, [ASSISTANT_LABEL, id])
     await putDocState(db, `page:${id}`, newPageDoc(ASSISTANT_LABEL, []))

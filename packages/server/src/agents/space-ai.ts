@@ -11,6 +11,7 @@
 import type { Pool } from 'pg'
 import type { ConnectionRow } from '../ai-connections.js'
 import type { GrantCtx } from '../page-read.js'
+import { publicAreaSql } from '../page-visibility.js'
 import { assistantPass } from './machine-access.js'
 import type { ResolvedAgent } from './manager-types.js'
 import { RESERVED_AGENT_PREFIX } from './registry.js'
@@ -18,7 +19,7 @@ import type { ToolProfile } from './tool-profile.js'
 
 export const SPACE_AI_ID = `${RESERVED_AGENT_PREFIX}space-ai`
 /** 没配过名字时的显示名（也是 space_ai.name 的缺省值） */
-export const SPACE_AI_DEFAULT_NAME = 'AI'
+export const SPACE_AI_DEFAULT_NAME = '空间 AI'
 export const SPACE_AI_NAME_MAX = 20
 /** 还没启用 / 连接没了：一轮开头现读配置读不到时的失败文案 */
 export const SPACE_AI_OFF = '这个空间还没有启用 AI'
@@ -32,17 +33,22 @@ export function isSpaceAiId(agentId: string): boolean {
 export const SPACE_AI_JOIN = `LEFT JOIN space_ai sa ON sa.space_id = s.id
   LEFT JOIN user_ai_connections sc ON sc.id = sa.connection_id AND sc.user_id = s.owner_id`
 
-// 页面所在空间的空间 AI（生效的才有行）；$2 = 叫它的人，必须是那个空间的成员
+// 页面所在空间的空间 AI（生效的才有行）；$2 = 叫它的人，必须是那个空间的成员。
+// 只在公共区的页上有：私人页是某个人的，团队共用的 AI 不碰（page-visibility.ts 的 publicAreaSql）。
+// 唯一的例外是叫它的人自己和它的直接对话页（space-ai-chat.ts）：那一页在他的私人区，空间 AI 在那里回复，读写范围照旧只有公共区
 const SELECT_RESOLVABLE = `SELECT s.id FROM live_pages p JOIN spaces s ON s.id = p.space_id
   JOIN space_members m ON m.space_id = s.id AND m.user_id = $2
-  ${SPACE_AI_JOIN} WHERE p.id = $1 AND sc.id IS NOT NULL`
+  ${SPACE_AI_JOIN} WHERE p.id = $1 AND sc.id IS NOT NULL
+  AND (${publicAreaSql('p')} OR EXISTS (SELECT 1 FROM space_ai_chats ch WHERE ch.page_id = p.id AND ch.space_id = s.id AND ch.user_id = $2))`
 const SELECT_OF_PAGE = `SELECT s.id AS space_id, s.owner_id, sc.id AS connection_id, COALESCE(sa.name, '${SPACE_AI_DEFAULT_NAME}') AS name
-  FROM live_pages p JOIN spaces s ON s.id = p.space_id ${SPACE_AI_JOIN} WHERE p.id = $1 AND sc.id IS NOT NULL`
+  FROM live_pages p JOIN spaces s ON s.id = p.space_id ${SPACE_AI_JOIN} WHERE p.id = $1 AND sc.id IS NOT NULL
+  AND (${publicAreaSql('p')} OR EXISTS (SELECT 1 FROM space_ai_chats ch WHERE ch.page_id = p.id AND ch.space_id = s.id))`
 const SELECT_CONNECTION = `SELECT sc.id, sc.user_id, sc.name, sc.protocol, sc.base_url, sc.model, sc.key_ciphertext, sc.key_last4
   FROM spaces s ${SPACE_AI_JOIN} WHERE s.id = $1 AND sc.id IS NOT NULL`
 // 名字不看生效：停用了，已有的回复块照样显示它的名字
 const SELECT_NAMES = `SELECT p.id, sa.name FROM live_pages p JOIN space_ai sa ON sa.space_id = p.space_id WHERE p.id = ANY($1::text[])`
-const IN_SPACE = 'SELECT 1 FROM live_pages WHERE id = $1 AND space_id = $2'
+// 凭证收窄的范围：这个空间公共区里的活页
+const IN_SPACE = `SELECT 1 FROM live_pages p WHERE p.id = $1 AND p.space_id = $2 AND ${publicAreaSql('p')}`
 
 export type SpaceAi = { spaceId: string; ownerId: string; connectionId: string; name: string }
 
@@ -119,4 +125,26 @@ const ALLOWED: Array<{ method: string; path: RegExp; write: boolean }> = [
 /** 收窄过的凭证（空间 / 只读）能不能打这个端点 */
 export function narrowedAllowed(method: string, path: string, readOnly: boolean): boolean {
   return ALLOWED.some((a) => a.method === method && a.path.test(path) && !(readOnly && a.write))
+}
+
+// ---------- 空间概览：空间 AI 新建会话时带在记忆后面（prompt-env.ts） ----------
+
+/** 概览里最多列几个顶层页 */
+export const OVERVIEW_MAX = 30
+
+const SELECT_SPACE_NAME = 'SELECT name FROM spaces WHERE id = $1'
+// 公共区的顶层页，按页面树的顺序（同页面列表的排序）
+const SELECT_TOP_PAGES = `SELECT id, title FROM live_pages p
+  WHERE p.space_id = $1 AND p.parent_id IS NULL AND p.kind IN ('doc', 'collection') AND p.in_page_tree AND ${publicAreaSql('p')}
+  ORDER BY p.position ASC NULLS LAST, p.created_at, p.id`
+
+/** 「这个空间：名字；顶层页面：…」一段。空间 AI 一上来就知道这个空间有哪些东西，找东西先看它再搜；私人页不列（它碰不到） */
+export async function spaceOverview(pool: Pick<Pool, 'query'>, spaceId: string): Promise<string> {
+  const [name, pages] = await Promise.all([
+    pool.query<{ name: string }>(SELECT_SPACE_NAME, [spaceId]).then((r) => r.rows[0]?.name ?? ''),
+    pool.query<{ id: string; title: string }>(SELECT_TOP_PAGES, [spaceId]).then((r) => r.rows),
+  ])
+  const shown = pages.slice(0, OVERVIEW_MAX).map((p) => `- ${p.title.trim() || '无标题'}（page:${p.id}）`)
+  const more = pages.length > OVERVIEW_MAX ? [`…另有 ${pages.length - OVERVIEW_MAX} 个`] : []
+  return [`这个空间：「${name}」`, '顶层页面：', ...(shown.length ? shown : ['（还没有）']), ...more].join('\n')
 }

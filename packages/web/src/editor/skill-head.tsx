@@ -3,6 +3,7 @@
  * 在这里改：失焦保存，服务端按 Agent Skills 规则校验（名字格式 / 同空间唯一 / 描述长度），错误原样显示。
  * 权限同页面：只读成员只看。附件放 scripts / references / assets（或根目录），agent 加载 skill 时同步到它所在机器。 */
 
+import { spaceAiPath } from '../ai/space-ai-path'
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { Page } from '../api'
@@ -90,7 +91,8 @@ export default function SkillHead({ pageId, readOnly, pages }: { pageId: string;
   return (
     <section className="skill-head">
       <div className="skill-head-top">
-        <button type="button" onClick={() => navigate('/ai/skills')}>
+        {/* 回到这个 skill 所在空间的 skill 库（空间 AI 页的 Skill 分页） */}
+        <button type="button" onClick={() => navigate(detail ? spaceAiPath(detail.spaceId, 'skills') : '/ai/skills')}>
           <Icon name="skill" size={13} /> {C.library}
         </button>
         {source && (

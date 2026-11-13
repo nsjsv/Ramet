@@ -26,6 +26,7 @@ export type NoticeItem =
   | { type: 'timer_failed'; key: string; at: string; timerName: string; source?: string; reason: string }
   | { type: 'automation'; key: string; at: string; ruleName: string; text: string; pageId: string | null; pageTitle: string }
   | ({ type: 'doc_mention'; key: string; at: string; blockId: string; actor: { name: string }; excerpt: string } & Page)
+  | ({ type: 'share'; key: string; at: string; level: 'edit' | 'view'; actor: { name: string } | null } & Page)
 
 export type Notice = {
   title: string
@@ -107,6 +108,13 @@ export function noticeOf(item: NoticeItem): Notice | null {
         title: `${item.actor.name} 在${titled(item.pageTitle)}里 @了你`,
         body: clip(item.excerpt),
         url: item.blockId ? `${pageUrl(item.pageId)}?block=${encodeURIComponent(item.blockId)}` : pageUrl(item.pageId),
+      }
+    case 'share':
+      return {
+        ...base,
+        title: `${item.actor?.name ?? '有人'} 把${titled(item.pageTitle)}分享给了你`,
+        body: item.level === 'edit' ? '可编辑' : '只读',
+        url: pageUrl(item.pageId),
       }
     case 'timer_failed': {
       const kind = !item.source || item.source === 'timer' ? '定时' : '规则'

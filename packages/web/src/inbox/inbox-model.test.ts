@@ -132,6 +132,15 @@ describe('正文里 @了你', () => {
   })
 })
 
+describe('分享给你', () => {
+  test('进「新消息」；打开那一页就消掉（同「正文里 @了你」）', () => {
+    const shared: InboxItem = { type: 'share', key: 'share:p3', at: 't', pageId: 'p3', pageTitle: '方案', level: 'view', actor: { id: 'u', name: 'bob' } }
+    expect(groupOf('share')).toBe('news')
+    expect(hasSeenOf([shared], 'p3')).toBe(true)
+    expect(dropSeenOf([shared, docMention('p2', 't')], 'p3').map((i) => i.key)).toEqual(['doc_mention:p2'])
+  })
+})
+
 describe('代回复', () => {
   test('评论打开那个串起草、正文 @ 在那一块起草；别的条目、没有块 id 的没有这个按钮', () => {
     expect(draftReplyHref(comment('t1', 't'))).toBe('/page/p1?comment=t1&draft=1')

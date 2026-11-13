@@ -30,6 +30,8 @@ export type CommentCtx = {
   /** 公开页：只读，没有输入框和任何操作 */
   readOnly: boolean
   spaceId: string | null
+  /** 这页在私人区：评论里 @ 的 AI 是自己的 Genet（comment-ai.ts） */
+  privatePage: boolean
   /** 当前用户是该空间 owner：能删别人的评论 */
   canModerate: boolean
   getSchema: () => Schema | undefined
@@ -117,6 +119,7 @@ function CommentItem({ comment, threadBy, ctx }: { comment: Comment; threadBy: s
           getSchema={ctx.getSchema}
           tick={ctx.tick}
           spaceId={ctx.spaceId}
+          privatePage={ctx.privatePage}
           placeholder={C.placeholder}
           initial={comment.body}
           autoFocus
@@ -168,6 +171,7 @@ export default function CommentThread({ thread, ctx, autoFocus, onEscape }: { th
               getSchema={ctx.getSchema}
               tick={ctx.tick}
               spaceId={ctx.spaceId}
+              privatePage={ctx.privatePage}
               placeholder={C.replyPlaceholder}
               autoFocus={autoFocus}
               submitLabel={C.reply}
@@ -193,6 +197,7 @@ export function DraftComposer({ anchor, ctx, initial }: { anchor: Anchor; ctx: C
       getSchema={ctx.getSchema}
       tick={ctx.tick}
       spaceId={ctx.spaceId}
+      privatePage={ctx.privatePage}
       placeholder={C.placeholder}
       initial={initial}
       autoFocus

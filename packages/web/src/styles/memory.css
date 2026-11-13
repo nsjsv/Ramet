@@ -1,9 +1,23 @@
-/* ---------- 空间公共记忆（memory/MemoryPanel.tsx）与输入卡里 /记住 的轻提示 ---------- */
+/* ---------- 记忆（memory/MemoryPanel.tsx：个人记忆 + 空间记忆两节）与输入卡里 /记住 的轻提示 ---------- */
 
 .memory-page {
   max-width: 760px;
   margin: 0 auto;
   padding: 48px 32px 96px;
+}
+
+/* 两节：个人记忆、当前空间的记忆 */
+.memory-section + .memory-section {
+  margin-top: 40px;
+  padding-top: 24px;
+  border-top: 1px solid var(--line);
+}
+
+.memory-section-title {
+  margin: 0 0 4px;
+  font-size: var(--t-md);
+  font-weight: 600;
+  color: var(--ink);
 }
 
 .memory-sub {

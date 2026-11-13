@@ -105,7 +105,9 @@ export default function ImportDialog({
       }
       if (blob.size > MAX_TOTAL) throw new Error('文件太大（上限 60MB），请分几次导入')
       setBusy('正在导入…')
-      const result = await api.importMarkdown(spaceId, blob, name, underCurrent && currentPage ? currentPage.id : null)
+      // 不放在当前页下时没说放哪：进私人区（同新建），想公开再挪
+      const parent = underCurrent && currentPage ? currentPage.id : null
+      const result = await api.importMarkdown(spaceId, blob, name, parent, parent === null)
       onDone(result.roots[0] ?? null)
       onClose()
     } catch (err) {

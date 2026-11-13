@@ -8,9 +8,9 @@
 // 删号预览（数量）与真删共用同一条继任者判定，确认框里的数字就是实际会发生的。
 
 import type { Pool, PoolClient } from 'pg'
-import { purgeSpace } from './page-purge.js'
+import { purgePageRows, purgeSpace } from './page-purge.js'
 
-export type DeleteImpact = { transferSpaces: number; purgeSpaces: number; purgePages: number }
+export type DeleteImpact = { transferSpaces: number; purgeSpaces: number; purgePages: number; purgePrivatePages: number }
 
 type OwnedSpace = { id: string; successor: string | null; pages: number }
 
@@ -26,6 +26,10 @@ const PROMOTE_SUCCESSOR = `UPDATE space_members SET role = 'owner' WHERE space_i
 const REASSIGN_PAGES = `UPDATE pages p SET owner_id = s.owner_id FROM spaces s
   WHERE p.space_id = s.id AND p.owner_id = $1`
 const CLEAR_ORPHAN_PAGES = 'UPDATE pages SET owner_id = NULL WHERE owner_id = $1'
+// 他在各空间私人区里的页（含回收站里的）：人没了就再没有人能看它们，与删空间同口径物理删除
+const SELECT_PRIVATE_PAGES = 'SELECT id FROM pages WHERE private_owner = $1'
+// 预览里的数字：不在被整个删掉的空间里的活私人页（那些已经算进 purgePages）
+const COUNT_PRIVATE_ELSEWHERE = `SELECT count(*)::int AS n FROM live_pages WHERE private_owner = $1 AND NOT (space_id = ANY($2::text[]))`
 // 机器只归接入人：人没了机器不能变成无主还挂着授权；返回 id 供提交后断开在线连接
 const DELETE_OWNED_CONNECTORS = 'DELETE FROM connectors WHERE owner_id = $1 RETURNING id'
 // sessions / space_members / invites / 收藏等走外键级联
@@ -39,10 +43,12 @@ async function ownedSpaces(db: Pool | PoolClient, userId: string): Promise<Owned
 export async function deleteImpact(pool: Pool, userId: string): Promise<DeleteImpact> {
   const spaces = await ownedSpaces(pool, userId)
   const purged = spaces.filter((s) => s.successor === null)
+  const elsewhere = (await pool.query<{ n: number }>(COUNT_PRIVATE_ELSEWHERE, [userId, purged.map((s) => s.id)])).rows[0]?.n ?? 0
   return {
     transferSpaces: spaces.length - purged.length,
     purgeSpaces: purged.length,
     purgePages: purged.reduce((n, s) => n + s.pages, 0),
+    purgePrivatePages: elsewhere,
   }
 }
 
@@ -50,6 +56,8 @@ export async function deleteImpact(pool: Pool, userId: string): Promise<DeleteIm
 export async function deleteUserAccount(client: PoolClient, userId: string): Promise<string[]> {
   // 先锁住他名下的空间行：从判定继任者到转交 / 删除之间，别的请求改不了这些空间的归属
   await client.query('SELECT id FROM spaces WHERE owner_id = $1 FOR UPDATE', [userId])
+  // 先删他的私人页：private_owner 不级联，留着删号会失败（宁可失败，也不让它们变成没人认领的页）
+  await purgePageRows(client, (await client.query<{ id: string }>(SELECT_PRIVATE_PAGES, [userId])).rows.map((r) => r.id))
   const dropped: string[] = []
   for (const space of await ownedSpaces(client, userId)) {
     if (space.successor === null) {

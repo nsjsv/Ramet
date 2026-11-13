@@ -520,6 +520,29 @@
   height: 18px;
 }
 
+/* 页面树上方的空间 AI 一行（assistant/SpaceAiRow.tsx）：与上面的入口同一几何；没开时淡一些、带「未启用」 */
+.space-ai-nav {
+  padding-top: 2px;
+}
+
+.space-ai-row-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.space-ai-row.is-off {
+  color: var(--ink-3);
+}
+
+.space-ai-row-off {
+  flex: none;
+  font-size: var(--t-xs);
+  color: var(--ink-3);
+}
+
 /* ---------- 侧栏顶部搜索框 ---------- */
 
 /* 无边框，状态层底色；悬停加深一档，聚焦换成面色 + 强调色描边 */
@@ -712,6 +735,12 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* 私人栏名字前的锁 */
+.dir-board-name > svg {
+  margin-right: 3px;
+  vertical-align: -1px;
 }
 
 /* section 折叠箭头：任何状态都 hover 才出现（占位不缩防布局抖动）；开合带旋转过渡 */

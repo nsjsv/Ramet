@@ -1,4 +1,4 @@
-/* ---------- Skill 库（AI 页的 Skill 分页，/ai/skills）----------
+/* ---------- Skill 库（空间 AI 页的 Skill 分页，/spaces/:id/ai/skills；一个空间的 skill）----------
  * 当前空间里的 skill 列表 + 新建 + 导入（zip / 文件夹 / GitHub）。skill 本身就是页面：点一行进 /page/:id，
  * 正文在编辑器里写，名称 / 描述 / 附件在页面顶部的 SkillHead（editor/skill-head.tsx）。
  * 权限同页面：只读成员能看列表，新建 / 导入 / 删除按钮不出现。 */

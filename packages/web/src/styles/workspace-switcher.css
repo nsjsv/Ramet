@@ -101,6 +101,15 @@
   color: var(--ink-3);
 }
 
+/* 「作为访客」：有页分享给我、我又不是成员的空间 */
+.space-menu-group {
+  margin-top: 6px;
+  padding: 4px 6px 2px;
+  font-size: var(--t-xs);
+  font-weight: 600;
+  color: var(--ink-3);
+}
+
 /* 空间选择框右边的图标按钮（设置 / 回收站）：只对当前选中的空间生效 */
 .ws-cog,
 .ws-trash {

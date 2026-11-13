@@ -39,6 +39,18 @@
   transition: background var(--d-1), color var(--d-1);
 }
 
+/* 空间 AI 页（ai/SpaceAiHub.tsx）分页栏最前面的名字 */
+.ai-tabs-title {
+  padding: 5px 10px 5px 0;
+  font-size: var(--t-md);
+  font-weight: 600;
+  color: var(--ink);
+  white-space: nowrap;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .ai-tab:hover {
   background: var(--hover);
   color: var(--ink);
@@ -329,4 +341,40 @@
   .ai-tasks {
     padding: 8px 16px 96px;
   }
+}
+
+/* ---------- 空间 AI 页的「对话」栏（assistant/SpaceAiChat.tsx） ---------- */
+
+.space-ai-private {
+  flex: none;
+  max-width: 760px;
+  width: 100%;
+  margin: 8px auto 0;
+  padding: 0 32px;
+  box-sizing: border-box;
+  font-size: var(--t-xs);
+  color: var(--ink-3);
+}
+
+/* 没开 / 只读 / 出错：一段说明（owner 多一个「去启用」） */
+.space-ai-state {
+  max-width: 760px;
+  width: 100%;
+  margin: 48px auto 0;
+  padding: 0 32px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  color: var(--ink-2);
+  font-size: var(--t-sm);
+}
+
+.space-ai-state p {
+  margin: 0;
+}
+
+.space-ai-hint {
+  color: var(--ink-3);
 }

@@ -1,6 +1,8 @@
-/* ---------- 空间公共记忆的界面文案（并进 copy.ts 的 COPY.memory；单独成文件是为了让 copy.ts 不超过 800 行）---------- */
+/* ---------- 记忆的界面文案（并进 copy.ts 的 COPY.memory；单独成文件是为了让 copy.ts 不超过 800 行）---------- */
 export const MEMORY_COPY = {
   sub: (space: string) => `「${space}」里所有 agent 共享`,
+  spaceTitle: (space: string) => `「${space}」的空间记忆`,
+  personal: { title: '你的个人记忆', sub: '只有你看得到，只给 Genet：你的偏好和习惯' },
   loading: '加载中…',
   loadFailed: '记忆加载失败，请稍后再试',
   stats: (count: number, chars: number, max: number) => `${count} 条 · 合计 ${chars} / ${max} 字`,
@@ -24,11 +26,11 @@ export const MEMORY_COPY = {
   /** 输入框里的 `/记住 内容` */
   command: {
     usage: '用法：/记住 要记住的内容',
-    saved: '已记住，这个空间里所有 agent 之后的每一轮都会带上',
+    savedPersonal: '已记进你的个人记忆，Genet 下一轮就会带上',
+    savedSpace: (space: string) => `已记进「${space}」的空间记忆，那里所有 agent 都会带上`,
     failed: '没有记下',
-    noSpace: '这个页面不在任何空间里，没法记忆',
     readOnly: '只读成员不能添加记忆',
   },
   /** 斜杠菜单里的 Ramet 命令 */
-  slash: { group: 'Ramet', label: '记住', hint: '把一句话记进这个空间的公共记忆（所有 agent 共享）' },
+  slash: { group: 'Ramet', label: '记住', hint: '记一句话：Genet 页上进你的个人记忆，别的页进这个空间的公共记忆' },
 }

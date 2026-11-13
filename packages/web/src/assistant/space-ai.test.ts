@@ -26,21 +26,29 @@ const NONE = { choice: null, lock: '' }
 const ids = (list: readonly AgentInfo[]) => list.map((a) => a.id)
 
 describe('空间 AI 的数据：按页面所在空间', () => {
-  test('每个空间都有（个人空间也能开）；没配过 / 老缓存里没有 ai 按没启用、名字 AI', () => {
-    expect(spaceAiOfSpace(MINE)).toEqual({ spaceId: 'mine', enabled: false, name: 'AI', personal: true })
+  test('每个空间都有（个人空间也能开）；没配过 / 老缓存里没有 ai 按没启用、名字「空间 AI」', () => {
+    expect(spaceAiOfSpace(MINE)).toEqual({ spaceId: 'mine', enabled: false, name: '空间 AI', chat: null })
     expect(spaceAiOfSpace(undefined)).toBeNull()
-    expect(spaceAiOfSpace(TEAM_ON)).toEqual({ spaceId: 'team', enabled: true, name: '小助手', personal: false })
-    expect(spaceAiOfSpace(space('old', undefined))).toEqual({ spaceId: 'old', enabled: false, name: 'AI', personal: false })
-    expect(spaceAiOfSpace(space('mine-on', { enabled: true, name: '我的助手' }, true))).toMatchObject({ enabled: true, personal: true })
+    expect(spaceAiOfSpace(TEAM_ON)).toEqual({ spaceId: 'team', enabled: true, name: '小助手', chat: null })
+    expect(spaceAiOfSpace(space('old', undefined))).toEqual({ spaceId: 'old', enabled: false, name: '空间 AI', chat: null })
+    expect(spaceAiOfSpace(space('mine-on', { enabled: true, name: '我的助手' }, true))).toMatchObject({ enabled: true, chat: null })
   })
 
   test('页面 → 空间 → 空间 AI；不知道这一页在哪（公开页、列表没到）是 null', () => {
     syncSpaceAi([TEAM_ON, TEAM_OFF, MINE], PAGES)
     expect(spaceAiOfPage('p-team')).toMatchObject({ enabled: true, name: '小助手' })
     expect(spaceAiOfPage('p-off')).toMatchObject({ enabled: false })
-    expect(spaceAiOfPage('p-mine')).toMatchObject({ enabled: false, personal: true })
+    expect(spaceAiOfPage('p-mine')).toMatchObject({ enabled: false, chat: null })
     expect(spaceAiOfPage('nowhere')).toBeNull()
     expect(spaceAiOfPage(undefined)).toBeNull()
+  })
+
+  test('私人页上没有空间 AI，只有我和它的直接对话页例外（空间列表里的 ai.chat）', () => {
+    const priv = { ...page('p-private', 'team'), private_owner: 'u1' } as Page
+    const chat = { ...page('p-chat', 'team'), private_owner: 'u1' } as Page
+    syncSpaceAi([space('team', { enabled: true, name: '小助手', chat: 'p-chat' })], [priv, chat])
+    expect(spaceAiOfPage('p-private')).toBeNull()
+    expect(spaceAiOfPage('p-chat')).toMatchObject({ enabled: true, name: '小助手', chat: 'p-chat' })
   })
 
   test('只在归属或配置真变了才通知；内容没变沿用同一个对象', () => {
@@ -74,15 +82,15 @@ describe('空间 AI 的数据：按页面所在空间', () => {
 })
 
 describe('空间 AI 的身份：名字跟着页面所在的空间', () => {
-  test('名字按这一页的空间现取，取不到写 AI；头像是机器人；能力同 Genet', () => {
+  test('名字按这一页的空间现取，取不到写「空间 AI」；头像是机器人；能力同 Genet', () => {
     syncSpaceAi([TEAM_ON, TEAM_OFF, MINE], PAGES)
     expect(spaceAiName('p-team')).toBe('小助手')
-    expect(spaceAiName('p-mine')).toBe('AI')
-    expect(spaceAiName()).toBe('AI')
+    expect(spaceAiName('p-mine')).toBe('空间 AI')
+    expect(spaceAiName()).toBe('空间 AI')
     expect(builtinAgent(SPACE_AI_ID, 'p-team')?.label).toBe('小助手')
     expect(findAgent(SPACE_AI_ID, 'p-team')?.label).toBe('小助手')
     expect(agentName(SPACE_AI_ID, 'p-team')).toBe('小助手')
-    expect(agentName(SPACE_AI_ID)).toBe('AI')
+    expect(agentName(SPACE_AI_ID)).toBe('空间 AI')
     expect(agentBadge(SPACE_AI_ID)).toEqual({ kind: 'mark', key: 'bot' })
     expect(capsOf(builtinAgent(SPACE_AI_ID))).toEqual({ workspace: false, toolProfile: false, team: false })
     // 同一个名字同一个对象（chip 的 useMemo / useSyncExternalStore 靠引用）
@@ -106,11 +114,20 @@ describe('这一页的目录：空间 AI 追加在末尾，只能点名 / 选中
     expect(pageCatalog(catalog, false, null)).toBe(catalog)
   })
 
+  test('私人页上没有空间 AI：它碰不到私人区（开着也不出现）', () => {
+    const secret = { ...page('p-secret', 'team'), private_owner: 'u1' } as Page
+    syncSpaceAi([TEAM_ON, TEAM_OFF, MINE], [...PAGES, secret])
+    expect(spaceAiOfPage('p-secret')).toBeNull()
+    expect(ids(catalogForPage(catalog, 'p-secret', NONE))).toEqual(['c:m1:codex', 'claude'])
+    expect(spaceAiOfPage('p-team')).toMatchObject({ enabled: true })
+    syncSpaceAi([TEAM_ON, TEAM_OFF, MINE], PAGES)
+  })
+
   test('Genet 页只有 Genet；锁定成别的工具时空间 AI 不在，锁定成它时只剩它', () => {
     expect(ids(catalogForPage(catalog, 'p-team', { choice: ASSISTANT_ID, lock: '' }))).toEqual([ASSISTANT_ID])
     expect(ids(catalogForPage(catalog, 'p-team', { choice: '', lock: 'claude' }))).toEqual(['claude'])
     expect(ids(catalogForPage(catalog, 'p-team', { choice: '', lock: SPACE_AI_ID }))).toEqual([SPACE_AI_ID])
-    // 锁定成它而它被关了：空目录（chip 显示「这个空间还没有启用 AI」）
+    // 锁定成它而它被关了：空目录（chip 显示「这个空间还没有启用空间 AI」）
     expect(ids(catalogForPage(catalog, 'p-off', { choice: '', lock: SPACE_AI_ID }))).toEqual([])
   })
 
@@ -137,12 +154,12 @@ describe('这一页的目录：空间 AI 追加在末尾，只能点名 / 选中
 })
 
 describe('没启用时开跑失败的说法', () => {
-  const on = { spaceId: 'team', enabled: true, name: 'AI', personal: false }
-  const off = { spaceId: 'team', enabled: false, name: 'AI', personal: false }
+  const on = { spaceId: 'team', enabled: true, name: 'AI', chat: null }
+  const off = { spaceId: 'team', enabled: false, name: 'AI', chat: null }
 
   test('团队空间没开、这次又是叫它：说清楚原因；别的情况交还原来的说法', () => {
-    expect(spaceAiOffReason(off, 'unknown agent', true)).toBe('这个空间还没有启用 AI')
-    expect(spaceAiOffReason(off, 'tool-locked', true)).toBe('这个空间还没有启用 AI')
+    expect(spaceAiOffReason(off, 'unknown agent', true)).toBe('这个空间还没有启用空间 AI')
+    expect(spaceAiOffReason(off, 'tool-locked', true)).toBe('这个空间还没有启用空间 AI')
     expect(spaceAiOffReason(on, 'unknown agent', true)).toBeNull()
     expect(spaceAiOffReason(off, 'unknown agent', false)).toBeNull()
     expect(spaceAiOffReason(null, 'unknown agent', true)).toBeNull()

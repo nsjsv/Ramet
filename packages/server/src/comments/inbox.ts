@@ -1,12 +1,13 @@
 // ---------- 收件箱里的评论条目 ----------
 // 一个讨论串一条，取串里最新一条「该让我看到」的评论 C：不是我写的、没删、30 天内、晚于我读到这个串的时刻，且满足其一
-//   mention    C @了我（mentions 是落库时过滤过的本空间成员）
+//   mention    C @了我（mentions 是落库时过滤过的、看得到这页的人）
 //   reply      我在这个串里发过言（未删的）——我之后才发言的话，发言时已读，比我早的评论自然不算
 //   new_thread C 是串的首条，而我是页面创建者
-// 只列活页面（live_pages）且我仍是其空间成员的（列举类：全局 admin 也不例外）。只是视图，按钮走评论接口自己的判定。
+// 只列活页面（live_pages）且我仍看得到的（page-visibility.ts；列举类：全局 admin 也不例外）。只是视图，按钮走评论接口自己的判定。
 // 页面关掉的那种评论不列：页面上已收起，点进去看不到、也读不掉这条
 import type { Pool } from 'pg'
 import { SPACE_AI_DEFAULT_NAME, spaceAiNames } from '../agents/space-ai.js'
+import { pageAccessJoin } from '../page-visibility.js'
 import { KIND_ENABLED, plainMentions } from './store.js'
 
 export type CommentInboxItem = {
@@ -39,7 +40,7 @@ const SELECT_COMMENT_ITEMS = `SELECT * FROM (
   SELECT DISTINCT ON (t.id) t.id AS thread_id, p.id AS page_id, p.title, c.body, c.created_at, c.author_id, c.author_ai, u.username, why.reason
   FROM comment_threads t
   JOIN live_pages p ON p.id = t.page_id
-  JOIN space_members m ON m.space_id = p.space_id AND m.user_id = $1
+  ${pageAccessJoin('p', '$1', 'm')}
   JOIN comments c ON c.thread_id = t.id
   LEFT JOIN users u ON u.id = c.author_id
   LEFT JOIN comment_reads r ON r.thread_id = t.id AND r.user_id = $1

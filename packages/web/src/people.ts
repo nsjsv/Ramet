@@ -2,9 +2,9 @@
  * 对话气泡按发言人画头像（非 React 的 widget，chat-view.tsx）、侧栏账号处与设置里画自己，都读这里。
  * 数据源：
  *   - 自己 = 登录态（App 的 user 经 setSelf 镜像过来，改头像后立即生效）；
- *   - 别人 = 页面所在空间的成员列表（GET /api/spaces/:id/members 带 avatar），按空间惰性取一次，缓存到刷新为止
- *     （control 广播每次改页名都会发，跟着它重取成员太费流量；别人换头像下次刷新可见）。
- *     只认同空间成员：服务端成员列表本身就这么限，头像只给有共同空间的人看。
+ *   - 别人 = 页面所在空间里我认识的人（GET /api/spaces/:id/people 带 avatar：成员看到成员和访客，访客只看到分享面板上的人），
+ *     按空间惰性取一次，缓存到刷新为止（control 广播每次改页名都会发，跟着它重取太费流量；别人换头像下次刷新可见）。
+ *     范围由服务端定，头像只给有共同空间的人看。
  * 头像图是上传文件的 160px 方图派生（/api/files/:id/icon，与页面图标同一条）。
  * 显示规则只有一份（avatarLook）：有图画图；没图 = 用户名首字 + 按用户名稳定取色（同协作光标色）；
  * 不认识的人（已退出空间 / 成员还没取到）= 中性人形。 */
@@ -58,7 +58,7 @@ export function personOf(spaceId: string | null, userId: string): Person | null 
   return members?.get(userId) ?? null
 }
 
-/** 某空间的全部成员（`@` 大菜单的「成员」分类）。没取过就发起取数并先回 null，到了 subscribePeople 通知 */
+/** 某空间里我认识的全部人（`@` 大菜单的「成员」分类、人员属性的候选）。没取过就发起取数并先回 null，到了 subscribePeople 通知 */
 export function spaceMembers(spaceId: string): Person[] | null {
   const members = spaces.get(spaceId)
   if (members === undefined) load(spaceId)
@@ -74,9 +74,9 @@ export function loadSpaceMembers(spaceId: string): Promise<void> {
 function load(spaceId: string): void {
   spaces.set(spaceId, null)
   const req = api
-    .listSpaceMembers(spaceId)
+    .listSpacePeople(spaceId)
     .then((list) => {
-      spaces.set(spaceId, new Map(list.map((m) => [m.user_id, { id: m.user_id, username: m.username, avatar: m.avatar ?? null }])))
+      spaces.set(spaceId, new Map(list.map((m) => [m.id, { id: m.id, username: m.username, avatar: m.avatar ?? null }])))
       notify()
     })
     .catch((err: unknown) => {

@@ -10,6 +10,7 @@ import { requireAuth, type AuthEnv, type AuthUser } from '../auth.js'
 import type { DocWriter } from '../collab.js'
 import { ENSURE_DIR_TREE, withTransaction } from '../db.js'
 import { linkInParent, unlinkFromParent } from '../page-entry.js'
+import { pageVisibleSql } from '../page-visibility.js'
 import { parentOk, roleInSpace, trashPageSubtree, validParent as validPageParent, writable } from './pages.js'
 
 // 用 type 而非 interface：pg 的 query<T> 约束要求隐式索引签名，interface 给不了
@@ -69,7 +70,7 @@ const SELECT_ITEMS = `SELECT fi.*, p.title AS page_title, p.icon_emoji, p.icon_f
   LEFT JOIN live_pages p ON p.id = fi.item_id AND fi.kind = 'page'
   LEFT JOIN files fl ON fl.id = fi.item_id AND fi.kind = 'file'
   WHERE b.space_id IS NOT NULL AND ${IN_SCOPE}
-    AND (fi.kind = 'file' OR p.id IS NOT NULL)
+    AND (fi.kind = 'file' OR (p.id IS NOT NULL AND ${pageVisibleSql('p', '$1')}))
   ORDER BY fi.${ORDER}`
 const SELECT_BOARD = 'SELECT * FROM boards WHERE id = $1'
 // 目录 / 条目行连目录树 space_id 一起取：可见门与可写门都要它（folder / item 行本身不带空间）
@@ -80,10 +81,10 @@ const SELECT_ITEM = `SELECT fi.*, b.space_id AS space_id FROM folder_items fi
   JOIN boards b ON b.id = fi.board_id
   WHERE fi.id = $1 AND b.space_id IS NOT NULL
     AND EXISTS (SELECT 1 FROM space_members m WHERE m.space_id = b.space_id AND m.user_id = $2)`
-const VISIBLE_PAGE = `SELECT p.space_id, p.kind,
+const VISIBLE_PAGE = `SELECT p.space_id, p.kind, p.private_owner,
     EXISTS (SELECT 1 FROM live_pages c WHERE c.parent_id = p.id) AS has_children
-  FROM live_pages p JOIN space_members m ON m.space_id = p.space_id AND m.user_id = $2
-  WHERE p.id = $1`
+  FROM live_pages p
+  WHERE p.id = $1 AND ${pageVisibleSql('p', '$2')}`
 // 挂进目录树的页一律是脱离页面树的独立页：拿掉父子关系并标记不进页面树。已经是这样的页不改（不白记一条页面变更）
 const DETACH_FROM_PAGE_TREE = `UPDATE pages SET parent_id = NULL, in_page_tree = false
   WHERE id = $1 AND (parent_id IS NOT NULL OR in_page_tree)`
@@ -99,9 +100,10 @@ const PARENT_IN_PAGE_TREE = `WITH RECURSIVE up AS (
   UNION
   SELECT p.id, p.parent_id, p.in_page_tree FROM live_pages p JOIN up ON p.id = up.parent_id
 ) SELECT bool_and(in_page_tree) AS ok FROM up`
-// 页面树同级列表：只算页面树成员（根级还躺着目录树文档，算进去下标就和前端看到的对不上）
+// 页面树同级列表：只算页面树成员（根级还躺着目录树文档，算进去下标就和前端看到的对不上）。
+// 目录树里的页只放回公共区（见下面的落点校验），兄弟也只算公共区的：别人的私人页不跟着重排
 const PAGE_TREE_SIBLINGS = `SELECT id FROM live_pages
-  WHERE parent_id IS NOT DISTINCT FROM $1 AND space_id = $2 AND in_page_tree AND id <> $3
+  WHERE parent_id IS NOT DISTINCT FROM $1 AND space_id = $2 AND in_page_tree AND id <> $3 AND private_owner IS NULL
   ORDER BY position ASC NULLS LAST, created_at, id`
 
 // 删目录 / 目录树要把范围内挂载的页面本体一起移入回收站。
@@ -356,9 +358,11 @@ export function boardsRoutes(pool: Pool, notify?: () => void, notifyBoards?: () 
       // 页面必须存在（未进回收站）且是我所在空间的页，admin 也不例外：挂进目录后标题会进目录树列表，
       // 而列表是列举类读路径（同 visiblePages）
       const page = (
-        await pool.query<{ space_id: string; kind: string; has_children: boolean }>(VISIBLE_PAGE, [body.item_id, user.id])
+        await pool.query<{ space_id: string; kind: string; private_owner: string | null; has_children: boolean }>(VISIBLE_PAGE, [body.item_id, user.id])
       ).rows[0]
       if (!page) return 'page not found'
+      // 目录树是整个空间共用的结构，私人页挂进去别人也看不到：先挪回公共区
+      if (page.private_owner !== null) return 'private pages cannot be attached'
       // 挂载会改写页面本身（脱离页面树），页面必须就在这棵目录树的空间里，不能借目录树改别的空间的页
       if (page.space_id !== spaceId) return 'page not in this space'
       // 目录树条目是叶子，画不出子页：带子页的页挂进来，子页就从两棵树里都消失了
@@ -495,9 +499,11 @@ export function boardsRoutes(pool: Pool, notify?: () => void, notifyBoards?: () 
     if (parentId !== null) {
       if (!(await parentOk(pool, user, parentId, page.space_id))) return c.json({ error: 'parent_id not found' }, 400)
       if (!(await validPageParent(pool, page.id, parentId))) return c.json({ error: 'parent_id would create a cycle' }, 400)
-      const parent = (await pool.query<{ kind: string }>('SELECT kind FROM live_pages WHERE id = $1', [parentId])).rows[0]
+      const parent = (await pool.query<{ kind: string; private_owner: string | null }>('SELECT kind, private_owner FROM live_pages WHERE id = $1', [parentId])).rows[0]
       // 集合 / 过程页 / skill 页没有可放子页面块的正文
       if (parent?.kind !== 'doc') return c.json({ error: 'parent must be a doc page' }, 400)
+      // 目录树的页是公共的：放回页面树也只放回公共区，要私人先放回公共区再挪（挪进私人区有自己的权限规则）
+      if (parent.private_owner !== null) return c.json({ error: 'parent must be in the public area' }, 400)
       const inTree = (await pool.query<{ ok: boolean | null }>(PARENT_IN_PAGE_TREE, [parentId])).rows[0]?.ok
       if (inTree !== true) return c.json({ error: 'parent is not in the page tree' }, 400)
       if (!write) return c.json({ error: 'doc writer unavailable' }, 500)

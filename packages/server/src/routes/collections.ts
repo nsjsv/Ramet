@@ -137,20 +137,24 @@ export function collectionRoutes(deps: CollectionDeps) {
     const user = c.get('user')
     const body: unknown = await c.req.json().catch(() => null)
     if (!isRecord(body)) return c.json({ error: 'body must be an object' }, 400)
-    const { id, space_id: spaceId, parent_id: parentRaw, inline, title } = body
+    const { id, space_id: spaceId, parent_id: parentRaw, inline, title, private: inPrivate } = body
     if (id !== undefined && !(typeof id === 'string' && UUID_V4.test(id))) return c.json({ error: 'id must be a lowercase uuid v4' }, 400)
     if (typeof spaceId !== 'string') return c.json({ error: 'space_id required' }, 400)
     if (parentRaw !== undefined && parentRaw !== null && typeof parentRaw !== 'string') return c.json({ error: 'parent_id must be a string' }, 400)
     if (inline !== undefined && typeof inline !== 'boolean') return c.json({ error: 'inline must be a boolean' }, 400)
     if (title !== undefined && typeof title !== 'string') return c.json({ error: 'title must be a string' }, 400)
+    if (inPrivate !== undefined && typeof inPrivate !== 'boolean') return c.json({ error: 'private must be a boolean' }, 400)
     const parentId = typeof parentRaw === 'string' ? parentRaw : null
     // 内联集合归父页正文里的集合块所有，没有父页就没有主人
     if (inline === true && parentId === null) return c.json({ error: 'inline collection needs parent_id' }, 400)
-    // 空间：不存在与非成员同响应（不泄露存在性），viewer 403。父页的口径同 POST /api/pages（可见且同空间）
+    // 空间：不存在与非成员同响应（不泄露存在性），viewer 403。父页的口径同 POST /api/pages（可写且同空间；
+    // 有父页时不看空间角色，访客在分享给他可编辑的页下也能建）
     if (!(await pool.query('SELECT 1 FROM spaces WHERE id = $1', [spaceId])).rows[0]) return c.json({ error: 'space not found' }, 404)
-    const role = await roleInSpace(pool, user, spaceId)
-    if (role === null) return c.json({ error: 'space not found' }, 404)
-    if (!writable(role)) return c.json({ error: 'forbidden' }, 403)
+    if (parentId === null) {
+      const role = await roleInSpace(pool, user, spaceId)
+      if (role === null) return c.json({ error: 'space not found' }, 404)
+      if (!writable(role)) return c.json({ error: 'forbidden' }, 403)
+    }
     if (!(await parentOk(pool, user, parentId, spaceId))) return c.json({ error: 'parent_id not found' }, 400)
     // 父页只能是 doc 页：挂在集合 / 过程页 / skill 页下的集合，侧栏（集合是叶子）和视图（行只认 doc）里都找不到
     if (parentId !== null && !(await pool.query(SELECT_DOC_PAGE, [parentId])).rows[0]) {
@@ -164,6 +168,8 @@ export function collectionRoutes(deps: CollectionDeps) {
       ownerId: user.id,
       inline: inline === true,
       title: (title ?? '').trim(),
+      // 顶层合集建在哪一区：private = true 进我的私人区，缺省公共；有父页时跟父页（数据库触发器）
+      privateOwner: parentId === null && inPrivate === true ? user.id : null,
     })
     if (!created) return c.json({ error: 'id already exists' }, 409)
     notify()
@@ -174,7 +180,7 @@ export function collectionRoutes(deps: CollectionDeps) {
 
   // 集合块的渲染判定用（collection-embed）：活着还是在回收站，父页是谁。按 id 直达，含回收站里的，
   // 块要分得清集合在回收站（给恢复按钮，恢复走 POST /api/pages/:id/restore）与无法加载。
-  // 权限同恢复路由（pageRole：空间成员任意角色可读），非成员 / 不存在 / 不是集合同 404
+  // 权限同恢复路由（pageRole：看得到就能读，任意角色），看不到 / 不存在 / 不是集合同 404
   app.get('/api/collections/:id/state', auth, async (c) => {
     const row = (
       await pool.query<{ parent_id: string | null; title: string; space_id: string | null; owner_id: string | null; trashed: boolean; inline: boolean }>(
@@ -182,7 +188,7 @@ export function collectionRoutes(deps: CollectionDeps) {
         [c.req.param('id')],
       )
     ).rows[0]
-    if (!row || (await pageRole(pool, c.get('user'), row)) === null) return denied(c, 404)
+    if (!row || (await pageRole(pool, c.get('user'), { id: c.req.param('id') })) === null) return denied(c, 404)
     return c.json({ state: row.trashed ? 'trashed' : 'live', parent_id: row.parent_id, title: row.title, inline: row.inline })
   })
 

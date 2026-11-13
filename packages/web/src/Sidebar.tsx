@@ -21,6 +21,9 @@ import { attentionCount, newsCount } from './inbox/inbox-model'
 import { confirmDialog, promptDialog } from './ui/dialog'
 import { toast, toastError } from './ui/toast'
 import { Checkbox } from './ui/Checkbox'
+import { canPrivatize } from './page-area'
+import { useMyShares } from './page-share'
+import SpaceAiRow from './assistant/SpaceAiRow'
 
 // 侧栏顶部搜索框：GET /api/search?q= 防抖下拉，命中点击跳页
 function SidebarSearch({ onPick }: { onPick: (id: string) => void }) {
@@ -162,7 +165,7 @@ export default function Sidebar({
   useEffect(
     () =>
       onOpenSettings((tab, spaceId) => {
-        // 空间类分页（机器）看的是当前选中的空间：条目在别的空间就先切过去
+        // 空间类分页（机器、空间设置）看的是当前选中的空间：条目在别的空间就先切过去
         if (spaceId && spaceId !== selectedSpaceId) onSelectSpace(spaceId)
         setSettingsTab(tab)
         setSettingsOpen(true)
@@ -179,24 +182,28 @@ export default function Sidebar({
   // 账号处的头像（换头像后 Shell 更新 user，这里随之重渲染）
   const me = { id: user.id, username: user.username, avatar: user.avatar ?? null }
   const selected = spaces?.find((s) => s.id === selectedSpaceId) ?? null
+  // 作为访客进得去的空间（有页分享给我、我又不是成员）：切换器单列一栏，选中时侧栏只有「分享给我的」，没有回收站和空间设置
+  const guestSpaces = useMyShares(user.id).guestSpaces.filter((g) => !spaces?.some((s) => s.id === g.id))
+  const guestSpace = selected ? null : (guestSpaces.find((g) => g.id === selectedSpaceId) ?? null)
   const isViewer = selected?.my_role === 'viewer'
   // 页面树写入口（新建 / 删除 / 拖拽 / 改名）在 viewer 空间全关（REST 写会 403）
   const readOnly = isViewer
   // ⚙ 主设置入口常驻（footer）：全局分页（默认 Agent / 编辑器 / 账户）任何登录用户都要能进；
   // 空间分页的可见性由 SettingsModal 按 my_role 裁剪，这里不靠条件渲染入口表达
 
-  async function createChild(parentId: string | null) {
-    const created = await api.createPage(parentId, selectedSpaceId ?? undefined)
+  // inPrivate：顶层页建在哪一栏（有父页时服务端跟父页的区）
+  async function createChild(parentId: string | null, inPrivate?: boolean) {
+    const created = await api.createPage(parentId, selectedSpaceId ?? undefined, parentId === null && inPrivate ? { private: true } : undefined)
     // 不自动展开父节点：新建页面只 navigate，树的折叠状态由用户手动控制
     onChanged()
     navigate(`/page/${created.id}`)
   }
 
   // 新建整页集合（空间顶层，默认「状态」属性 + 表格视图由服务端写进初始文档），建好直接打开
-  async function createCollection() {
+  async function createCollection(inPrivate?: boolean) {
     if (!selectedSpaceId) return
     try {
-      const created = await collectionApi.create({ space_id: selectedSpaceId, inline: false })
+      const created = await collectionApi.create({ space_id: selectedSpaceId, inline: false, ...(inPrivate ? { private: true } : {}) })
       // 先进本地列表再跳：PageRoute 按列表里的 kind 分流，列表没到时会先把集合当普通页挂上正文编辑器
       onPageCreated(created)
       onChanged()
@@ -263,7 +270,7 @@ export default function Sidebar({
         <b className="sidebar-name">Ramet</b>
       </div>
       <SidebarSearch onPick={(id) => navigate(`/page/${id}`)} />
-      {/* 功能入口：AI（Genet / 任务 / Skill / 记忆，/ai 下哪个分页都算选中）与收件箱 */}
+      {/* 功能入口：Genet（Genet / 任务 / 自动 / 记忆，/ai 下哪个分页都算选中）与收件箱 */}
       <nav className="side-nav">
         <NavLink to="/ai" className={({ isActive }) => 'side-nav-item' + (isActive ? ' active' : '')}>
           <span className="side-nav-ic">
@@ -286,17 +293,25 @@ export default function Sidebar({
       </nav>
       {/* 收藏：私人书签（页面 / 块 / AI 回复 / 过程页步骤） */}
       <FavoritesList pages={pages} spaceId={selectedSpaceId} onNavigate={(to) => navigate(to)} />
+      {/* 当前空间的空间 AI（访客空间没有）：页面树上方一行，点进对话 / 记忆 / Skill */}
+      {selected && <SpaceAiRow spaceId={selected.id} />}
       {/* 竖树列表：该空间的页面树 + 目录树同区滚动，名字恒定「页面树」「目录树」；
           页面树随空间派生（有页面即渲染），目录树按需落行。外壳 / 折叠 / 删除在 Boards.tsx，
           页面树内容 / 拖拽在 PageTree.tsx。页面拖拽 = 插入线，深空白落点 = 空间顶层末尾 */}
       <Boards
         pages={pages}
+        me={user.id}
         selectedSpaceId={selectedSpaceId}
         spaceIds={spaces?.map((s) => s.id) ?? []}
         readOnly={readOnly}
+        guest={guestSpace !== null}
         onNavigate={(id) => navigate(`/page/${id}`)}
-        onCreatePage={(parentId) => void createChild(parentId)}
-        onCreateCollection={() => void createCollection()}
+        onCreatePage={(parentId, inPrivate) => void createChild(parentId, inPrivate)}
+        onCreateCollection={(inPrivate) => void createCollection(inPrivate)}
+        canPrivatize={(pageId) => {
+          const page = pages?.find((p) => p.id === pageId)
+          return !!page && canPrivatize(page, user.id, selected?.my_role)
+        }}
         onRemovePage={(node) => void remove(node)}
         onPagesTrashed={pagesTrashed}
         onPageCreated={onPageCreated}
@@ -307,7 +322,7 @@ export default function Sidebar({
         <>
           <button className="ws-trigger" data-tip={COPY.side.switchSpace} onClick={() => setSpaceMenuOpen((v) => !v)}>
             <span className="ws-trigger-name">
-              {selected?.name ?? (spaces === null ? COPY.loading : COPY.side.noSpace)}
+              {selected?.name ?? guestSpace?.name ?? (spaces === null ? COPY.loading : COPY.side.noSpace)}
             </span>
             <span className="ws-trigger-caret">
               <Icon name="caret" size={12} />
@@ -343,6 +358,22 @@ export default function Sidebar({
                         {s.name}
                       </span>
                       {s.id === selectedSpaceId && <Icon name="check" size={14} />}
+                    </button>
+                  ))}
+                  {guestSpaces.length > 0 && <div className="space-menu-group">{COPY.side.guestSpaces}</div>}
+                  {guestSpaces.map((g) => (
+                    <button
+                      key={g.id}
+                      className={'space-item' + (g.id === selectedSpaceId ? ' active' : '')}
+                      onClick={() => {
+                        onSelectSpace(g.id)
+                        setSpaceMenuOpen(false)
+                      }}
+                    >
+                      <span className="space-item-name" data-tip={g.name}>
+                        {g.name}
+                      </span>
+                      {g.id === selectedSpaceId && <Icon name="check" size={14} />}
                     </button>
                   ))}
                   {!isViewer && (

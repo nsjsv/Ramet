@@ -115,7 +115,7 @@ export default function PublicPage() {
   const [viewTick, setViewTick] = useState(0)
   const getView = useCallback(() => (viewRef.current?.isDestroyed ? undefined : viewRef.current), [])
   const commentCtx = useMemo<CommentCtx>(
-    () => ({ readOnly: true, spaceId: null, canModerate: false, getSchema: () => undefined, tick: viewTick }),
+    () => ({ readOnly: true, spaceId: null, privatePage: false, canModerate: false, getSchema: () => undefined, tick: viewTick }),
     [viewTick],
   )
 

@@ -13,17 +13,18 @@
 // 块引用不跨页读原块（nestedAtoms：定位 + 提及自带的快照）。
 //
 // 空间 AI（space-ai.ts）的一轮带 scope：块引用与过程摘要只读这个空间里的页（别的空间的按读不到处理，与它的凭证同一个范围），
-// 每条用户消息带署名（speaker）：叫它的人在变，它要看得出每条是谁说的。别的 agent 不带 scope，提示词逐字节不变。
+// 每条用户消息带署名（speaker）：叫它的人在变，它要看得出每条是谁说的；记忆后面多一段空间概览（space-ai.ts 的 spaceOverview）。
+// 别的 agent 不带 scope，提示词逐字节不变。
 
 import { createHash } from 'node:crypto'
 import * as Y from 'yjs'
 import type { Pool } from 'pg'
 import { loadDocForRead, pageAccess } from '../collab.js'
-import { memoryBlockOfPage } from '../memories.js'
+import { pageMemory } from './space-context.js'
 import type { AtomText } from '../updates.js'
 import { stepLine } from './doc.js'
 import { nestedAtoms, resolveRefs } from './refs.js'
-import { pageInSpace } from './space-ai.js'
+import { pageInSpace, spaceOverview } from './space-ai.js'
 import type { ToolProfile } from './tool-profile.js'
 
 export type PromptEnv = {
@@ -31,7 +32,7 @@ export type PromptEnv = {
   atoms: AtomText
   /** 某条 AI 回复所属过程页的摘要行（已带标题行）；没有 / 读不到 / 过程页已删返回 undefined */
   process: (reply: Y.XmlElement) => string[] | undefined
-  /** 页面所在空间的全部公共记忆，已渲染成提示词里的一段；没有记忆为 ''（memories.ts 的 memoryBlock） */
+  /** 页面所在空间的全部公共记忆（+ 任务页记着的目标空间的约定），已渲染成提示词里的一段；没有为 ''（space-context.ts 的 pageMemory） */
   memory: string
   /** 这一轮的工具档位：会话按它交付工具，收尾落库的会话记录也记它（none 只有正文，见文件头） */
   tools: ToolProfile
@@ -123,11 +124,14 @@ export async function resolvePromptEnv(
 ): Promise<PromptEnv> {
   if (tools === 'none') return { atoms: nestedAtoms, process: () => undefined, memory: '', tools }
   const inScope = scope ? (id: string) => pageInSpace(pool, id, scope.space) : undefined
-  const [atoms, memory, speaker] = await Promise.all([
+  const [atoms, pageMem, speaker, overview] = await Promise.all([
     resolveRefs(pool, user, fragment, getLiveDoc, inScope),
-    memoryBlockOfPage(pool, pageId),
+    pageMemory(pool, pageId),
     scope ? speakersOf(pool, fragment) : undefined,
+    scope ? spaceOverview(pool, scope.space) : undefined,
   ])
+  // 空间 AI：空间概览跟在记忆后面，同记忆一样只在新建会话时带
+  const memory = overview ? [pageMem, overview].filter(Boolean).join('\n\n') : pageMem
   const summaries = new Map<string, string[] | undefined>()
   await Promise.all(
     runIdsOf(fragment).map(async (id) => {
